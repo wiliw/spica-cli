@@ -37,7 +37,7 @@ export const ToolsPanel = React.memo(({ tools, height = 10, isRunning }: ToolsPa
 
   return (
     <Box flexDirection="column" minHeight={height} maxHeight={height}>
-      <Box borderStyle="single" borderColor="green">
+      <Box borderStyle="single" borderColor="green" height={1}>
         <Text bold color="green">{title} ({tools.length})</Text>
       </Box>
       <Box flexDirection="column" minHeight={maxLines} maxHeight={maxLines} paddingX={1}>

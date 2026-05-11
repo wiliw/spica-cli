@@ -26,7 +26,7 @@ export const ThinkingPanel = React.memo(({ content, isRunning, height = 20 }: Th
 
   return (
     <Box flexDirection="column" minHeight={height} maxHeight={height}>
-      <Box borderStyle="single" borderColor="magenta">
+      <Box borderStyle="single" borderColor="magenta" height={1}>
         <Text bold color="magenta">{title}</Text>
       </Box>
       <Box flexDirection="column" minHeight={maxLines} maxHeight={maxLines} paddingX={1}>
