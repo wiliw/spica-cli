@@ -9,7 +9,7 @@ interface InputPanelProps {
   isRunning: boolean;
 }
 
-export const InputPanel = React.memo(({ onSubmit, onQuit, onInterrupt, isRunning }: InputPanelProps) => {
+export const InputPanel = React.memo(({ onSubmit, onQuit, isRunning }: InputPanelProps) => {
   const [value, setValue] = React.useState('');
 
   const handleSubmit = () => {
@@ -25,14 +25,8 @@ export const InputPanel = React.memo(({ onSubmit, onQuit, onInterrupt, isRunning
     }
   };
 
-  useInput((input, key) => {
-    if (key.escape && isRunning) {
-      onInterrupt();
-    }
-  });
-
   const borderColor = isRunning ? 'yellow' : 'gray';
-  const placeholder = isRunning ? 'Running... (ESC to interrupt)' : 'Input (quit to exit)';
+  const placeholder = isRunning ? 'Running... (ESC ESC to interrupt)' : 'Input (quit to exit)';
 
   return (
     <Box borderStyle="single" borderColor={borderColor} paddingX={1} minHeight={3} maxHeight={3}>

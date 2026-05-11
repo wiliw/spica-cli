@@ -26,7 +26,7 @@ export function App() {
     setShowInterruptConfirm(true);
   };
 
-  useInput((ch, key) => {
+useInput((ch, key) => {
     if (showExitSummary) {
       if (key.return) process.exit(0);
       return;
@@ -42,9 +42,14 @@ export function App() {
       return;
     }
     
+    if (isRunning && key.escape) {
+      setShowInterruptConfirm(true);
+      return;
+    }
+    
     if (key.upArrow) scrollUp();
-      if (key.downArrow) scrollDown();
-      if (key.pageDown || ch === 'G') jumpToLatest();
+    if (key.downArrow) scrollDown();
+    if (key.pageDown || ch === 'G') jumpToLatest();
     
     if (key.ctrl && ch === 'p') setShowSetup(true);
   });
