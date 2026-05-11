@@ -53,6 +53,7 @@ export function useAgent() {
   });
 
 const agentRef = useRef<SpicaAgent | null>(null);
+  const agentInitializedRef = useRef(false);
   const streamBufferRef = useRef<string>('');
   const reasoningBufferRef = useRef<string>('');
   const reasoningTimestampRef = useRef<Date | null>(null);
@@ -106,10 +107,14 @@ const agentRef = useRef<SpicaAgent | null>(null);
 
   const processQueue = async () => {
     if (isProcessingRef.current || taskQueueRef.current.length === 0) return;
+    if (!agentInitializedRef.current) return;
     
     isProcessingRef.current = true;
     const task = taskQueueRef.current.shift();
-    if (!task) return;
+    if (!task) {
+      isProcessingRef.current = false;
+      return;
+    }
     
 streamBufferRef.current = '';
         reasoningBufferRef.current = '';
@@ -261,6 +266,7 @@ useEffect(() => {
       });
 
       agent.init().then(() => {
+        agentInitializedRef.current = true;
         const projectContext = loadProjectContext(agent.getWorkspacePath());
         const historyEvents = projectContext
           .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -281,6 +287,10 @@ useEffect(() => {
           events: newEvents,
           messages: associateEvents(newEvents),
         }));
+        
+        if (taskQueueRef.current.length > 0) {
+          processQueue();
+        }
       }).catch((error) => {
         setState(prev => ({
           ...prev,
