@@ -169,6 +169,23 @@ export OPENAI_MODEL=llama-3-8b
 ↑↓ Navigate | Enter Start | S Settings | Q Quit
 ```
 
+## TUI Features
+
+### Split-Screen Layout
+- Left: AI Output (scrollable message list with focus indicator)
+- Right Top: Thinking (reasoning for focused message)
+- Right Bottom: Tools (tool calls for focused message)
+
+### Controls
+- ↑↓: Scroll message list, focus auto-follows
+- Enter: Submit input
+- ESC: Interrupt running task
+- Ctrl+C: Exit
+
+### Input Stability
+- Isolated input component prevents character loss during fast typing
+- Works during LLM stream output without interference
+
 ---
 
 ## CLI 命令
