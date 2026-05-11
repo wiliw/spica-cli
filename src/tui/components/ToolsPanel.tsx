@@ -1,19 +1,24 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { ToolCall } from '../types';
+
+interface ToolDisplay {
+  name: string;
+  status: string;
+  output?: string;
+}
 
 interface ToolsPanelProps {
-  tools: ToolCall[];
+  tools: ToolDisplay[];
 }
 
 export const ToolsPanel = React.memo(({ tools }: ToolsPanelProps) => {
   return (
-    <Box flexDirection="column" flexGrow={1}>
+    <Box flexDirection="column">
       <Box borderStyle="single" borderColor="green">
         <Text bold color="green">Tools ({tools.length})</Text>
       </Box>
-      <Box flexDirection="column" flexGrow={1}>
-        {tools.slice(0, 5).map((tool, i) => {
+      <Box flexDirection="column">
+        {tools.slice(0, 3).map((tool, i) => {
           const icon = tool.status === 'running' ? '←' : tool.status === 'success' ? '✓' : '✗';
           const color = tool.status === 'running' ? 'yellow' : tool.status === 'success' ? 'green' : 'red';
           return (
@@ -22,7 +27,6 @@ export const ToolsPanel = React.memo(({ tools }: ToolsPanelProps) => {
             </Text>
           );
         })}
-        {tools.length > 5 && <Text dimColor>[...{tools.length - 5} more]</Text>}
         {tools.length === 0 && <Text dimColor>No tools</Text>}
       </Box>
     </Box>

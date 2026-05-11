@@ -80,9 +80,19 @@ export function App() {
     );
   }
 
+  const focusedMessage = state.messages[focusIndex];
+  const displayReasoning = state.currentReasoning || focusedMessage?.reasoning || '';
+  const displayTools = state.isRunning 
+    ? state.events.filter(e => e.type === 'tool_call').map(e => ({
+        name: e.toolName || 'unknown',
+        status: e.toolStatus || 'running',
+        output: e.content || '',
+      }))
+    : focusedMessage?.tools || [];
+
   return (
-    <Box flexDirection="column" height="100%">
-      <Box flexDirection="row" flexGrow={1}>
+    <Box flexDirection="column">
+      <Box flexDirection="row">
         <Box width="50%">
           <AIOutputPanel
             messages={state.messages}
@@ -91,12 +101,8 @@ export function App() {
           />
         </Box>
         <Box width="50%" flexDirection="column">
-          <Box height="66%">
-            <ThinkingPanel content={state.messages[focusIndex]?.reasoning || ''} />
-          </Box>
-          <Box height="33%">
-            <ToolsPanel tools={state.messages[focusIndex]?.tools || []} />
-          </Box>
+          <ThinkingPanel content={displayReasoning} />
+          <ToolsPanel tools={displayTools} />
         </Box>
       </Box>
       <InputPanel 
