@@ -72,7 +72,9 @@ export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, aut
             </Text>
           )}
           {visibleLines.map((line, i) => (
-            <Text key={i} color={i === 0 ? 'green' : 'white'}>{line}</Text>
+            <Box key={i} minHeight={1}>
+              <Text color={i === 0 ? 'green' : 'white'}>{line}</Text>
+            </Box>
           ))}
           {(hasMoreBelow || nextTurn) && (
             <Text dimColor color="gray">

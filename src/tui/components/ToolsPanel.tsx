@@ -21,7 +21,7 @@ export const ToolsPanel = React.memo(({ tools, height = 10, isRunning }: ToolsPa
 
   const toolTexts = tools.map(t => {
     const icon = t.status === 'running' ? '...' : t.status === 'success' ? '[OK]' : '[ERR]';
-    return `${icon} ${t.name}${t.output ? ` : ${t.output.slice(0, 30)}` : ''}`;
+    return `${icon} ${t.name}${t.output ? ` : ${t.output.slice(0, 50)}` : ''}`;
   });
 
   const needsMarquee = !isRunning && toolTexts.length > maxLines;
