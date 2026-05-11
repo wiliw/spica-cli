@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { SpicaAgent } from '../../agent';
 import { loadProjectContext } from '../../utils/projectState';
+import { associateEvents } from '../utils/associateEvents';
+import type { MessageWithContext } from '../types';
 
 interface EventItem {
   type: 'message' | 'tool_call' | 'reasoning' | 'stream_chunk';
@@ -26,19 +28,21 @@ export interface SubAgentState {
 export interface AgentState {
   isRunning: boolean;
   events: any[];
+  messages: MessageWithContext[];
   currentStream: string;
   currentReasoning: string;
   error: string | null;
   sessionStart: Date | null;
   taskCount: number;
   subAgents: Map<string, SubAgentState>;
-  showSplitView: boolean; // 只在subAgents.size > 1时显示分屏
+  showSplitView: boolean;
 }
 
 export function useAgent() {
   const [state, setState] = useState<AgentState>({
     isRunning: false,
     events: [],
+    messages: [],
     currentStream: '',
     currentReasoning: '',
     error: null,
@@ -92,6 +96,7 @@ const agentRef = useRef<SpicaAgent | null>(null);
         return {
           ...prev,
           events: newEvents,
+          messages: associateEvents(newEvents),
           currentStream: updates.stream ? streamBufferRef.current : prev.currentStream,
           currentReasoning: updates.reasoning ? reasoningBufferRef.current : prev.currentReasoning,
         };
@@ -196,46 +201,59 @@ useEffect(() => {
             return {
               ...prev,
               events: newEvents,
+              messages: associateEvents(newEvents),
               currentStream: '',
               currentReasoning: '',
             };
           });
         } else if (msg.role === 'user') {
-          setState(prev => ({
-            ...prev,
-            events: [...prev.events, { 
+          setState(prev => {
+            const newEvents = [...prev.events, { 
               type: 'message', 
               role: 'user', 
               content: msg.content, 
               timestamp: new Date(),
-            }],
-          }));
+            }];
+            return {
+              ...prev,
+              events: newEvents,
+              messages: associateEvents(newEvents),
+            };
+          });
         }
       });
 
       agent.on('tool_call', (data: any) => {
-        setState(prev => ({
-          ...prev,
-          events: [...prev.events, { 
+        setState(prev => {
+          const newEvents = [...prev.events, { 
             type: 'tool_call', 
             toolName: data.name, 
             toolArguments: data.arguments,
             toolStatus: 'running', 
             content: '', 
             timestamp: new Date(),
-          }],
-        }));
+          }];
+          return {
+            ...prev,
+            events: newEvents,
+            messages: associateEvents(newEvents),
+          };
+        });
       });
 
       agent.on('tool_result', (data: any) => {
-        setState(prev => ({
-          ...prev,
-          events: prev.events.map(e => 
+        setState(prev => {
+          const newEvents = prev.events.map(e => 
             e.type === 'tool_call' && e.toolName === data.name && e.toolStatus === 'running'
               ? { ...e, toolStatus: data.success ? 'success' : 'error', content: data.output || data.error || '' }
               : e
-          ),
-        }));
+          );
+          return {
+            ...prev,
+            events: newEvents,
+            messages: associateEvents(newEvents),
+          };
+        });
       });
 
       agent.on('error', (data: any) => {
@@ -253,12 +271,15 @@ useEffect(() => {
             timestamp: new Date(),
           }));
         
+        const newEvents = historyEvents.length > 0 
+          ? [...historyEvents, { type: 'message', role: 'assistant', content: '✓ Ready', timestamp: new Date() }]
+          : [{ type: 'message', role: 'assistant', content: '✓ Ready', timestamp: new Date() }];
+        
         setState(prev => ({
           ...prev,
           sessionStart: new Date(),
-          events: historyEvents.length > 0 
-            ? [...historyEvents, { type: 'message', role: 'assistant', content: '✓ Ready', timestamp: new Date() }]
-            : [{ type: 'message', role: 'assistant', content: '✓ Ready', timestamp: new Date() }],
+          events: newEvents,
+          messages: associateEvents(newEvents),
         }));
       }).catch((error) => {
         setState(prev => ({
