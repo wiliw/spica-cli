@@ -158,7 +158,7 @@ streamBufferRef.current = '';
 
 useEffect(() => {
     if (!agentRef.current) {
-      const agent = new SpicaAgent();
+      const agent = new SpicaAgent(undefined, process.cwd());
       agentRef.current = agent;
       
       agent.on('stream', (data: any) => {
