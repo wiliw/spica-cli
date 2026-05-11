@@ -94,16 +94,16 @@ useInput((ch, key) => {
         status: e.toolStatus || 'running',
         output: e.content || '',
       }))
-    : (focusedTurn?.tools || []).map(t => ({
-        name: t.name,
-        status: t.status,
+    : focusedTurn?.tools?.map(t => ({
+        name: t.name || 'unknown',
+        status: t.status || 'success',
         output: t.output || '',
-      }));
+      })) || [];
 
   return (
-    <Box flexDirection="column" minHeight={terminalHeight} maxHeight={terminalHeight}>
-      <Box flexDirection="row" minHeight={contentHeight} maxHeight={contentHeight}>
-        <Box width="60%" minHeight={contentHeight} maxHeight={contentHeight} flexDirection="column">
+    <Box flexDirection="column" minHeight={terminalHeight} maxHeight={terminalHeight} width="100%">
+      <Box flexDirection="row" minHeight={contentHeight} maxHeight={contentHeight} width="100%">
+        <Box width="60%" minHeight={contentHeight} maxHeight={contentHeight}>
           <AIOutputPanel
             turns={state.turns}
             focusIndex={focusIndex}
@@ -113,9 +113,9 @@ useInput((ch, key) => {
             pendingInput={state.pendingInput}
           />
         </Box>
-        <Box width="40%" minHeight={contentHeight} maxHeight={contentHeight} flexDirection="column">
+        <Box width="40%" flexDirection="column" minHeight={contentHeight} maxHeight={contentHeight}>
           <ThinkingPanel content={displayReasoning} isRunning={state.isRunning} height={Math.floor(contentHeight * 0.6)} />
-          <ToolsPanel tools={displayTools} isRunning={state.isRunning} height={Math.floor(contentHeight * 0.4)} />
+          <ToolsPanel tools={displayTools} isRunning={state.isRunning} height={Math.ceil(contentHeight * 0.4)} />
         </Box>
       </Box>
       <InputPanel 
