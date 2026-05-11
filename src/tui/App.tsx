@@ -15,6 +15,14 @@ export function App() {
   const [showInterruptConfirm, setShowInterruptConfirm] = React.useState(false);
   const [showExitSummary, setShowExitSummary] = React.useState(false);
 
+  const handleQuit = () => {
+    setShowExitSummary(true);
+  };
+
+  const handleInterrupt = () => {
+    setShowInterruptConfirm(true);
+  };
+
   useInput((ch, key) => {
     if (showExitSummary) {
       if (key.return) process.exit(0);
@@ -28,11 +36,6 @@ export function App() {
       } else if (key.return) {
         setShowInterruptConfirm(false);
       }
-      return;
-    }
-    
-    if (key.escape && state.isRunning) {
-      setShowInterruptConfirm(true);
       return;
     }
     
@@ -96,7 +99,12 @@ export function App() {
           </Box>
         </Box>
       </Box>
-      <InputPanel onSubmit={startTask} isRunning={state.isRunning} />
+      <InputPanel 
+        onSubmit={startTask} 
+        onQuit={handleQuit}
+        onInterrupt={handleInterrupt}
+        isRunning={state.isRunning} 
+      />
     </Box>
   );
 }
