@@ -15,7 +15,7 @@ export const ToolsPanel = React.memo(({ tools }: ToolsPanelProps) => {
   return (
     <Box flexDirection="column" height={8}>
       <Box borderStyle="single" borderColor="green">
-        <Text bold color="green">Tools ({tools.length})</Text>
+        <Text bold color="green">Toolcalls ({tools.length})</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1} paddingX={1}>
         {tools.length > 0 ? (
