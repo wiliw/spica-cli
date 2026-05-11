@@ -136,7 +136,6 @@ streamBufferRef.current = '';
       isRunning: true,
       currentStream: '',
       currentReasoning: '',
-      pendingInput: null,
       error: null,
     }));
 
@@ -181,7 +180,29 @@ useEffect(() => {
       agent.on('stream', (data: any) => {
         streamBufferRef.current += data.chunk;
         pendingUpdateRef.current.stream = true;
-        flushDisplay();
+        
+        setState(prev => {
+          const newEvents = [...prev.events];
+          const lastAssistant = newEvents.find(e => e.type === 'message' && e.role === 'assistant' && e.timestamp === reasoningTimestampRef.current);
+          
+          if (lastAssistant) {
+            lastAssistant.content = streamBufferRef.current;
+          } else {
+            newEvents.push({
+              type: 'message',
+              role: 'assistant',
+              content: streamBufferRef.current,
+              timestamp: reasoningTimestampRef.current || new Date(),
+            });
+          }
+          
+          return {
+            ...prev,
+            events: newEvents,
+            turns: associateEvents(newEvents),
+            currentStream: streamBufferRef.current,
+          };
+        });
       });
 
       agent.on('reasoning', (data: any) => {
@@ -197,23 +218,25 @@ useEffect(() => {
         const timestamp = new Date();
         
         if (msg.role === 'assistant') {
-          const finalStream = streamBufferRef.current;
-          const finalReasoning = reasoningBufferRef.current;
-          
-          streamBufferRef.current = '';
-          reasoningBufferRef.current = '';
-          
           setState(prev => {
-            const newEvents = [...prev.events];
+            const newEvents = prev.events.map(e => {
+              if (e.type === 'message' && e.role === 'assistant' && e.content === streamBufferRef.current) {
+                return { ...e, content: msg.content || streamBufferRef.current };
+              }
+              return e;
+            });
             
-            if (msg.content || finalStream) {
+            if (!newEvents.find(e => e.type === 'message' && e.role === 'assistant' && e.timestamp === timestamp)) {
               newEvents.push({
                 type: 'message',
                 role: 'assistant',
-                content: msg.content || finalStream,
-                timestamp: new Date(),
+                content: msg.content || streamBufferRef.current,
+                timestamp: timestamp,
               });
             }
+            
+            streamBufferRef.current = '';
+            reasoningBufferRef.current = '';
             
             return {
               ...prev,
@@ -331,11 +354,22 @@ const interrupt = () => {
   const startTask = async (request: string) => {
     taskQueueRef.current.push(request);
     
-    setState(prev => ({
-      ...prev,
-      taskCount: prev.taskCount + 1,
-      pendingInput: request,
-    }));
+    setState(prev => {
+      const userEvent = {
+        type: 'message',
+        role: 'user',
+        content: request,
+        timestamp: new Date(),
+      };
+      const newEvents = [...prev.events, userEvent];
+      return {
+        ...prev,
+        taskCount: prev.taskCount + 1,
+        pendingInput: null,
+        events: newEvents,
+        turns: associateEvents(newEvents),
+      };
+    });
     
     processQueue();
   };
