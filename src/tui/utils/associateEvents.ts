@@ -7,6 +7,7 @@ function generateId(): string {
 export function associateEventsToTurns(flatEvents: Event[]): ConversationTurn[] {
   const turns: ConversationTurn[] = [];
   let currentUserMessage = '';
+  let currentAssistantMessage = '';
   let currentReasoning = '';
   let currentTools: ToolCall[] = [];
   const pendingResults: Map<string, { status: string; output: string }> = new Map();
@@ -29,6 +30,19 @@ export function associateEventsToTurns(flatEvents: Event[]): ConversationTurn[] 
       });
     } else if (event.type === 'message') {
       if (event.role === 'user') {
+        if (currentUserMessage && currentAssistantMessage) {
+          turns.push({
+            id: generateId(),
+            userMessage: currentUserMessage,
+            assistantMessage: currentAssistantMessage,
+            reasoning: currentReasoning,
+            tools: currentTools,
+            timestamp: event.timestamp,
+          });
+          currentAssistantMessage = '';
+          currentReasoning = '';
+          currentTools = [];
+        }
         currentUserMessage = event.content;
       } else if (event.role === 'assistant') {
         currentTools = currentTools.map(tool => {
@@ -39,12 +53,14 @@ export function associateEventsToTurns(flatEvents: Event[]): ConversationTurn[] 
           return tool;
         });
         pendingResults.clear();
-
+        
+        currentAssistantMessage = event.content;
+        
         if (currentUserMessage) {
           turns.push({
             id: generateId(),
             userMessage: currentUserMessage,
-            assistantMessage: event.content,
+            assistantMessage: currentAssistantMessage,
             reasoning: currentReasoning,
             tools: currentTools,
             timestamp: event.timestamp,
@@ -52,10 +68,22 @@ export function associateEventsToTurns(flatEvents: Event[]): ConversationTurn[] 
         }
 
         currentUserMessage = '';
+        currentAssistantMessage = '';
         currentReasoning = '';
         currentTools = [];
       }
     }
+  }
+
+  if (currentUserMessage) {
+    turns.push({
+      id: generateId(),
+      userMessage: currentUserMessage,
+      assistantMessage: currentAssistantMessage || '...',
+      reasoning: currentReasoning,
+      tools: currentTools,
+      timestamp: new Date(),
+    });
   }
 
   return turns;
