@@ -10,7 +10,7 @@ import { ToolsPanel } from './components/ToolsPanel';
 
 export function App() {
   const { state, startTask, interrupt } = useAgent();
-  const { scrollOffset, focusIndex, scrollUp, scrollDown } = useScroll(state.messages.length);
+  const { scrollOffset, focusIndex, autoFollow, scrollUp, scrollDown, jumpToLatest } = useScroll(state.messages.length);
   const [showSetup, setShowSetup] = React.useState(false);
   const [showInterruptConfirm, setShowInterruptConfirm] = React.useState(false);
   const [showExitSummary, setShowExitSummary] = React.useState(false);
@@ -42,6 +42,7 @@ export function App() {
     if (!state.isRunning) {
       if (key.upArrow) scrollUp();
       if (key.downArrow) scrollDown();
+      if (key.pageDown || ch === 'G') jumpToLatest();
     }
     
     if (key.ctrl && ch === 'p') setShowSetup(true);
@@ -92,12 +93,13 @@ export function App() {
 
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" height={process.stdout.rows - 3 || 20}>
+      <Box flexDirection="row">
         <Box width="40%">
           <AIOutputPanel
             messages={state.messages}
             scrollOffset={scrollOffset}
             focusIndex={focusIndex}
+            autoFollow={autoFollow}
           />
         </Box>
         <Box width="60%" flexDirection="column">
