@@ -1,6 +1,5 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { useMarquee } from '../hooks/useMarquee';
 
 interface ThinkingPanelProps {
   content: string;
@@ -10,24 +9,22 @@ interface ThinkingPanelProps {
 
 export const ThinkingPanel = React.memo(({ content, isRunning, height = 20 }: ThinkingPanelProps) => {
   const title = isRunning ? 'Thinking' : 'Thoughts';
-  const contentHeight = height - 1;
-  
+  const headerHeight = 1;
+  const contentHeight = height - headerHeight;
+
   const lines = content.split('\n').filter(l => l);
-  const needsScroll = lines.length > contentHeight && !isRunning;
   const displayLines = isRunning 
     ? lines.slice(-contentHeight)
-    : needsScroll 
-      ? useMarquee(content, contentHeight).split('\n')
-      : lines;
+    : lines.slice(0, contentHeight);
 
   return (
     <Box flexDirection="column" height={height}>
-      <Box borderStyle="single" borderColor="magenta" height={1}>
+      <Box borderStyle="single" borderColor="magenta" height={headerHeight}>
         <Text bold color="magenta">{title}</Text>
       </Box>
       <Box flexDirection="column" height={contentHeight} paddingX={1}>
         {content ? (
-          displayLines.slice(0, contentHeight).map((line, i) => (
+          displayLines.map((line, i) => (
             <Text key={i} color="gray">{line}</Text>
           ))
         ) : (
