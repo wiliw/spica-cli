@@ -65,23 +65,21 @@ export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, aut
           == FOCUS: Round {focusIndex + 1} ==
         </Text>
         
-        {(hasMoreAbove || prevTurn) && (
-          <Text dimColor color="gray">
-            {hasMoreAbove ? '< scroll up' : `< Round ${focusIndex}`}
-          </Text>
-        )}
-        
         <Box flexDirection="column" marginTop={1} height={contentHeight - 4}>
+          {(hasMoreAbove || prevTurn) && (
+            <Text dimColor color="gray">
+              {hasMoreAbove ? '< scroll up' : `< Round ${focusIndex}`}
+            </Text>
+          )}
           {visibleLines.map((line, i) => (
             <Text key={i} color={i === 0 ? 'green' : 'white'}>{line}</Text>
           ))}
+          {(hasMoreBelow || nextTurn) && (
+            <Text dimColor color="gray">
+              {hasMoreBelow ? 'scroll down >' : `Round ${focusIndex + 2} >`}
+            </Text>
+          )}
         </Box>
-        
-        {(hasMoreBelow || nextTurn) && (
-          <Text dimColor color="gray">
-            {hasMoreBelow ? 'scroll down >' : `Round ${focusIndex + 2} >`}
-          </Text>
-        )}
       </Box>
     </Box>
   );
