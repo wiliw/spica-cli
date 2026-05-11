@@ -9,28 +9,28 @@ interface ThinkingPanelProps {
 
 export const ThinkingPanel = React.memo(({ content, isRunning, height = 20 }: ThinkingPanelProps) => {
   const title = isRunning ? 'Thinking' : 'Thoughts';
-  const headerHeight = 1;
-  const contentHeight = height - headerHeight;
+  const headerHeight = 2;
+  const maxLines = height - headerHeight;
 
-  const lines = content.split('\n').filter(l => l);
-  const displayLines = isRunning 
-    ? lines.slice(-contentHeight)
-    : lines.slice(0, contentHeight);
+  const allLines = content.split('\n');
+  const visibleLines = isRunning 
+    ? allLines.slice(-maxLines)
+    : allLines.slice(0, maxLines);
 
   return (
-    <Box flexDirection="column" height={height}>
-      <Box borderStyle="single" borderColor="magenta" height={headerHeight}>
+    <Box flexDirection="column" minHeight={height} maxHeight={height}>
+      <Box borderStyle="single" borderColor="magenta">
         <Text bold color="magenta">{title}</Text>
       </Box>
-      <Box flexDirection="column" height={contentHeight} paddingX={1}>
-        {content ? (
-          displayLines.map((line, i) => (
-            <Text key={i} color="gray">{line}</Text>
+      <Box flexDirection="column" minHeight={maxLines} maxHeight={maxLines} paddingX={1}>
+        {visibleLines.length > 0 ? (
+          visibleLines.map((line, i) => (
+            <Box key={i} minHeight={1} maxHeight={1}>
+              <Text color="gray" wrap="truncate">{line.slice(0, 100)}</Text>
+            </Box>
           ))
         ) : (
-          <Box height={contentHeight} alignItems="center" justifyContent="center">
-            <Text dimColor>No thinking recorded</Text>
-          </Box>
+          <Text dimColor>No thinking recorded</Text>
         )}
       </Box>
     </Box>

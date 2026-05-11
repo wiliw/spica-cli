@@ -15,30 +15,30 @@ interface ToolsPanelProps {
 
 export const ToolsPanel = React.memo(({ tools, height = 10, isRunning }: ToolsPanelProps) => {
   const title = isRunning ? 'Toolcalling' : 'Toolcalled';
-  const headerHeight = 1;
-  const contentHeight = height - headerHeight;
+  const headerHeight = 2;
+  const maxLines = height - headerHeight;
 
-  const toolLines = tools.slice(0, contentHeight).map(t => {
-    const icon = t.status === 'running' ? '...' : t.status === 'success' ? '[OK]' : '[ERR]';
-    const color = t.status === 'running' ? 'yellow' : t.status === 'success' ? 'green' : 'red';
-    const line = `${icon} ${t.name}${t.output ? ` : ${t.output.slice(0, 40)}` : ''}`;
-    return { line, color };
-  });
+  const visibleTools = tools.slice(0, maxLines);
 
   return (
-    <Box flexDirection="column" height={height}>
-      <Box borderStyle="single" borderColor="green" height={headerHeight}>
+    <Box flexDirection="column" minHeight={height} maxHeight={height}>
+      <Box borderStyle="single" borderColor="green">
         <Text bold color="green">{title} ({tools.length})</Text>
       </Box>
-      <Box flexDirection="column" height={contentHeight} paddingX={1}>
-        {tools.length > 0 ? (
-          toolLines.map((item, i) => (
-            <Text key={i} color={item.color}>{item.line}</Text>
-          ))
+      <Box flexDirection="column" minHeight={maxLines} maxHeight={maxLines} paddingX={1}>
+        {visibleTools.length > 0 ? (
+          visibleTools.map((tool, i) => {
+            const icon = tool.status === 'running' ? '...' : tool.status === 'success' ? '[OK]' : '[ERR]';
+            const color = tool.status === 'running' ? 'yellow' : tool.status === 'success' ? 'green' : 'red';
+            const text = `${icon} ${tool.name}${tool.output ? ` : ${tool.output.slice(0, 30)}` : ''}`;
+            return (
+              <Box key={i} minHeight={1} maxHeight={1}>
+                <Text color={color} wrap="truncate">{text}</Text>
+              </Box>
+            );
+          })
         ) : (
-          <Box height={contentHeight} alignItems="center" justifyContent="center">
-            <Text dimColor>No tools used</Text>
-          </Box>
+          <Text dimColor>No tools used</Text>
         )}
       </Box>
     </Box>
