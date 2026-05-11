@@ -10,7 +10,7 @@ import { ToolsPanel } from './components/ToolsPanel';
 
 export function App() {
   const { state, startTask, interrupt } = useAgent();
-  const { scrollOffset, focusIndex, autoFollow, scrollUp, scrollDown, jumpToLatest } = useScroll(state.messages.length);
+  const { scrollOffset, focusIndex, autoFollow, scrollUp, scrollDown, jumpToLatest } = useScroll(state.turns.length);
   const [showSetup, setShowSetup] = React.useState(false);
   const [showInterruptConfirm, setShowInterruptConfirm] = React.useState(false);
   const [showExitSummary, setShowExitSummary] = React.useState(false);
@@ -81,32 +81,32 @@ export function App() {
     );
   }
 
-  const focusedMessage = state.messages[focusIndex];
-  const displayReasoning = state.currentReasoning || focusedMessage?.reasoning || '';
+  const focusedTurn = state.turns[focusIndex];
+  const displayReasoning = state.currentReasoning || focusedTurn?.reasoning || '';
   const displayTools = state.isRunning 
     ? state.events.filter(e => e.type === 'tool_call').map(e => ({
         name: e.toolName || 'unknown',
         status: e.toolStatus || 'running',
         output: e.content || '',
       }))
-    : focusedMessage?.tools || [];
+    : focusedTurn?.tools || [];
 
   return (
-    <Box flexDirection="column">
-      <Box flexDirection="row">
+    <Box flexDirection="column" height={20}>
+      <Box flexDirection="row" height={17}>
         <Box width="40%">
           <AIOutputPanel
-            messages={state.messages}
+            turns={state.turns}
             scrollOffset={scrollOffset}
             focusIndex={focusIndex}
             autoFollow={autoFollow}
           />
         </Box>
         <Box width="60%" flexDirection="column">
-          <Box height="70%">
+          <Box height={12}>
             <ThinkingPanel content={displayReasoning} />
           </Box>
-          <Box height="30%">
+          <Box height={5}>
             <ToolsPanel tools={displayTools} />
           </Box>
         </Box>

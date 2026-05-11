@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { SpicaAgent } from '../../agent';
 import { loadProjectContext } from '../../utils/projectState';
 import { associateEvents } from '../utils/associateEvents';
-import type { MessageWithContext } from '../types';
+import type { ConversationTurn } from '../types';
 
 interface EventItem {
   type: 'message' | 'tool_call' | 'reasoning' | 'stream_chunk';
@@ -11,6 +11,17 @@ interface EventItem {
   toolStatus?: 'running' | 'success' | 'error';
   role?: 'user' | 'assistant';
   timestamp: Date;
+}
+
+export interface AgentState {
+  isRunning: boolean;
+  events: any[];
+  turns: ConversationTurn[];
+  currentStream: string;
+  currentReasoning: string;
+  error: string | null;
+  sessionStart: Date | null;
+  taskCount: number;
 }
 
 export interface SubAgentState {
@@ -42,14 +53,12 @@ export function useAgent() {
   const [state, setState] = useState<AgentState>({
     isRunning: false,
     events: [],
-    messages: [],
+    turns: [],
     currentStream: '',
     currentReasoning: '',
     error: null,
     sessionStart: null,
     taskCount: 0,
-    subAgents: new Map(),
-    showSplitView: false,
   });
 
 const agentRef = useRef<SpicaAgent | null>(null);
@@ -97,7 +106,7 @@ const agentRef = useRef<SpicaAgent | null>(null);
         return {
           ...prev,
           events: newEvents,
-          messages: associateEvents(newEvents),
+          turns: associateEvents(newEvents),
           currentStream: updates.stream ? streamBufferRef.current : prev.currentStream,
           currentReasoning: updates.reasoning ? reasoningBufferRef.current : prev.currentReasoning,
         };
@@ -206,7 +215,7 @@ useEffect(() => {
             return {
               ...prev,
               events: newEvents,
-              messages: associateEvents(newEvents),
+              turns: associateEvents(newEvents),
               currentStream: '',
               currentReasoning: '',
             };
@@ -222,7 +231,7 @@ useEffect(() => {
             return {
               ...prev,
               events: newEvents,
-              messages: associateEvents(newEvents),
+              turns: associateEvents(newEvents),
             };
           });
         }
@@ -241,7 +250,7 @@ useEffect(() => {
           return {
             ...prev,
             events: newEvents,
-            messages: associateEvents(newEvents),
+            turns: associateEvents(newEvents),
           };
         });
       });
@@ -256,7 +265,7 @@ useEffect(() => {
           return {
             ...prev,
             events: newEvents,
-            messages: associateEvents(newEvents),
+            turns: associateEvents(newEvents),
           };
         });
       });
@@ -277,7 +286,7 @@ useEffect(() => {
             timestamp: new Date(),
           }));
         
-        const newEvents = historyEvents.length > 0 
+const newEvents = historyEvents.length > 0 
           ? [...historyEvents, { type: 'message', role: 'assistant', content: '✓ Ready', timestamp: new Date() }]
           : [{ type: 'message', role: 'assistant', content: '✓ Ready', timestamp: new Date() }];
         
@@ -285,7 +294,7 @@ useEffect(() => {
           ...prev,
           sessionStart: new Date(),
           events: newEvents,
-          messages: associateEvents(newEvents),
+          turns: associateEvents(newEvents),
         }));
         
         if (taskQueueRef.current.length > 0) {

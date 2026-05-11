@@ -6,10 +6,10 @@ export interface ToolCall {
   timestamp: Date;
 }
 
-export interface MessageWithContext {
+export interface ConversationTurn {
   id: string;
-  role: 'user' | 'assistant';
-  content: string;
+  userMessage: string;
+  assistantMessage: string;
   reasoning: string;
   tools: ToolCall[];
   timestamp: Date;

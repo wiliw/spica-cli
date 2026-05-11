@@ -1,11 +1,12 @@
-import type { Event, MessageWithContext, ToolCall } from '../types';
+import type { Event, ConversationTurn, ToolCall } from '../types';
 
 function generateId(): string {
-  return `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  return `turn_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
-export function associateEvents(flatEvents: Event[]): MessageWithContext[] {
-  const messages: MessageWithContext[] = [];
+export function associateEventsToTurns(flatEvents: Event[]): ConversationTurn[] {
+  const turns: ConversationTurn[] = [];
+  let currentUserMessage = '';
   let currentReasoning = '';
   let currentTools: ToolCall[] = [];
   const pendingResults: Map<string, { status: string; output: string }> = new Map();
@@ -27,30 +28,39 @@ export function associateEvents(flatEvents: Event[]): MessageWithContext[] {
         output: event.content || '',
       });
     } else if (event.type === 'message') {
-      currentTools = currentTools.map(tool => {
-        const result = pendingResults.get(tool.name);
-        if (result) {
-          return { ...tool, status: result.status, output: result.output };
+      if (event.role === 'user') {
+        currentUserMessage = event.content;
+      } else if (event.role === 'assistant') {
+        currentTools = currentTools.map(tool => {
+          const result = pendingResults.get(tool.name);
+          if (result) {
+            return { ...tool, status: result.status, output: result.output };
+          }
+          return tool;
+        });
+        pendingResults.clear();
+
+        if (currentUserMessage) {
+          turns.push({
+            id: generateId(),
+            userMessage: currentUserMessage,
+            assistantMessage: event.content,
+            reasoning: currentReasoning,
+            tools: currentTools,
+            timestamp: event.timestamp,
+          });
         }
-        return tool;
-      });
-      pendingResults.clear();
 
-      messages.push({
-        id: generateId(),
-        role: event.role || 'assistant',
-        content: event.content,
-        reasoning: event.role === 'assistant' ? currentReasoning : '',
-        tools: event.role === 'assistant' ? currentTools : [],
-        timestamp: event.timestamp,
-      });
-
-      if (event.role === 'assistant') {
+        currentUserMessage = '';
         currentReasoning = '';
         currentTools = [];
       }
     }
   }
 
-  return messages;
+  return turns;
+}
+
+export function associateEvents(flatEvents: Event[]): any[] {
+  return associateEventsToTurns(flatEvents);
 }
