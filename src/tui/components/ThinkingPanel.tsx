@@ -10,28 +10,31 @@ interface ThinkingPanelProps {
 
 export const ThinkingPanel = React.memo(({ content, isRunning, height = 20 }: ThinkingPanelProps) => {
   const title = isRunning ? 'Thinking' : 'Thoughts';
-  const headerHeight = 2;
+  const headerHeight = 1;
   const maxLines = height - headerHeight;
 
   const allLines = content.split('\n');
-  const needsMarquee = !isRunning && allLines.length > maxLines;
-  
-  const displayText = isRunning
-    ? allLines.slice(-maxLines).join('\n')
-    : needsMarquee
-      ? useMarquee(content, maxLines)
-      : allLines.slice(0, maxLines).join('\n');
+  const visibleLines = isRunning 
+    ? allLines.slice(Math.max(0, allLines.length - maxLines))
+    : allLines.slice(0, maxLines);
 
-  const displayLines = displayText.split('\n');
+  const needsMarquee = !isRunning && allLines.length > maxLines;
+  const displayText = isRunning 
+    ? visibleLines.join('\n')
+    : needsMarquee 
+      ? useMarquee(content, maxLines)
+      : visibleLines.join('\n');
+
+  const displayLines = displayText.split('\n').slice(0, maxLines);
 
   return (
     <Box flexDirection="column" minHeight={height} maxHeight={height}>
-      <Box borderStyle="single" borderColor="magenta" height={1}>
+      <Box borderStyle="single" borderColor="magenta" minHeight={headerHeight} maxHeight={headerHeight}>
         <Text bold color="magenta" backgroundColor="black">{title}</Text>
       </Box>
       <Box flexDirection="column" minHeight={maxLines} maxHeight={maxLines} paddingX={1}>
         {displayLines.length > 0 ? (
-          displayLines.slice(0, maxLines).map((line, i) => (
+          displayLines.map((line, i) => (
             <Box key={i} minHeight={1} maxHeight={1}>
               <Text color="yellow">{line}</Text>
             </Box>
