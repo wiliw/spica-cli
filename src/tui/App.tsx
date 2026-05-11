@@ -42,11 +42,9 @@ export function App() {
       return;
     }
     
-    if (!state.isRunning) {
-      if (key.upArrow) scrollUp();
+    if (key.upArrow) scrollUp();
       if (key.downArrow) scrollDown();
       if (key.pageDown || ch === 'G') jumpToLatest();
-    }
     
     if (key.ctrl && ch === 'p') setShowSetup(true);
   });
