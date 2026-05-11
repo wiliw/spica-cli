@@ -16,13 +16,17 @@ export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, aut
   const prevTurn = turns[focusIndex - 1];
   const nextTurn = turns[focusIndex + 1];
 
+  const headerHeight = 1;
+  const borderHeight = 2;
+  const contentHeight = height - headerHeight - borderHeight;
+
   if (!focusedTurn && !pendingInput) {
     return (
       <Box flexDirection="column" height={height}>
-        <Box borderStyle="single" borderColor="cyan" height={1}>
+        <Box borderStyle="single" borderColor="cyan" height={headerHeight}>
           <Text bold color="cyan">Rounds 0/0</Text>
         </Box>
-        <Box flexGrow={1} alignItems="center" justifyContent="center">
+        <Box height={contentHeight} alignItems="center" justifyContent="center">
           <Text dimColor>No rounds yet</Text>
         </Box>
       </Box>
@@ -42,47 +46,42 @@ export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, aut
     ];
   }
 
-  const headerLines = 3;
-  const indicatorLines = (prevTurn ? 1 : 0) + (nextTurn ? 1 : 0);
-  const availableLines = height - headerLines - indicatorLines;
-  const maxOffset = Math.max(0, contentLines.length - availableLines);
+  const maxOffset = Math.max(0, contentLines.length - contentHeight);
   const safeOffset = Math.min(Math.max(0, contentOffset), maxOffset);
-  const visibleLines = contentLines.slice(safeOffset, safeOffset + availableLines);
+  const visibleLines = contentLines.slice(safeOffset, safeOffset + contentHeight);
   const hasMoreAbove = safeOffset > 0;
-  const hasMoreBelow = safeOffset + availableLines < contentLines.length;
+  const hasMoreBelow = safeOffset + contentHeight < contentLines.length;
 
   return (
     <Box flexDirection="column" height={height}>
-      <Box borderStyle="single" borderColor="cyan" height={1}>
+      <Box borderStyle="single" borderColor="cyan" height={headerHeight}>
         <Text bold color="cyan">
           {isPending ? 'Rounds (pending)' : `Rounds ${focusIndex + 1}/${turns.length}`} {autoFollow ? '[AUTO]' : '[MANUAL]'}
         </Text>
       </Box>
       
-      <Box borderStyle="double" borderColor="yellow" paddingX={1} flexGrow={1}>
-        <Box flexDirection="column">
-          <Text bold color="yellow" inverse>
-            == FOCUS: Round {focusIndex + 1} ==
+      <Box borderStyle="double" borderColor="yellow" height={contentHeight} flexDirection="column">
+        <Text bold color="yellow" inverse>
+          == FOCUS: Round {focusIndex + 1} ==
+        </Text>
+        
+        {(hasMoreAbove || prevTurn) && (
+          <Text dimColor color="gray">
+            {hasMoreAbove ? '< scroll up' : `< Round ${focusIndex}`}
           </Text>
-          
-          {(hasMoreAbove || prevTurn) && (
-            <Text dimColor color="gray">
-              {hasMoreAbove ? '< scroll up' : `< Round ${focusIndex}`}
-            </Text>
-          )}
-          
-          <Box flexDirection="column" marginTop={1}>
-            {visibleLines.map((line, i) => (
-              <Text key={i} color={i === 0 ? 'green' : 'white'}>{line}</Text>
-            ))}
-          </Box>
-          
-          {(hasMoreBelow || nextTurn) && (
-            <Text dimColor color="gray">
-              {hasMoreBelow ? 'scroll down >' : `Round ${focusIndex + 2} >`}
-            </Text>
-          )}
+        )}
+        
+        <Box flexDirection="column" marginTop={1} height={contentHeight - 4}>
+          {visibleLines.map((line, i) => (
+            <Text key={i} color={i === 0 ? 'green' : 'white'}>{line}</Text>
+          ))}
         </Box>
+        
+        {(hasMoreBelow || nextTurn) && (
+          <Text dimColor color="gray">
+            {hasMoreBelow ? 'scroll down >' : `Round ${focusIndex + 2} >`}
+          </Text>
+        )}
       </Box>
     </Box>
   );
