@@ -10,7 +10,7 @@ import { ToolsPanel } from './components/ToolsPanel';
 
 export function App() {
   const { state, startTask, interrupt } = useAgent();
-  const { focusIndex, contentOffset, autoFollow, scrollUp, scrollDown, jumpToLatest } = useScroll(state.turns.length);
+  const { scrollOffset, focusIndex, autoFollow, scrollUp, scrollDown, jumpToLatest } = useScroll(state.turns.length);
   const [showSetup, setShowSetup] = React.useState(false);
   const [showInterruptConfirm, setShowInterruptConfirm] = React.useState(false);
   const [showExitSummary, setShowExitSummary] = React.useState(false);
@@ -97,8 +97,8 @@ export function App() {
         <Box width="62%">
           <AIOutputPanel
             turns={state.turns}
+            scrollOffset={scrollOffset}
             focusIndex={focusIndex}
-            contentOffset={contentOffset}
             autoFollow={autoFollow}
           />
         </Box>

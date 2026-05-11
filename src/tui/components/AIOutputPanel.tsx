@@ -4,26 +4,15 @@ import type { ConversationTurn } from '../types';
 
 interface AIOutputPanelProps {
   turns: ConversationTurn[];
+  scrollOffset: number;
   focusIndex: number;
-  contentOffset: number;
   autoFollow?: boolean;
 }
 
-export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, autoFollow }: AIOutputPanelProps) => {
+export const AIOutputPanel = React.memo(({ turns, scrollOffset, focusIndex, autoFollow }: AIOutputPanelProps) => {
   const focusedTurn = turns[focusIndex];
   const prevTurns = turns.slice(Math.max(0, focusIndex - 2), focusIndex);
   const nextTurns = turns.slice(focusIndex + 1, focusIndex + 2);
-
-  const contentLines = focusedTurn 
-    ? [
-        `Q: ${focusedTurn.userMessage}`,
-        ...focusedTurn.assistantMessage.split('\n').filter(l => l.length > 0)
-      ]
-    : [];
-  const maxContentOffset = Math.max(0, contentLines.length - 15);
-  const visibleLines = contentLines.slice(contentOffset, contentOffset + 15);
-  const hasMoreAbove = contentOffset > 0;
-  const hasMoreBelow = contentOffset + 15 < contentLines.length;
 
   return (
     <Box flexDirection="column" flexGrow={1}>
@@ -53,17 +42,16 @@ export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, aut
             <Text bold color="yellow" inverse>
               == FOCUS: Round {focusIndex + 1} ==
             </Text>
-            {hasMoreAbove && (
-              <Text dimColor color="gray">{'<'} more above</Text>
-            )}
-            <Box marginTop={1} flexDirection="column">
-              {visibleLines.map((line, i) => (
-                <Text key={i} color={i === 0 ? 'green' : 'white'}>{line}</Text>
-              ))}
+            <Box marginTop={1}>
+              <Text bold color="green">
+                Q: {focusedTurn.userMessage}
+              </Text>
             </Box>
-            {hasMoreBelow && (
-              <Text dimColor color="gray">more below {'>'}</Text>
-            )}
+            <Box marginTop={1}>
+              <Text color="white">
+                {focusedTurn.assistantMessage}
+              </Text>
+            </Box>
           </Box>
         )}
         
@@ -83,7 +71,7 @@ export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, aut
         
         {turns.length === 0 && (
           <Box flexGrow={1} alignItems="center" justifyContent="center">
-            <Text dimColor>No turns yet</Text>
+            <Text dimColor>No rounds yet</Text>
           </Box>
         )}
       </Box>
