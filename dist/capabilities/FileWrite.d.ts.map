@@ -1,0 +1,1 @@
+{"version":3,"file":"FileWrite.d.ts","sourceRoot":"","sources":["../../src/capabilities/FileWrite.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,UAAU,EAAE,gBAAgB,EAAE,eAAe,EAAE,eAAe,EAAE,MAAM,SAAS,CAAC;AAEzF,qBAAa,mBAAoB,YAAW,UAAU,CAAC,eAAe,EAAE,eAAe,CAAC;IACtF,IAAI,SAAgB;IACpB,WAAW,SAA6B;IAElC,OAAO,CAAC,MAAM,EAAE,eAAe,GAAG,OAAO,CAAC,gBAAgB,CAAC,eAAe,CAAC,CAAC;CAoBnF"}

@@ -1,0 +1,51 @@
+{
+  "name": "spica-cli",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "AI coding agent CLI with three-step workflow",
+  "main": "dist/index.js",
+  "bin": {
+    "spica": "bin/spica"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "npm run build:cli",
+    "build:cli": "PWD=$(pwd) && cat > bin/spica << EOF\n#!/usr/bin/env -S npx tsx\nimport('${PWD}/src/index.ts');\nEOF\nchmod +x bin/spica",
+    "test": "vitest",
+    "test:run": "vitest run"
+  },
+  "keywords": [
+    "ai",
+    "cli",
+    "agent",
+    "mvp"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@types/react": "^19.2.14",
+    "axios": "^1.16.0",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "execa": "^9.1.0",
+    "fast-glob": "^3.3.3",
+    "fs-extra": "^11.2.0",
+    "glob": "^13.0.6",
+    "ink": "^6.8.0",
+    "ink-text-input": "^6.0.0",
+    "npm-run-path": "^6.0.0",
+    "openai": "^4.52.0",
+    "ora": "^8.0.1",
+    "react": "^19.2.6",
+    "simple-git": "^3.25.0",
+    "unicorn-magic": "^0.4.0"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^20.12.12",
+    "ink-testing-library": "^4.0.0",
+    "tsx": "^4.10.5",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}

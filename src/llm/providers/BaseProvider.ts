@@ -1,0 +1,71 @@
+import { EventEmitter } from 'events';
+
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  toolCallId?: string;
+  toolCalls?: ToolCall[];
+}
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, any>;
+}
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: {
+    type: 'object';
+    properties: Record<string, any>;
+    required: string[];
+  };
+}
+
+export interface LLMResponse {
+  content?: string;
+  toolCalls?: ToolCall[];
+  finished: boolean;
+  reasoning?: string;
+}
+
+export interface LLMProviderConfig {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  name?: string;
+}
+
+export abstract class BaseProvider extends EventEmitter {
+  protected config: LLMProviderConfig;
+  protected messages: ChatMessage[] = [];
+
+  constructor(config: LLMProviderConfig) {
+    super();
+    this.config = config;
+  }
+
+  abstract generate(prompt: string, tools?: ToolDefinition[]): Promise<LLMResponse>;
+  abstract continueWithToolResult(toolCallId: string, result: string, tools?: ToolDefinition[]): Promise<LLMResponse>;
+
+  setSystemPrompt(prompt: string) {
+    this.messages = [{ role: 'system', content: prompt }];
+  }
+
+  addMessage(message: ChatMessage) {
+    this.messages.push(message);
+  }
+
+  clearHistory() {
+    this.messages = [];
+  }
+
+  getMessages(): ChatMessage[] {
+    return this.messages;
+  }
+
+  setMessages(messages: ChatMessage[]): void {
+    this.messages = messages;
+  }
+}

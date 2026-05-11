@@ -1,0 +1,1 @@
+{"version":3,"file":"MvpSkill.d.ts","sourceRoot":"","sources":["../../src/workflow/MvpSkill.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,SAAS,EAAkB,MAAM,aAAa,CAAC;AA+CxD,qBAAa,QAAS,SAAQ,SAAS;;IASrC,YAAY,CAAC,QAAQ,EAAE,MAAM,GAAG,MAAM,EAAE;IAIxC,mBAAmB,CAAC,QAAQ,EAAE,MAAM,GAAG,MAAM,EAAE;IAKzC,WAAW,CAAC,KAAK,EAAE,MAAM,GAAG,OAAO,CAAC,IAAI,CAAC;CAuBhD"}
