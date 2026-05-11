@@ -92,9 +92,9 @@ export function App() {
     : focusedTurn?.tools || [];
 
   return (
-    <Box flexDirection="column" height={20}>
-      <Box flexDirection="row" height={17}>
-        <Box width="40%">
+    <Box flexDirection="column" flexGrow={1}>
+      <Box flexDirection="row" flexGrow={1}>
+        <Box width="40%" flexGrow={1}>
           <AIOutputPanel
             turns={state.turns}
             scrollOffset={scrollOffset}
@@ -102,11 +102,11 @@ export function App() {
             autoFollow={autoFollow}
           />
         </Box>
-        <Box width="60%" flexDirection="column">
-          <Box height={12}>
+        <Box width="60%" flexDirection="column" flexGrow={1}>
+          <Box flexGrow={1}>
             <ThinkingPanel content={displayReasoning} />
           </Box>
-          <Box height={5}>
+          <Box height={8}>
             <ToolsPanel tools={displayTools} />
           </Box>
         </Box>

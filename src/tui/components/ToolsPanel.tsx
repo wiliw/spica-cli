@@ -13,21 +13,30 @@ interface ToolsPanelProps {
 
 export const ToolsPanel = React.memo(({ tools }: ToolsPanelProps) => {
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" height={8}>
       <Box borderStyle="single" borderColor="green">
-        <Text bold color="green">Tools ({tools.length})</Text>
+        <Text bold color="green">🔧 Tools ({tools.length})</Text>
       </Box>
-      <Box flexDirection="column">
-        {tools.slice(0, 3).map((tool, i) => {
-          const icon = tool.status === 'running' ? '←' : tool.status === 'success' ? '✓' : '✗';
-          const color = tool.status === 'running' ? 'yellow' : tool.status === 'success' ? 'green' : 'red';
-          return (
-            <Text key={i} color={color}>
-              {icon} {tool.name}
-            </Text>
-          );
-        })}
-        {tools.length === 0 && <Text dimColor>No tools</Text>}
+      <Box flexDirection="column" flexGrow={1} paddingX={1}>
+        {tools.length > 0 ? (
+          tools.map((tool, i) => {
+            const icon = tool.status === 'running' ? '⏳' : tool.status === 'success' ? '✅' : '❌';
+            const color = tool.status === 'running' ? 'yellow' : tool.status === 'success' ? 'green' : 'red';
+            return (
+              <Box key={i} flexDirection="row">
+                <Text color={color}>{icon} </Text>
+                <Text bold color={color}>{tool.name}</Text>
+                {tool.output && (
+                  <Text dimColor> → {tool.output.slice(0, 40)}</Text>
+                )}
+              </Box>
+            );
+          })
+        ) : (
+          <Box flexGrow={1} alignItems="center" justifyContent="center">
+            <Text dimColor>No tools used</Text>
+          </Box>
+        )}
       </Box>
     </Box>
   );
