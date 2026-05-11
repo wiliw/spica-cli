@@ -7,35 +7,26 @@ interface AIOutputPanelProps {
   focusIndex: number;
   contentOffset: number;
   autoFollow?: boolean;
-  viewportHeight?: number;
 }
 
-export const AIOutputPanel = React.memo(({ 
-  turns, 
-  focusIndex, 
-  contentOffset, 
-  autoFollow,
-  viewportHeight = 20
-}: AIOutputPanelProps) => {
+export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, autoFollow }: AIOutputPanelProps) => {
   const focusedTurn = turns[focusIndex];
-  const prevTurn = turns[focusIndex - 1];
-  const nextTurn = turns[focusIndex + 1];
+  const prevTurns = turns.slice(Math.max(0, focusIndex - 2), focusIndex);
+  const nextTurns = turns.slice(focusIndex + 1, focusIndex + 2);
 
   const contentLines = focusedTurn 
     ? [
         `Q: ${focusedTurn.userMessage}`,
-        '',
-        ...focusedTurn.assistantMessage.split('\n')
-      ].filter(Boolean)
+        ...focusedTurn.assistantMessage.split('\n').filter(l => l.length > 0)
+      ]
     : [];
-
-  const visibleLines = contentLines.slice(contentOffset, contentOffset + viewportHeight);
+  const maxContentOffset = Math.max(0, contentLines.length - 15);
+  const visibleLines = contentLines.slice(contentOffset, contentOffset + 15);
   const hasMoreAbove = contentOffset > 0;
-  const hasMoreBelow = contentOffset + viewportHeight < contentLines.length;
-  const contentHeight = contentLines.length;
+  const hasMoreBelow = contentOffset + 15 < contentLines.length;
 
   return (
-    <Box flexDirection="column" height={viewportHeight}>
+    <Box flexDirection="column" flexGrow={1}>
       <Box borderStyle="single" borderColor="cyan">
         <Text bold color="cyan">
           Rounds {focusIndex + 1}/{turns.length} {autoFollow ? '[AUTO]' : '[MANUAL]'}
@@ -43,47 +34,56 @@ export const AIOutputPanel = React.memo(({
       </Box>
       
       <Box flexDirection="column" flexGrow={1}>
-        {prevTurn && (
-          <Box marginTop={1}>
+        {prevTurns.map((turn, i) => (
+          <Box key={turn.id} flexDirection="column" marginTop={1}>
             <Text dimColor color="gray">
-              [Round {focusIndex}] {'<'}{hasMoreAbove ? ' ^' : ''}
+              -- Round {focusIndex - 2 + i + 1} --
+            </Text>
+            <Text dimColor>
+              Q: {turn.userMessage}
+            </Text>
+            <Text dimColor>
+              A: {turn.assistantMessage.split('\n')[0]}
             </Text>
           </Box>
-        )}
-        
-        {!prevTurn && hasMoreAbove && (
-          <Box marginTop={1}>
-            <Text dimColor color="gray">{'^'} more above</Text>
-          </Box>
-        )}
+        ))}
         
         {focusedTurn && (
-          <Box flexDirection="column" borderStyle="double" borderColor="yellow" paddingX={1}>
+          <Box flexDirection="column" borderStyle="double" borderColor="yellow" paddingX={1} marginTop={1}>
             <Text bold color="yellow" inverse>
               == FOCUS: Round {focusIndex + 1} ==
             </Text>
-            <Box marginTop={1}>
+            {hasMoreAbove && (
+              <Text dimColor color="gray">{'<'} more above</Text>
+            )}
+            <Box marginTop={1} flexDirection="column">
               {visibleLines.map((line, i) => (
-                <Text key={i} color="white">{line}</Text>
+                <Text key={i} color={i === 0 ? 'green' : 'white'}>{line}</Text>
               ))}
             </Box>
             {hasMoreBelow && (
-              <Text dimColor color="gray">{'v'} more below</Text>
+              <Text dimColor color="gray">more below {'>'}</Text>
             )}
           </Box>
         )}
         
-        {nextTurn && !hasMoreBelow && (
-          <Box marginTop={1}>
+        {nextTurns.map((turn, i) => (
+          <Box key={turn.id} flexDirection="column" marginTop={1}>
             <Text dimColor color="gray">
-              [Round {focusIndex + 2}] {'>'}
+              -- Round {focusIndex + i + 2} --
+            </Text>
+            <Text dimColor>
+              Q: {turn.userMessage}
+            </Text>
+            <Text dimColor>
+              A: {turn.assistantMessage.split('\n')[0]}
             </Text>
           </Box>
-        )}
+        ))}
         
         {turns.length === 0 && (
           <Box flexGrow={1} alignItems="center" justifyContent="center">
-            <Text dimColor>No rounds yet</Text>
+            <Text dimColor>No turns yet</Text>
           </Box>
         )}
       </Box>

@@ -7,17 +7,14 @@ interface UseScrollResult {
   scrollUp: () => void;
   scrollDown: () => void;
   jumpToLatest: () => void;
-  setContentHeight: (height: number) => void;
-  setViewportHeight: (height: number) => void;
 }
 
 export function useScroll(totalRounds: number): UseScrollResult {
   const [focusIndex, setFocusIndex] = useState(0);
   const [contentOffset, setContentOffset] = useState(0);
   const [autoFollow, setAutoFollow] = useState(true);
-  const contentHeightRef = useRef(0);
-  const viewportHeightRef = useRef(20);
   const scrollDirectionRef = useRef<'up' | 'down' | null>(null);
+  const maxContentOffsetRef = useRef(0);
 
   useEffect(() => {
     if (autoFollow && totalRounds > 0) {
@@ -26,30 +23,25 @@ export function useScroll(totalRounds: number): UseScrollResult {
     }
   }, [totalRounds, autoFollow]);
 
-  const setContentHeight = useCallback((height: number) => {
-    contentHeightRef.current = height;
-  }, []);
-
-  const setViewportHeight = useCallback((height: number) => {
-    viewportHeightRef.current = height;
-  }, []);
+  useEffect(() => {
+    maxContentOffsetRef.current = 0;
+  }, [focusIndex]);
 
   const scrollUp = useCallback(() => {
     scrollDirectionRef.current = 'up';
-    const maxOffset = Math.max(0, contentHeightRef.current - viewportHeightRef.current);
     
     if (contentOffset > 0) {
       setContentOffset(prev => Math.max(0, prev - 1));
     } else if (focusIndex > 0) {
       setFocusIndex(prev => prev - 1);
       setAutoFollow(false);
-      setContentOffset(maxOffset);
+      setContentOffset(maxContentOffsetRef.current);
     }
   }, [contentOffset, focusIndex]);
 
   const scrollDown = useCallback(() => {
     scrollDirectionRef.current = 'down';
-    const maxOffset = Math.max(0, contentHeightRef.current - viewportHeightRef.current);
+    const maxOffset = maxContentOffsetRef.current;
     
     if (contentOffset < maxOffset) {
       setContentOffset(prev => Math.min(maxOffset, prev + 1));
@@ -79,7 +71,5 @@ export function useScroll(totalRounds: number): UseScrollResult {
     scrollUp,
     scrollDown,
     jumpToLatest,
-    setContentHeight,
-    setViewportHeight,
   };
 }

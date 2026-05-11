@@ -92,15 +92,14 @@ export function App() {
     : focusedTurn?.tools || [];
 
   return (
-    <Box flexDirection="column" height={process.stdout.rows || 40}>
-      <Box flexDirection="row" height={process.stdout.rows - 4 || 36}>
+    <Box flexDirection="column" flexGrow={1}>
+      <Box flexDirection="row" flexGrow={1}>
         <Box width="62%">
           <AIOutputPanel
             turns={state.turns}
             focusIndex={focusIndex}
             contentOffset={contentOffset}
             autoFollow={autoFollow}
-            viewportHeight={process.stdout.rows - 6 || 34}
           />
         </Box>
         <Box width="38%" flexDirection="column">
