@@ -42,7 +42,7 @@ export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, aut
   } else if (focusedTurn) {
     contentLines = [
       `Q: ${focusedTurn.userMessage}`,
-      ...focusedTurn.assistantMessage.split('\n').filter(l => l)
+      ...focusedTurn.assistantMessage.split('\n')
     ];
   }
 

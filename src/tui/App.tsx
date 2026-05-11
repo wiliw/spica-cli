@@ -94,7 +94,11 @@ useInput((ch, key) => {
         status: e.toolStatus || 'running',
         output: e.content || '',
       }))
-    : focusedTurn?.tools || [];
+    : (focusedTurn?.tools || []).map(t => ({
+        name: t.name,
+        status: t.status,
+        output: t.output || '',
+      }));
 
   return (
     <Box flexDirection="column" minHeight={terminalHeight} maxHeight={terminalHeight}>

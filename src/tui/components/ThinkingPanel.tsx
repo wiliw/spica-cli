@@ -13,7 +13,7 @@ export const ThinkingPanel = React.memo(({ content, isRunning, height = 20 }: Th
   const headerHeight = 2;
   const maxLines = height - headerHeight;
 
-  const allLines = content.split('\n').filter(l => l);
+  const allLines = content.split('\n');
   const needsMarquee = !isRunning && allLines.length > maxLines;
   
   const displayText = isRunning
