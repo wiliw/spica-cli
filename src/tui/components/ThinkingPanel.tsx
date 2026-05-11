@@ -27,17 +27,17 @@ export const ThinkingPanel = React.memo(({ content, isRunning, height = 20 }: Th
   return (
     <Box flexDirection="column" minHeight={height} maxHeight={height}>
       <Box borderStyle="single" borderColor="magenta" height={1}>
-        <Text bold color="magenta">{title}</Text>
+        <Text bold color="magenta" backgroundColor="black">{title}</Text>
       </Box>
       <Box flexDirection="column" minHeight={maxLines} maxHeight={maxLines} paddingX={1}>
         {displayLines.length > 0 ? (
           displayLines.slice(0, maxLines).map((line, i) => (
             <Box key={i} minHeight={1} maxHeight={1}>
-              <Text color="gray">{line}</Text>
+              <Text color="yellow">{line}</Text>
             </Box>
           ))
         ) : (
-          <Text dimColor>No thinking recorded</Text>
+          <Text dimColor color="magenta">No thinking recorded</Text>
         )}
       </Box>
     </Box>

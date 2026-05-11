@@ -55,19 +55,19 @@ export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, aut
   return (
     <Box flexDirection="column" height={height}>
       <Box borderStyle="single" borderColor="cyan" height={headerHeight}>
-        <Text bold color="cyan">
+        <Text bold color="cyan" backgroundColor="black">
           {isPending ? 'Rounds (pending)' : `Rounds ${focusIndex + 1}/${turns.length}`} {autoFollow ? '[AUTO]' : '[MANUAL]'}
         </Text>
       </Box>
       
-      <Box borderStyle="double" borderColor="yellow" height={contentHeight} flexDirection="column">
-        <Text bold color="yellow" inverse>
+      <Box borderStyle="double" borderColor="magenta" height={contentHeight} flexDirection="column">
+        <Text bold color="magenta" inverse backgroundColor="black">
           == FOCUS: Round {focusIndex + 1} ==
         </Text>
         
         <Box flexDirection="column" marginTop={1} height={contentHeight - 4}>
           {(hasMoreAbove || prevTurn) && (
-            <Text dimColor color="gray">
+            <Text dimColor color="cyan">
               {hasMoreAbove ? '< scroll up' : `< Round ${focusIndex}`}
             </Text>
           )}
@@ -77,7 +77,7 @@ export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, aut
             </Box>
           ))}
           {(hasMoreBelow || nextTurn) && (
-            <Text dimColor color="gray">
+            <Text dimColor color="cyan">
               {hasMoreBelow ? 'scroll down >' : `Round ${focusIndex + 2} >`}
             </Text>
           )}

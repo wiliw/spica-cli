@@ -38,7 +38,7 @@ export const ToolsPanel = React.memo(({ tools, height = 10, isRunning }: ToolsPa
   return (
     <Box flexDirection="column" minHeight={height} maxHeight={height}>
       <Box borderStyle="single" borderColor="green" height={1}>
-        <Text bold color="green">{title} ({tools.length})</Text>
+        <Text bold color="green" backgroundColor="black">{title} ({tools.length})</Text>
       </Box>
       <Box flexDirection="column" minHeight={maxLines} maxHeight={maxLines} paddingX={1}>
         {displayLines.length > 0 ? (
@@ -47,12 +47,12 @@ export const ToolsPanel = React.memo(({ tools, height = 10, isRunning }: ToolsPa
             const color = tool?.status === 'running' ? 'yellow' : tool?.status === 'success' ? 'green' : 'red';
             return (
               <Box key={i} minHeight={1} maxHeight={1}>
-                <Text color={color}>{line}</Text>
+                <Text color={color} bold>{line}</Text>
               </Box>
             );
           })
         ) : (
-          <Text dimColor>No tools used</Text>
+          <Text dimColor color="cyan">No tools used</Text>
         )}
       </Box>
     </Box>
