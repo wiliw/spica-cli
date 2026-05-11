@@ -92,17 +92,21 @@ export function App() {
 
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row">
-        <Box width="50%">
+      <Box flexDirection="row" height={process.stdout.rows - 3 || 20}>
+        <Box width="40%">
           <AIOutputPanel
             messages={state.messages}
             scrollOffset={scrollOffset}
             focusIndex={focusIndex}
           />
         </Box>
-        <Box width="50%" flexDirection="column">
-          <ThinkingPanel content={displayReasoning} />
-          <ToolsPanel tools={displayTools} />
+        <Box width="60%" flexDirection="column">
+          <Box height="70%">
+            <ThinkingPanel content={displayReasoning} />
+          </Box>
+          <Box height="30%">
+            <ToolsPanel tools={displayTools} />
+          </Box>
         </Box>
       </Box>
       <InputPanel 
