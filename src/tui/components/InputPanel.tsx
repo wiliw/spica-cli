@@ -35,7 +35,7 @@ export const InputPanel = React.memo(({ onSubmit, onQuit, onInterrupt, isRunning
   const placeholder = isRunning ? 'Running... (ESC to interrupt)' : 'Input (quit to exit)';
 
   return (
-    <Box borderStyle="single" borderColor={borderColor} paddingX={1}>
+    <Box borderStyle="single" borderColor={borderColor} paddingX={1} minHeight={3} maxHeight={3}>
       <TextInput
         value={value}
         onChange={setValue}
