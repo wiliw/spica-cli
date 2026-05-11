@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, useStdout } from 'ink';
 import { useAgent } from './hooks/useAgent';
 import { useScroll } from './hooks/useScroll';
 import { ProviderSetupTUI } from './ProviderSetupTUI';
@@ -9,8 +9,11 @@ import { ThinkingPanel } from './components/ThinkingPanel';
 import { ToolsPanel } from './components/ToolsPanel';
 
 export function App() {
+  const { stdout } = useStdout();
+  const terminalHeight = stdout?.rows || 40;
+  const contentHeight = terminalHeight - 3;
   const { state, startTask, interrupt } = useAgent();
-  const { scrollOffset, focusIndex, autoFollow, scrollUp, scrollDown, jumpToLatest } = useScroll(state.turns.length);
+  const { focusIndex, contentOffset, autoFollow, scrollUp, scrollDown, jumpToLatest } = useScroll(state.turns.length);
   const [showSetup, setShowSetup] = React.useState(false);
   const [showInterruptConfirm, setShowInterruptConfirm] = React.useState(false);
   const [showExitSummary, setShowExitSummary] = React.useState(false);
@@ -92,23 +95,20 @@ export function App() {
     : focusedTurn?.tools || [];
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
-      <Box flexDirection="row" flexGrow={1}>
-        <Box width="62%">
+    <Box flexDirection="column" height={terminalHeight}>
+      <Box flexDirection="row" height={contentHeight}>
+        <Box width="62%" height={contentHeight}>
           <AIOutputPanel
             turns={state.turns}
-            scrollOffset={scrollOffset}
             focusIndex={focusIndex}
+            contentOffset={contentOffset}
             autoFollow={autoFollow}
+            height={contentHeight}
           />
         </Box>
-        <Box width="38%" flexDirection="column">
-          <Box height="60%">
-            <ThinkingPanel content={displayReasoning} isRunning={state.isRunning} />
-          </Box>
-          <Box height="40%">
-            <ToolsPanel tools={displayTools} />
-          </Box>
+        <Box width="38%" flexDirection="column" height={contentHeight}>
+          <ThinkingPanel content={displayReasoning} isRunning={state.isRunning} height={Math.floor(contentHeight * 0.6)} />
+          <ToolsPanel tools={displayTools} height={Math.floor(contentHeight * 0.4)} />
         </Box>
       </Box>
       <InputPanel 

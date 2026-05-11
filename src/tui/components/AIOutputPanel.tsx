@@ -4,19 +4,36 @@ import type { ConversationTurn } from '../types';
 
 interface AIOutputPanelProps {
   turns: ConversationTurn[];
-  scrollOffset: number;
   focusIndex: number;
+  contentOffset: number;
   autoFollow?: boolean;
+  height?: number;
 }
 
-export const AIOutputPanel = React.memo(({ turns, scrollOffset, focusIndex, autoFollow }: AIOutputPanelProps) => {
+export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, autoFollow, height = 30 }: AIOutputPanelProps) => {
   const focusedTurn = turns[focusIndex];
   const prevTurns = turns.slice(Math.max(0, focusIndex - 2), focusIndex);
   const nextTurns = turns.slice(focusIndex + 1, focusIndex + 2);
 
+  const contentLines = focusedTurn 
+    ? [
+        `Q: ${focusedTurn.userMessage}`,
+        ...focusedTurn.assistantMessage.split('\n').filter(l => l)
+      ]
+    : [];
+  
+  const headerHeight = 2;
+  const focusHeaderHeight = 3;
+  const visibleContentHeight = height - headerHeight - focusHeaderHeight - prevTurns.length * 4 - nextTurns.length * 4 - 2;
+  const maxOffset = Math.max(0, contentLines.length - visibleContentHeight);
+  const safeOffset = Math.min(Math.max(0, contentOffset), maxOffset);
+  const visibleLines = contentLines.slice(safeOffset, safeOffset + visibleContentHeight);
+  const hasMoreAbove = safeOffset > 0;
+  const hasMoreBelow = safeOffset + visibleContentHeight < contentLines.length;
+
   return (
-    <Box flexDirection="column" flexGrow={1}>
-      <Box borderStyle="single" borderColor="cyan">
+    <Box flexDirection="column" height={height}>
+      <Box borderStyle="single" borderColor="cyan" height={headerHeight}>
         <Text bold color="cyan">
           Rounds {focusIndex + 1}/{turns.length} {autoFollow ? '[AUTO]' : '[MANUAL]'}
         </Text>
@@ -38,20 +55,21 @@ export const AIOutputPanel = React.memo(({ turns, scrollOffset, focusIndex, auto
         ))}
         
         {focusedTurn && (
-          <Box flexDirection="column" borderStyle="double" borderColor="yellow" paddingX={1} marginTop={1}>
+          <Box flexDirection="column" borderStyle="double" borderColor="yellow" paddingX={1} marginTop={1} flexGrow={1}>
             <Text bold color="yellow" inverse>
               == FOCUS: Round {focusIndex + 1} ==
             </Text>
-            <Box marginTop={1}>
-              <Text bold color="green">
-                Q: {focusedTurn.userMessage}
-              </Text>
+            {hasMoreAbove && (
+              <Text dimColor color="gray">{'<'} scroll up for more</Text>
+            )}
+            <Box flexDirection="column" marginTop={1}>
+              {visibleLines.map((line, i) => (
+                <Text key={i} color={i === 0 ? 'green' : 'white'}>{line}</Text>
+              ))}
             </Box>
-            <Box marginTop={1}>
-              <Text color="white">
-                {focusedTurn.assistantMessage}
-              </Text>
-            </Box>
+            {hasMoreBelow && (
+              <Text dimColor color="gray">scroll down for more {'>'}</Text>
+            )}
           </Box>
         )}
         

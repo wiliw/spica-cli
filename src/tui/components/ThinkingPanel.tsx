@@ -5,18 +5,19 @@ import { useMarquee } from '../hooks/useMarquee';
 interface ThinkingPanelProps {
   content: string;
   isRunning?: boolean;
+  height?: number;
 }
 
-export const ThinkingPanel = React.memo(({ content, isRunning }: ThinkingPanelProps) => {
+export const ThinkingPanel = React.memo(({ content, isRunning, height = 20 }: ThinkingPanelProps) => {
   const displayContent = useMarquee(content, 20);
   const title = isRunning ? 'Thinking' : 'Thoughts';
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
-      <Box borderStyle="single" borderColor="magenta">
+    <Box flexDirection="column" height={height}>
+      <Box borderStyle="single" borderColor="magenta" height={1}>
         <Text bold color="magenta">{title}</Text>
       </Box>
-      <Box flexDirection="column" flexGrow={1} paddingX={1}>
+      <Box flexDirection="column" height={height - 1} paddingX={1}>
         {content ? (
           <Text color="gray">{displayContent}</Text>
         ) : (

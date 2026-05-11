@@ -9,17 +9,18 @@ interface ToolDisplay {
 
 interface ToolsPanelProps {
   tools: ToolDisplay[];
+  height?: number;
 }
 
-export const ToolsPanel = React.memo(({ tools }: ToolsPanelProps) => {
+export const ToolsPanel = React.memo(({ tools, height = 10 }: ToolsPanelProps) => {
   return (
-    <Box flexDirection="column" height={8}>
-      <Box borderStyle="single" borderColor="green">
+    <Box flexDirection="column" height={height}>
+      <Box borderStyle="single" borderColor="green" height={1}>
         <Text bold color="green">Toolcalls ({tools.length})</Text>
       </Box>
-      <Box flexDirection="column" flexGrow={1} paddingX={1}>
+      <Box flexDirection="column" height={height - 1} paddingX={1}>
         {tools.length > 0 ? (
-          tools.map((tool, i) => {
+          tools.slice(0, height - 1).map((tool, i) => {
             const icon = tool.status === 'running' ? '...' : tool.status === 'success' ? '[OK]' : '[ERR]';
             const color = tool.status === 'running' ? 'yellow' : tool.status === 'success' ? 'green' : 'red';
             return (
