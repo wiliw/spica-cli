@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { useMarquee } from '../hooks/useMarquee';
 
 interface ThinkingPanelProps {
   content: string;
@@ -12,10 +13,16 @@ export const ThinkingPanel = React.memo(({ content, isRunning, height = 20 }: Th
   const headerHeight = 2;
   const maxLines = height - headerHeight;
 
-  const allLines = content.split('\n');
-  const visibleLines = isRunning 
-    ? allLines.slice(-maxLines)
-    : allLines.slice(0, maxLines);
+  const allLines = content.split('\n').filter(l => l);
+  const needsMarquee = !isRunning && allLines.length > maxLines;
+  
+  const displayText = isRunning
+    ? allLines.slice(-maxLines).join('\n')
+    : needsMarquee
+      ? useMarquee(content, maxLines)
+      : allLines.slice(0, maxLines).join('\n');
+
+  const displayLines = displayText.split('\n');
 
   return (
     <Box flexDirection="column" minHeight={height} maxHeight={height}>
@@ -23,8 +30,8 @@ export const ThinkingPanel = React.memo(({ content, isRunning, height = 20 }: Th
         <Text bold color="magenta">{title}</Text>
       </Box>
       <Box flexDirection="column" minHeight={maxLines} maxHeight={maxLines} paddingX={1}>
-        {visibleLines.length > 0 ? (
-          visibleLines.map((line, i) => (
+        {displayLines.length > 0 ? (
+          displayLines.slice(0, maxLines).map((line, i) => (
             <Box key={i} minHeight={1} maxHeight={1}>
               <Text color="gray" wrap="truncate">{line.slice(0, 100)}</Text>
             </Box>
