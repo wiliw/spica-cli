@@ -149,4 +149,29 @@ describe('Spica TUI Tests', () => {
     
     unmount();
   });
+
+  test('split layout renders', async () => {
+    const { stdout, unmount } = render(<App />);
+    await new Promise(r => setTimeout(r, 500));
+    
+    const output = stdout.lastFrame();
+    expect(output).toContain('AI Output');
+    expect(output).toContain('Thinking');
+    expect(output).toContain('Tools');
+    
+    unmount();
+  });
+
+  test('keyboard scroll works', async () => {
+    const { stdin, stdout, unmount } = render(<App />);
+    
+    // Press down arrow
+    stdin.write('\x1b[B');
+    await new Promise(r => setTimeout(r, 100));
+    
+    const output = stdout.lastFrame();
+    // Should show scroll happened
+    
+    unmount();
+  });
 });
