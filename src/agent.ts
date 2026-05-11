@@ -48,6 +48,9 @@ export class SpicaAgent extends EventEmitter {
 
   interrupt() {
     this.interruptFlag = true;
+    if (this.llm) {
+      this.llm.interrupt();
+    }
   }
 
 async init() {

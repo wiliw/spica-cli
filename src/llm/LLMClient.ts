@@ -20,6 +20,7 @@ export class LLMClient extends EventEmitter {
   private rateLimiter: RateLimiter;
   private functionCaller: FunctionCaller;
   private tools: ToolDefinition[] = [];
+  private abortController: AbortController | null = null;
 
   constructor(config: LLMClientConfig) {
     super();
@@ -63,15 +64,27 @@ export class LLMClient extends EventEmitter {
     await this.rateLimiter.waitForAvailability();
     this.rateLimiter.recordRequest();
 
+    this.abortController = new AbortController();
     const toolsToUse = tools || this.tools;
-    const response = await this.provider.generate(prompt, toolsToUse);
+    
+    try {
+      const response = await this.provider.generate(prompt, toolsToUse, this.abortController.signal);
 
-    if (response.content) {
-      const tokens = this.tokenCounter.estimateTokens(response.content);
-      this.rateLimiter.recordTokenUsage(tokens);
+      if (response.content) {
+        const tokens = this.tokenCounter.estimateTokens(response.content);
+        this.rateLimiter.recordTokenUsage(tokens);
+      }
+
+      return response;
+    } finally {
+      this.abortController = null;
     }
+  }
 
-    return response;
+  interrupt() {
+    if (this.abortController) {
+      this.abortController.abort();
+    }
   }
 
   async continueWithToolResult(toolCallName: string, result: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
@@ -83,14 +96,20 @@ export class LLMClient extends EventEmitter {
     await this.rateLimiter.waitForAvailability();
     this.rateLimiter.recordRequest();
 
-    const response = await this.provider.continueWithToolResult(toolCallId, result, toolsToUse);
+    this.abortController = new AbortController();
+    
+    try {
+      const response = await this.provider.continueWithToolResult(toolCallId, result, toolsToUse, this.abortController.signal);
 
-    if (response.content) {
-      const tokens = this.tokenCounter.estimateTokens(response.content);
-      this.rateLimiter.recordTokenUsage(tokens);
+      if (response.content) {
+        const tokens = this.tokenCounter.estimateTokens(response.content);
+        this.rateLimiter.recordTokenUsage(tokens);
+      }
+
+      return response;
+    } finally {
+      this.abortController = null;
     }
-
-    return response;
   }
 
   async executeWithTools(prompt: string, maxIterations: number = 10): Promise<string> {

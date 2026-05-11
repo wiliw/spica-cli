@@ -23,7 +23,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
     this.onChunk = handler;
   }
 
-async generate(prompt: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
+async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): Promise<LLMResponse> {
     this.messages.push({ role: 'user', content: prompt });
 
     try {
@@ -39,13 +39,15 @@ async generate(prompt: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
           },
         })),
         stream: true,
-      });
+      }, { signal });
 
       let fullContent = '';
       let toolCalls: any[] = [];
       let hasToolCalls = false;
 
       for await (const chunk of stream) {
+        if (signal?.aborted) break;
+        
         const delta = chunk.choices[0]?.delta;
         
         if (delta?.content) {
@@ -99,6 +101,9 @@ async generate(prompt: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
 
       return { finished: true };
     } catch (error: any) {
+      if (signal?.aborted) {
+        return { finished: true };
+      }
       if (error.message?.includes('streaming')) {
         return await this.generateNonStreaming(prompt, tools);
       }
@@ -150,7 +155,7 @@ async generate(prompt: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
     return { finished: true };
   }
 
-  async continueWithToolResult(toolCallId: string, result: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
+  async continueWithToolResult(toolCallId: string, result: string, tools?: ToolDefinition[], signal?: AbortSignal): Promise<LLMResponse> {
     this.messages.push({
       role: 'tool',
       content: result,
@@ -170,13 +175,15 @@ async generate(prompt: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
           },
         })),
         stream: true,
-      });
+      }, { signal });
 
       let fullContent = '';
       let toolCalls: any[] = [];
       let hasToolCalls = false;
 
       for await (const chunk of stream) {
+        if (signal?.aborted) break;
+        
         const delta = chunk.choices[0]?.delta;
         
         if (delta?.content) {
@@ -229,6 +236,9 @@ async generate(prompt: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
 
       return { finished: true };
     } catch (error: any) {
+      if (signal?.aborted) {
+        return { finished: true };
+      }
       throw new Error(`${this.providerName} API error: ${error.message}`);
     }
   }
