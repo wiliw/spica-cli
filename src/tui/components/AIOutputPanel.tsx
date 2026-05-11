@@ -4,18 +4,38 @@ import type { ConversationTurn } from '../types';
 
 interface AIOutputPanelProps {
   turns: ConversationTurn[];
-  scrollOffset: number;
   focusIndex: number;
+  contentOffset: number;
   autoFollow?: boolean;
+  viewportHeight?: number;
 }
 
-export const AIOutputPanel = React.memo(({ turns, scrollOffset, focusIndex, autoFollow }: AIOutputPanelProps) => {
+export const AIOutputPanel = React.memo(({ 
+  turns, 
+  focusIndex, 
+  contentOffset, 
+  autoFollow,
+  viewportHeight = 20
+}: AIOutputPanelProps) => {
   const focusedTurn = turns[focusIndex];
-  const prevTurns = turns.slice(Math.max(0, focusIndex - 2), focusIndex);
-  const nextTurns = turns.slice(focusIndex + 1, focusIndex + 2);
+  const prevTurn = turns[focusIndex - 1];
+  const nextTurn = turns[focusIndex + 1];
+
+  const contentLines = focusedTurn 
+    ? [
+        `Q: ${focusedTurn.userMessage}`,
+        '',
+        ...focusedTurn.assistantMessage.split('\n')
+      ].filter(Boolean)
+    : [];
+
+  const visibleLines = contentLines.slice(contentOffset, contentOffset + viewportHeight);
+  const hasMoreAbove = contentOffset > 0;
+  const hasMoreBelow = contentOffset + viewportHeight < contentLines.length;
+  const contentHeight = contentLines.length;
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
+    <Box flexDirection="column" height={viewportHeight}>
       <Box borderStyle="single" borderColor="cyan">
         <Text bold color="cyan">
           Rounds {focusIndex + 1}/{turns.length} {autoFollow ? '[AUTO]' : '[MANUAL]'}
@@ -23,55 +43,47 @@ export const AIOutputPanel = React.memo(({ turns, scrollOffset, focusIndex, auto
       </Box>
       
       <Box flexDirection="column" flexGrow={1}>
-        {prevTurns.map((turn, i) => (
-          <Box key={turn.id} flexDirection="column" marginTop={1}>
+        {prevTurn && (
+          <Box marginTop={1}>
             <Text dimColor color="gray">
-              -- Round {focusIndex - 2 + i + 1} --
-            </Text>
-            <Text dimColor>
-              Q: {turn.userMessage}
-            </Text>
-            <Text dimColor>
-              A: {turn.assistantMessage.split('\n')[0]}
+              [Round {focusIndex}] {'<'}{hasMoreAbove ? ' ^' : ''}
             </Text>
           </Box>
-        ))}
+        )}
+        
+        {!prevTurn && hasMoreAbove && (
+          <Box marginTop={1}>
+            <Text dimColor color="gray">{'^'} more above</Text>
+          </Box>
+        )}
         
         {focusedTurn && (
-          <Box flexDirection="column" borderStyle="double" borderColor="yellow" paddingX={1} marginTop={1}>
+          <Box flexDirection="column" borderStyle="double" borderColor="yellow" paddingX={1}>
             <Text bold color="yellow" inverse>
               == FOCUS: Round {focusIndex + 1} ==
             </Text>
             <Box marginTop={1}>
-              <Text bold color="green">
-                Q: {focusedTurn.userMessage}
-              </Text>
+              {visibleLines.map((line, i) => (
+                <Text key={i} color="white">{line}</Text>
+              ))}
             </Box>
-            <Box marginTop={1}>
-              <Text color="white">
-                {focusedTurn.assistantMessage}
-              </Text>
-            </Box>
+            {hasMoreBelow && (
+              <Text dimColor color="gray">{'v'} more below</Text>
+            )}
           </Box>
         )}
         
-        {nextTurns.map((turn, i) => (
-          <Box key={turn.id} flexDirection="column" marginTop={1}>
+        {nextTurn && !hasMoreBelow && (
+          <Box marginTop={1}>
             <Text dimColor color="gray">
-              -- Round {focusIndex + i + 2} --
-            </Text>
-            <Text dimColor>
-              Q: {turn.userMessage}
-            </Text>
-            <Text dimColor>
-              A: {turn.assistantMessage.split('\n')[0]}
+              [Round {focusIndex + 2}] {'>'}
             </Text>
           </Box>
-        ))}
+        )}
         
         {turns.length === 0 && (
           <Box flexGrow={1} alignItems="center" justifyContent="center">
-            <Text dimColor>No turns yet</Text>
+            <Text dimColor>No rounds yet</Text>
           </Box>
         )}
       </Box>

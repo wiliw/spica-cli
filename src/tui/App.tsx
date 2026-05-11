@@ -10,7 +10,7 @@ import { ToolsPanel } from './components/ToolsPanel';
 
 export function App() {
   const { state, startTask, interrupt } = useAgent();
-  const { scrollOffset, focusIndex, autoFollow, scrollUp, scrollDown, jumpToLatest } = useScroll(state.turns.length);
+  const { focusIndex, contentOffset, autoFollow, scrollUp, scrollDown, jumpToLatest } = useScroll(state.turns.length);
   const [showSetup, setShowSetup] = React.useState(false);
   const [showInterruptConfirm, setShowInterruptConfirm] = React.useState(false);
   const [showExitSummary, setShowExitSummary] = React.useState(false);
@@ -92,14 +92,15 @@ export function App() {
     : focusedTurn?.tools || [];
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
-      <Box flexDirection="row" flexGrow={1}>
+    <Box flexDirection="column" height={process.stdout.rows || 40}>
+      <Box flexDirection="row" height={process.stdout.rows - 4 || 36}>
         <Box width="62%">
           <AIOutputPanel
             turns={state.turns}
-            scrollOffset={scrollOffset}
             focusIndex={focusIndex}
+            contentOffset={contentOffset}
             autoFollow={autoFollow}
+            viewportHeight={process.stdout.rows - 6 || 34}
           />
         </Box>
         <Box width="38%" flexDirection="column">
