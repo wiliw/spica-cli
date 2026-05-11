@@ -27,7 +27,7 @@ export const ToolsPanel = React.memo(({ tools }: ToolsPanelProps) => {
                 <Text color={color}>{icon} </Text>
                 <Text bold color={color}>{tool.name}</Text>
                 {tool.output && (
-                  <Text dimColor> -> {tool.output.slice(0, 40)}</Text>
+                  <Text dimColor> : {tool.output.slice(0, 40)}</Text>
                 )}
               </Box>
             );
