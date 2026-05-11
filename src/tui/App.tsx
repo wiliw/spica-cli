@@ -1,53 +1,19 @@
 import React from 'react';
 import { Box, Text, useInput } from 'ink';
 import { useAgent } from './hooks/useAgent';
+import { useScroll } from './hooks/useScroll';
 import { ProviderSetupTUI } from './ProviderSetupTUI';
 import { InputPanel } from './components/InputPanel';
+import { AIOutputPanel } from './components/AIOutputPanel';
+import { ThinkingPanel } from './components/ThinkingPanel';
+import { ToolsPanel } from './components/ToolsPanel';
 
 export function App() {
   const { state, startTask, interrupt } = useAgent();
+  const { scrollOffset, focusIndex, scrollUp, scrollDown } = useScroll(state.messages.length);
   const [showSetup, setShowSetup] = React.useState(false);
   const [showInterruptConfirm, setShowInterruptConfirm] = React.useState(false);
   const [showExitSummary, setShowExitSummary] = React.useState(false);
-
-  const renderEvent = (event: any, i: number, events: any[]) => {
-    if (event.type === 'message') {
-      if (event.role === 'user') {
-        return <Text key={i} bold color="cyan">You: {event.content}</Text>;
-      } else {
-        return <Text key={i} color="white">{event.content}</Text>;
-      }
-    }
-    
-    if (event.type === 'reasoning') {
-      const isFirstReasoning = events.slice(0, i).filter(e => e.type === 'reasoning').length === 0;
-      return <Text key={i} color="gray">{isFirstReasoning ? '[思] ' : ''}{event.content}</Text>;
-    }
-    
-    if (event.type === 'tool_call') {
-      const icon = event.toolStatus === 'running' ? '←' : event.toolStatus === 'success' ? '✓' : '✗';
-      const color = event.toolStatus === 'running' ? 'yellow' : event.toolStatus === 'success' ? 'green' : 'red';
-      
-      let argDesc = '';
-      if (event.toolArguments?.tasks) {
-        const tasks = event.toolArguments.tasks;
-        argDesc = `并行处理${tasks.length}个任务: ${tasks.map(t => t.description).join(', ')}`;
-      } else {
-        argDesc = event.toolArguments?.description || event.toolArguments?.prompt || '';
-      }
-      
-      return (
-        <Box key={i} flexDirection="column">
-          <Text color={color}>{icon} {event.toolName}{argDesc ? `: ${argDesc}` : ''}</Text>
-          {event.toolStatus !== 'running' && event.content && (
-            <Text color="gray">{event.content.split('\n').slice(0, 3).join('\n')}</Text>
-          )}
-        </Box>
-      );
-    }
-    
-    return null;
-  };
 
   useInput((ch, key) => {
     if (showExitSummary) {
@@ -68,6 +34,11 @@ export function App() {
     if (key.escape && state.isRunning) {
       setShowInterruptConfirm(true);
       return;
+    }
+    
+    if (!state.isRunning) {
+      if (key.upArrow) scrollUp();
+      if (key.downArrow) scrollDown();
     }
     
     if (key.ctrl && ch === 'p') setShowSetup(true);
@@ -106,30 +77,26 @@ export function App() {
     );
   }
 
-  const borderColor = state.isRunning ? 'yellow' : 'gray';
-  
   return (
-    <Box flexDirection="column">
-      <Box flexDirection="column" paddingX={2} paddingY={1}>
-        {state.events
-          .filter(e => e.timestamp)
-          .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
-          .map((event, i) => renderEvent(event, i, state.events))}
-        
-        {state.currentStream && (
-          <Text color="white">{state.currentStream}</Text>
-        )}
-        
-        {state.error && <Text color="red">✗ {state.error}</Text>}
-        
-        {!state.isRunning && state.events.length === 0 && (
-          <Text dimColor>Ready</Text>
-        )}
+    <Box flexDirection="column" height="100%">
+      <Box flexDirection="row" flexGrow={1}>
+        <Box width="50%">
+          <AIOutputPanel
+            messages={state.messages}
+            scrollOffset={scrollOffset}
+            focusIndex={focusIndex}
+          />
+        </Box>
+        <Box width="50%" flexDirection="column">
+          <Box height="66%">
+            <ThinkingPanel content={state.messages[focusIndex]?.reasoning || ''} />
+          </Box>
+          <Box height="33%">
+            <ToolsPanel tools={state.messages[focusIndex]?.tools || []} />
+          </Box>
+        </Box>
       </Box>
-
-      <Box borderStyle="single" borderColor={borderColor} paddingX={1}>
-        <InputPanel onSubmit={startTask} isRunning={state.isRunning} />
-      </Box>
+      <InputPanel onSubmit={startTask} isRunning={state.isRunning} />
     </Box>
   );
 }
