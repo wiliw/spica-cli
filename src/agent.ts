@@ -301,11 +301,17 @@ Project Context (from .spica.md):
     if (this.llm) {
       const allMessages = this.llm.getMessages();
       
-      const simplifiedMessages = allMessages.filter(m => 
-        m.role === 'user' || (m.role === 'assistant' && m.content && !m.toolCalls)
-      );
+      const simplifiedMessages = allMessages.map(m => {
+        if (m.role === 'tool') {
+          return { role: 'tool', content: m.content, toolCallId: m.toolCallId };
+        }
+        return {
+          role: m.role,
+          content: m.content,
+          toolCalls: m.toolCalls,
+        };
+      }).filter(m => m.role === 'user' || m.role === 'assistant' || m.role === 'tool');
       
-      // 只保存项目级记忆，不保存全局记忆
       saveProjectContext(this.workspacePath, simplifiedMessages);
       
       if (this._todos.length > 0) {

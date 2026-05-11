@@ -97,7 +97,8 @@ export function loadProjectContext(workspacePath: string): any[] {
     const contextPath = path.join(workspacePath, CONTEXT_FILE);
     if (fs.existsSync(contextPath)) {
       const data = fs.readFileSync(contextPath, 'utf-8');
-      return JSON.parse(data);
+      const messages = JSON.parse(data);
+      return messages.filter(m => m.role === 'user' || m.role === 'assistant');
     }
   } catch (error) {
     console.error('Failed to load project context:', error);
