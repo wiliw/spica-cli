@@ -8,14 +8,15 @@ interface AIOutputPanelProps {
   contentOffset: number;
   autoFollow?: boolean;
   height?: number;
+  pendingInput?: string | null;
 }
 
-export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, autoFollow, height = 30 }: AIOutputPanelProps) => {
+export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, autoFollow, height = 30, pendingInput }: AIOutputPanelProps) => {
   const focusedTurn = turns[focusIndex];
   const prevTurn = turns[focusIndex - 1];
   const nextTurn = turns[focusIndex + 1];
 
-  if (!focusedTurn) {
+  if (!focusedTurn && !pendingInput) {
     return (
       <Box flexDirection="column" height={height}>
         <Box borderStyle="single" borderColor="cyan" height={1}>
@@ -28,10 +29,18 @@ export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, aut
     );
   }
 
-  const contentLines = [
-    `Q: ${focusedTurn.userMessage}`,
-    ...focusedTurn.assistantMessage.split('\n').filter(l => l)
-  ];
+  let contentLines: string[] = [];
+  let isPending = false;
+  
+  if (pendingInput && !focusedTurn) {
+    contentLines = [`Q: ${pendingInput}`, '...'];
+    isPending = true;
+  } else if (focusedTurn) {
+    contentLines = [
+      `Q: ${focusedTurn.userMessage}`,
+      ...focusedTurn.assistantMessage.split('\n').filter(l => l)
+    ];
+  }
 
   const headerLines = 3;
   const indicatorLines = (prevTurn ? 1 : 0) + (nextTurn ? 1 : 0);
@@ -46,7 +55,7 @@ export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, aut
     <Box flexDirection="column" height={height}>
       <Box borderStyle="single" borderColor="cyan" height={1}>
         <Text bold color="cyan">
-          Rounds {focusIndex + 1}/{turns.length} {autoFollow ? '[AUTO]' : '[MANUAL]'}
+          {isPending ? 'Rounds (pending)' : `Rounds ${focusIndex + 1}/${turns.length}`} {autoFollow ? '[AUTO]' : '[MANUAL]'}
         </Text>
       </Box>
       

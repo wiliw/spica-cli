@@ -19,6 +19,7 @@ export interface AgentState {
   turns: ConversationTurn[];
   currentStream: string;
   currentReasoning: string;
+  pendingInput: string | null;
   error: string | null;
   sessionStart: Date | null;
   taskCount: number;
@@ -56,6 +57,7 @@ export function useAgent() {
     turns: [],
     currentStream: '',
     currentReasoning: '',
+    pendingInput: null,
     error: null,
     sessionStart: null,
     taskCount: 0,
@@ -134,6 +136,7 @@ streamBufferRef.current = '';
       isRunning: true,
       currentStream: '',
       currentReasoning: '',
+      pendingInput: null,
       error: null,
     }));
 
@@ -331,6 +334,7 @@ const interrupt = () => {
     setState(prev => ({
       ...prev,
       taskCount: prev.taskCount + 1,
+      pendingInput: request,
     }));
     
     processQueue();

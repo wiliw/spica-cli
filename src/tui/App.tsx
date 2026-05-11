@@ -97,16 +97,17 @@ export function App() {
   return (
     <Box flexDirection="column" height={terminalHeight}>
       <Box flexDirection="row" height={contentHeight}>
-        <Box width="62%" height={contentHeight}>
+        <Box width="60%" height={contentHeight}>
           <AIOutputPanel
             turns={state.turns}
             focusIndex={focusIndex}
             contentOffset={contentOffset}
             autoFollow={autoFollow}
             height={contentHeight}
+            pendingInput={state.pendingInput}
           />
         </Box>
-        <Box width="38%" flexDirection="column" height={contentHeight}>
+        <Box width="40%" flexDirection="column" height={contentHeight}>
           <ThinkingPanel content={displayReasoning} isRunning={state.isRunning} height={Math.floor(contentHeight * 0.6)} />
           <ToolsPanel tools={displayTools} isRunning={state.isRunning} height={Math.floor(contentHeight * 0.4)} />
         </Box>
