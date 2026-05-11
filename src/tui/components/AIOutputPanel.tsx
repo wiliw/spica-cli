@@ -18,7 +18,7 @@ export const AIOutputPanel = React.memo(({ turns, scrollOffset, focusIndex, auto
     <Box flexDirection="column" flexGrow={1}>
       <Box borderStyle="single" borderColor="cyan">
         <Text bold color="cyan">
-          Turns {focusIndex + 1}/{turns.length} {autoFollow ? '●AUTO' : '○MANUAL'}
+          Turns {focusIndex + 1}/{turns.length} {autoFollow ? '[AUTO]' : '[MANUAL]'}
         </Text>
       </Box>
       
@@ -26,7 +26,7 @@ export const AIOutputPanel = React.memo(({ turns, scrollOffset, focusIndex, auto
         {prevTurns.map((turn, i) => (
           <Box key={turn.id} flexDirection="column" marginTop={1}>
             <Text dimColor color="gray">
-              ── Turn {focusIndex - 2 + i + 1} ──
+              -- Turn {focusIndex - 2 + i + 1} --
             </Text>
             <Text dimColor>
               Q: {turn.userMessage}
@@ -40,11 +40,11 @@ export const AIOutputPanel = React.memo(({ turns, scrollOffset, focusIndex, auto
         {focusedTurn && (
           <Box flexDirection="column" borderStyle="double" borderColor="yellow" paddingX={1} marginTop={1}>
             <Text bold color="yellow" inverse>
-              ══ FOCUS: Turn {focusIndex + 1} ══
+              == FOCUS: Turn {focusIndex + 1} ==
             </Text>
             <Box marginTop={1}>
               <Text bold color="green">
-                ❯ Q: {focusedTurn.userMessage}
+                > Q: {focusedTurn.userMessage}
               </Text>
             </Box>
             <Box marginTop={1}>
@@ -58,7 +58,7 @@ export const AIOutputPanel = React.memo(({ turns, scrollOffset, focusIndex, auto
         {nextTurns.map((turn, i) => (
           <Box key={turn.id} flexDirection="column" marginTop={1}>
             <Text dimColor color="gray">
-              ── Turn {focusIndex + i + 2} ──
+              -- Turn {focusIndex + i + 2} --
             </Text>
             <Text dimColor>
               Q: {turn.userMessage}

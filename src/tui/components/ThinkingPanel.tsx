@@ -12,7 +12,7 @@ export const ThinkingPanel = React.memo(({ content }: ThinkingPanelProps) => {
   return (
     <Box flexDirection="column" flexGrow={1}>
       <Box borderStyle="single" borderColor="magenta">
-        <Text bold color="magenta">💭 Thinking</Text>
+        <Text bold color="magenta">Thinking</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1} paddingX={1}>
         {content ? (

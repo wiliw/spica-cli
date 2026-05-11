@@ -1,7 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
 
-const MAX_VISIBLE = 10;
-
 interface UseScrollResult {
   scrollOffset: number;
   focusIndex: number;
@@ -12,38 +10,43 @@ interface UseScrollResult {
 }
 
 export function useScroll(totalItems: number): UseScrollResult {
-  const [scrollOffset, setScrollOffset] = useState(0);
+  const [focusIndex, setFocusIndex] = useState(0);
   const [autoFollow, setAutoFollow] = useState(true);
-  
-  const maxOffset = Math.max(0, totalItems - MAX_VISIBLE);
   
   useEffect(() => {
     if (autoFollow && totalItems > 0) {
-      setScrollOffset(maxOffset);
+      setFocusIndex(totalItems - 1);
     }
-  }, [totalItems, autoFollow, maxOffset]);
-
-  const focusIndex = Math.min(scrollOffset + Math.floor(MAX_VISIBLE / 2), totalItems - 1);
+  }, [totalItems, autoFollow]);
 
   const scrollUp = useCallback(() => {
     setAutoFollow(false);
-    setScrollOffset(prev => Math.max(0, prev - 1));
+    setFocusIndex(prev => Math.max(0, prev - 1));
   }, []);
 
   const scrollDown = useCallback(() => {
-    const newOffset = scrollOffset + 1;
-    if (newOffset >= maxOffset) {
+    const newIndex = focusIndex + 1;
+    if (newIndex >= totalItems - 1) {
       setAutoFollow(true);
-      setScrollOffset(maxOffset);
+      setFocusIndex(totalItems - 1);
     } else {
-      setScrollOffset(newOffset);
+      setFocusIndex(newIndex);
     }
-  }, [scrollOffset, maxOffset]);
+  }, [focusIndex, totalItems]);
 
   const jumpToLatest = useCallback(() => {
     setAutoFollow(true);
-    setScrollOffset(maxOffset);
-  }, [maxOffset]);
+    if (totalItems > 0) {
+      setFocusIndex(totalItems - 1);
+    }
+  }, [totalItems]);
 
-  return { scrollOffset, focusIndex, autoFollow, scrollUp, scrollDown, jumpToLatest };
+  return { 
+    scrollOffset: Math.max(0, focusIndex - 2), 
+    focusIndex, 
+    autoFollow, 
+    scrollUp, 
+    scrollDown, 
+    jumpToLatest 
+  };
 }
