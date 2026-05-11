@@ -33,7 +33,7 @@ export const ThinkingPanel = React.memo(({ content, isRunning, height = 20 }: Th
         {displayLines.length > 0 ? (
           displayLines.slice(0, maxLines).map((line, i) => (
             <Box key={i} minHeight={1} maxHeight={1}>
-              <Text color="gray" wrap="truncate">{line.slice(0, 100)}</Text>
+              <Text color="gray">{line}</Text>
             </Box>
           ))
         ) : (

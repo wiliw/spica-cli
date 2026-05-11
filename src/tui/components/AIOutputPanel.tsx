@@ -37,7 +37,7 @@ export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, aut
   let isPending = false;
   
   if (pendingInput && !focusedTurn) {
-    contentLines = [`Q: ${pendingInput}`, '...'];
+    contentLines = [`Q: ${pendingInput}`];
     isPending = true;
   } else if (focusedTurn) {
     contentLines = [
