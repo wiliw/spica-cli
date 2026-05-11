@@ -108,7 +108,7 @@ export function App() {
         </Box>
         <Box width="38%" flexDirection="column" height={contentHeight}>
           <ThinkingPanel content={displayReasoning} isRunning={state.isRunning} height={Math.floor(contentHeight * 0.6)} />
-          <ToolsPanel tools={displayTools} height={Math.floor(contentHeight * 0.4)} />
+          <ToolsPanel tools={displayTools} isRunning={state.isRunning} height={Math.floor(contentHeight * 0.4)} />
         </Box>
       </Box>
       <InputPanel 
