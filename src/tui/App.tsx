@@ -42,16 +42,15 @@ useInput((ch, key) => {
       return;
     }
     
-    if (isRunning && key.escape) {
-      setShowInterruptConfirm(true);
-      return;
-    }
-    
     if (key.upArrow) scrollUp();
     if (key.downArrow) scrollDown();
     if (key.pageDown || ch === 'G') jumpToLatest();
     
     if (key.ctrl && ch === 'p') setShowSetup(true);
+    
+    if (state.isRunning && key.escape) {
+      setShowInterruptConfirm(true);
+    }
   });
 
   if (showSetup) return <ProviderSetupTUI onComplete={() => setShowSetup(false)} />;
@@ -98,9 +97,9 @@ useInput((ch, key) => {
     : focusedTurn?.tools || [];
 
   return (
-    <Box flexDirection="column" height={terminalHeight}>
-      <Box flexDirection="row" height={contentHeight}>
-        <Box width="60%" height={contentHeight}>
+    <Box flexDirection="column" minHeight={terminalHeight} maxHeight={terminalHeight}>
+      <Box flexDirection="row" minHeight={contentHeight} maxHeight={contentHeight}>
+        <Box width="60%" minHeight={contentHeight} maxHeight={contentHeight} flexDirection="column">
           <AIOutputPanel
             turns={state.turns}
             focusIndex={focusIndex}
@@ -110,7 +109,7 @@ useInput((ch, key) => {
             pendingInput={state.pendingInput}
           />
         </Box>
-        <Box width="40%" flexDirection="column" height={contentHeight}>
+        <Box width="40%" minHeight={contentHeight} maxHeight={contentHeight} flexDirection="column">
           <ThinkingPanel content={displayReasoning} isRunning={state.isRunning} height={Math.floor(contentHeight * 0.6)} />
           <ToolsPanel tools={displayTools} isRunning={state.isRunning} height={Math.floor(contentHeight * 0.4)} />
         </Box>
