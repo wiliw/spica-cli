@@ -44,7 +44,7 @@ export const AIOutputPanel = React.memo(({ turns, scrollOffset, focusIndex, auto
             </Text>
             <Box marginTop={1}>
               <Text bold color="green">
-                > Q: {focusedTurn.userMessage}
+                Q: {focusedTurn.userMessage}
               </Text>
             </Box>
             <Box marginTop={1}>

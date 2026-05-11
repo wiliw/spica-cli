@@ -94,7 +94,7 @@ export function App() {
   return (
     <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="row" flexGrow={1}>
-        <Box width="40%" flexGrow={1}>
+        <Box width="62%">
           <AIOutputPanel
             turns={state.turns}
             scrollOffset={scrollOffset}
@@ -102,11 +102,11 @@ export function App() {
             autoFollow={autoFollow}
           />
         </Box>
-        <Box width="60%" flexDirection="column" flexGrow={1}>
-          <Box flexGrow={1}>
+        <Box width="38%" flexDirection="column">
+          <Box height="60%">
             <ThinkingPanel content={displayReasoning} />
           </Box>
-          <Box height={8}>
+          <Box height="40%">
             <ToolsPanel tools={displayTools} />
           </Box>
         </Box>
