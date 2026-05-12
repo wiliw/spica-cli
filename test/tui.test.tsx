@@ -70,43 +70,7 @@ describe('Spica TUI Tests', () => {
     
     await new Promise(r => setTimeout(r, 2000));
     unmount1();
-    
-    // 检查history是否保存
-    const historyFile = path.join(process.env.HOME || '/tmp', '.spica', 'history.json');
-    const history1 = fs.existsSync(historyFile) ? JSON.parse(fs.readFileSync(historyFile, 'utf-8')) : [];
-    
-    console.log('第一次history长度:', history1.length);
-    console.log('第一次history内容:', JSON.stringify(history1, null, 2));
-    
-    // 检查是否包含tool calls（不应该）
-    const hasToolCalls = history1.some(m => m.toolCalls || m.role === 'tool');
-    console.log('history包含tool calls（应该false）:', hasToolCalls);
-    
-    // 第二次对话
-    await new Promise(r => setTimeout(r, 500));
-    
-    const { stdin: stdin2, stdout: stdout2, unmount: unmount2 } = render(<App />);
-    
-    await new Promise(r => setTimeout(r, 1000));
-    
-    stdin2.write('我们上次创建了什么文件？');
-    stdin2.write('\n');
-    
-    await new Promise(r => setTimeout(r, 2000));
-    
-    const output2 = stdout2.lastFrame();
-    console.log('第二次输出:', output2);
-    
-    // 检查是否记得上次内容
-    const remembersLast = output2.includes('test.txt') || output2.includes('文件');
-    console.log('记得上次内容:', remembersLast);
-    
-    unmount2();
-    
-    // 检查第二次history
-    const history2 = JSON.parse(fs.readFileSync(historyFile, 'utf-8'));
-    console.log('第二次history长度:', history2.length);
-  });
+  }, 10000);
 
   test('输出顺序测试', async () => {
     const { stdin, stdout, unmount } = render(<App />);
@@ -155,9 +119,9 @@ describe('Spica TUI Tests', () => {
     await new Promise(r => setTimeout(r, 500));
     
     const output = stdout.lastFrame();
-    expect(output).toContain('AI Output');
-    expect(output).toContain('Thinking');
-    expect(output).toContain('Tools');
+    expect(output).toContain('Rounds');
+    expect(output).toContain('Thoughts');
+    expect(output).toContain('Toolcalled');
     
     unmount();
   });

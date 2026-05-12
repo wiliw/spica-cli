@@ -34,11 +34,11 @@ export const ToolsPanel = React.memo(({ tools, height = 10, isRunning }: ToolsPa
   );
 
   return (
-    <Box flexDirection="column" minHeight={height} maxHeight={height}>
-      <Box borderStyle="single" borderColor="green" minHeight={headerHeight} maxHeight={headerHeight}>
+    <Box flexDirection="column" height={height}>
+      <Box borderStyle="single" borderColor="green" height={headerHeight}>
         <Text bold color="green" backgroundColor="black">{title} ({tools.length})</Text>
       </Box>
-      <Box flexDirection="column" minHeight={maxLines} maxHeight={maxLines} paddingX={1}>
+      <Box flexDirection="column" height={maxLines} paddingX={1}>
         {displayLines.length > 0 ? (
           displayLines.slice(0, maxLines).map((line, i) => {
             const tool = tools[startIndex + i];

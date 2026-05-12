@@ -28,11 +28,11 @@ export const ThinkingPanel = React.memo(({ content, isRunning, height = 20 }: Th
   const displayLines = displayText.split('\n').slice(0, maxLines);
 
   return (
-    <Box flexDirection="column" minHeight={height} maxHeight={height}>
-      <Box borderStyle="single" borderColor="magenta" minHeight={headerHeight} maxHeight={headerHeight}>
+    <Box flexDirection="column" height={height}>
+      <Box borderStyle="single" borderColor="magenta" height={headerHeight}>
         <Text bold color="magenta" backgroundColor="black">{title}</Text>
       </Box>
-      <Box flexDirection="column" minHeight={maxLines} maxHeight={maxLines} paddingX={1}>
+      <Box flexDirection="column" height={maxLines} paddingX={1}>
         {displayLines.length > 0 ? (
           displayLines.map((line, i) => (
             <Box key={i} minHeight={1} maxHeight={1}>

@@ -21,7 +21,7 @@ describe('ThinkingPanel', () => {
     const lines = Array.from({ length: 20 }, (_, i) => `Line ${i + 1}`);
     const longContent = lines.join('\n');
     
-    const { stdout, unmount } = render(<ThinkingPanel content={longContent} />);
+    const { stdout, unmount } = render(<ThinkingPanel content={longContent} height={12} />);
     
     await new Promise(r => setTimeout(r, 100));
     
@@ -37,7 +37,7 @@ describe('ThinkingPanel', () => {
     const lines = Array.from({ length: 20 }, (_, i) => `Line ${i + 1}`);
     const longContent = lines.join('\n');
     
-    const { stdout, unmount } = render(<ThinkingPanel content={longContent} />);
+    const { stdout, unmount } = render(<ThinkingPanel content={longContent} height={12} />);
     
     await new Promise(r => setTimeout(r, 100));
     const initialOutput = stdout.lastFrame();
@@ -74,12 +74,12 @@ describe('ThinkingPanel', () => {
   });
 
   test('shows No thinking for empty content', async () => {
-    const { stdout, unmount } = render(<ThinkingPanel content="" />);
+    const { stdout, unmount } = render(<ThinkingPanel content="" height={11} />);
     
     await new Promise(r => setTimeout(r, 100));
     
     const output = stdout.lastFrame();
-    expect(output).toContain('No thinking');
+    expect(output).toContain('No thinking recorded');
     
     unmount();
   });

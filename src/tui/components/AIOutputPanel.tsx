@@ -24,7 +24,7 @@ export const AIOutputPanel = React.memo(({ turns, focusIndex, contentOffset, aut
     return (
       <Box flexDirection="column" height={height}>
         <Box borderStyle="single" borderColor="cyan" height={headerHeight}>
-          <Text bold color="cyan">Rounds 0/0</Text>
+          <Text bold color="cyan" backgroundColor="black">Rounds 0/0</Text>
         </Box>
         <Box height={contentHeight} alignItems="center" justifyContent="center">
           <Text dimColor>No rounds yet</Text>
