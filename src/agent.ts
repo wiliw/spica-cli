@@ -257,32 +257,36 @@ Project Context (from .spica.md):
     
     let iterations = 0;
 
+    const allToolResults: Array<{ name: string; id: string; result: string }> = [];
+
     while (!response.finished && iterations < maxIterations && !this.interruptFlag) {
       iterations++;
-      
+
       if (this.interruptFlag) break;
-      
+
       if (response.toolCalls && response.toolCalls.length > 0) {
         const toolResults = await Promise.all(response.toolCalls.map(async (tc) => {
           if (this.interruptFlag) return { name: tc.name, id: tc.id, result: 'interrupted' };
-          
+
           this.emit('tool_call', { name: tc.name, arguments: tc.arguments });
-          
+
           const result = await executeTool(tc.name, tc.arguments);
-          
-          this.emit('tool_result', { 
-            name: tc.name, 
+
+          this.emit('tool_result', {
+            name: tc.name,
             success: result.success,
             output: result.output,
             error: result.error,
             diff: result.diff,
           });
-          
+
           return { name: tc.name, id: tc.id, result: result.output || result.error || '' };
         }));
-        
+
+        allToolResults.push(...toolResults);
+
         if (this.interruptFlag) break;
-        
+
         for (const { name, id, result } of toolResults) {
           response = await this.llm.continueWithToolResult(name, result, TOOLS_DEFINITIONS);
         }
@@ -291,26 +295,43 @@ Project Context (from .spica.md):
       }
     }
 
-    const assistantContent = response.content || 
+    const assistantContent = response.content ||
       this.llm?.getMessages().filter(m => m.role === 'assistant').pop()?.content || '';
-    
+
     if (assistantContent) {
       this.emit('message', { role: 'assistant', content: assistantContent });
     }
-    
+
     if (this.llm) {
       const allMessages = this.llm.getMessages();
-      
+
       const simplifiedMessages = allMessages.map(m => {
         if (m.role === 'tool') {
           return { role: 'tool', content: m.content, toolCallId: m.toolCallId };
         }
+
+        if (m.toolCalls && allToolResults.length > 0) {
+          const enrichedToolCalls = m.toolCalls.map(tc => {
+            const matchingResult = allToolResults.find(tr => tr.name === tc.name);
+            return {
+              ...tc,
+              result: matchingResult?.result || '',
+            };
+          });
+
+          return {
+            role: m.role,
+            content: m.content,
+            toolCalls: enrichedToolCalls,
+          };
+        }
+
         return {
           role: m.role,
           content: m.content,
           toolCalls: m.toolCalls,
         };
-      }).filter(m => m.role === 'user' || m.role === 'assistant' || m.role === 'tool');
+      }).filter(m => m.role === 'user' || m.role === 'assistant');
       
       saveProjectContext(this.workspacePath, simplifiedMessages);
       

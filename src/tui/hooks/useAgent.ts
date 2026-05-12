@@ -2,20 +2,11 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { SpicaAgent } from '../../agent';
 import { loadProjectContext } from '../../utils/projectState';
 import { associateEvents } from '../utils/associateEvents';
-import type { ConversationTurn } from '../types';
-
-interface EventItem {
-  type: 'message' | 'tool_call' | 'reasoning' | 'stream_chunk';
-  content: string;
-  toolName?: string;
-  toolStatus?: 'running' | 'success' | 'error';
-  role?: 'user' | 'assistant';
-  timestamp: Date;
-}
+import type { ConversationTurn, Event } from '../types';
 
 export interface AgentState {
   isRunning: boolean;
-  events: any[];
+  events: Event[];
   turns: ConversationTurn[];
   currentStream: string;
   currentReasoning: string;
@@ -23,31 +14,6 @@ export interface AgentState {
   error: string | null;
   sessionStart: Date | null;
   taskCount: number;
-}
-
-export interface SubAgentState {
-  taskId: string;
-  description: string;
-  status: 'running' | 'completed';
-  events: any[]; // 独立的events数组
-  currentStream: string;
-  currentReasoning: string;
-  result?: string;
-  startTime: number;
-  scrollOffset: number; // 独立滚动位置
-}
-
-export interface AgentState {
-  isRunning: boolean;
-  events: any[];
-  messages: MessageWithContext[];
-  currentStream: string;
-  currentReasoning: string;
-  error: string | null;
-  sessionStart: Date | null;
-  taskCount: number;
-  subAgents: Map<string, SubAgentState>;
-  showSplitView: boolean;
 }
 
 export function useAgent() {
@@ -63,7 +29,7 @@ export function useAgent() {
     taskCount: 0,
   });
 
-const agentRef = useRef<SpicaAgent | null>(null);
+  const agentRef = useRef<SpicaAgent | null>(null);
   const agentInitializedRef = useRef(false);
   const streamBufferRef = useRef<string>('');
   const reasoningBufferRef = useRef<string>('');
@@ -71,29 +37,26 @@ const agentRef = useRef<SpicaAgent | null>(null);
   const taskQueueRef = useRef<Array<string>>([]);
   const isProcessingRef = useRef(false);
   const interruptFlagRef = useRef(false);
-  
+
   const pendingUpdateRef = useRef<{stream?: boolean; reasoning?: boolean}>({});
   const flushTimerRef = useRef<NodeJS.Timeout | null>(null);
-  
+
   const flushDisplay = useCallback(() => {
     if (flushTimerRef.current) return;
-    
+
     flushTimerRef.current = setTimeout(() => {
       const updates = pendingUpdateRef.current;
       pendingUpdateRef.current = {};
       flushTimerRef.current = null;
-      
+
       setState(prev => {
         const newEvents = [...prev.events];
-        
-        if (updates.stream) {
-        }
-        
+
         if (updates.reasoning && reasoningBufferRef.current.trim()) {
-          const existingReasoning = newEvents.find(e => 
+          const existingReasoning = newEvents.find(e =>
             e.type === 'reasoning' && e.timestamp === reasoningTimestampRef.current
           );
-          
+
           if (existingReasoning) {
             existingReasoning.content = reasoningBufferRef.current;
           } else {
@@ -101,10 +64,10 @@ const agentRef = useRef<SpicaAgent | null>(null);
               type: 'reasoning',
               content: reasoningBufferRef.current,
               timestamp: reasoningTimestampRef.current || new Date(),
-            });
+            } as Event);
           }
         }
-        
+
         return {
           ...prev,
           events: newEvents,
@@ -119,17 +82,17 @@ const agentRef = useRef<SpicaAgent | null>(null);
   const processQueue = async () => {
     if (isProcessingRef.current || taskQueueRef.current.length === 0) return;
     if (!agentInitializedRef.current) return;
-    
+
     isProcessingRef.current = true;
     const task = taskQueueRef.current.shift();
     if (!task) {
       isProcessingRef.current = false;
       return;
     }
-    
-streamBufferRef.current = '';
-        reasoningBufferRef.current = '';
-        reasoningTimestampRef.current = null;
+
+    streamBufferRef.current = '';
+    reasoningBufferRef.current = '';
+    reasoningTimestampRef.current = null;
 
     setState(prev => ({
       ...prev,
@@ -160,31 +123,31 @@ streamBufferRef.current = '';
     }
 
     isProcessingRef.current = false;
-    
+
     if (interruptFlagRef.current) {
       console.error(`[INTERRUPTED]`);
       return;
     }
-    
+
     if (taskQueueRef.current.length > 0) {
       console.error(`[NEXT_IN_QUEUE]`);
       processQueue();
     }
   };
 
-useEffect(() => {
+  useEffect(() => {
     if (!agentRef.current) {
       const agent = new SpicaAgent(undefined, process.cwd());
       agentRef.current = agent;
-      
+
       agent.on('stream', (data: any) => {
         streamBufferRef.current += data.chunk;
         pendingUpdateRef.current.stream = true;
-        
+
         setState(prev => {
           const newEvents = [...prev.events];
           const lastAssistant = newEvents.find(e => e.type === 'message' && e.role === 'assistant' && e.timestamp === reasoningTimestampRef.current);
-          
+
           if (lastAssistant) {
             lastAssistant.content = streamBufferRef.current;
           } else {
@@ -193,9 +156,9 @@ useEffect(() => {
               role: 'assistant',
               content: streamBufferRef.current,
               timestamp: reasoningTimestampRef.current || new Date(),
-            });
+            } as Event);
           }
-          
+
           return {
             ...prev,
             events: newEvents,
@@ -216,7 +179,7 @@ useEffect(() => {
 
       agent.on('message', (msg: any) => {
         const timestamp = new Date();
-        
+
         if (msg.role === 'assistant') {
           setState(prev => {
             const newEvents = prev.events.map(e => {
@@ -225,19 +188,19 @@ useEffect(() => {
               }
               return e;
             });
-            
+
             if (!newEvents.find(e => e.type === 'message' && e.role === 'assistant' && e.timestamp === timestamp)) {
               newEvents.push({
                 type: 'message',
                 role: 'assistant',
                 content: msg.content || streamBufferRef.current,
                 timestamp: timestamp,
-              });
+              } as Event);
             }
-            
+
             streamBufferRef.current = '';
             reasoningBufferRef.current = '';
-            
+
             return {
               ...prev,
               events: newEvents,
@@ -248,12 +211,13 @@ useEffect(() => {
           });
         } else if (msg.role === 'user') {
           setState(prev => {
-            const newEvents = [...prev.events, { 
-              type: 'message', 
-              role: 'user', 
-              content: msg.content, 
+            const newEvent: Event = {
+              type: 'message',
+              role: 'user',
+              content: msg.content,
               timestamp: new Date(),
-            }];
+            };
+            const newEvents = [...prev.events, newEvent];
             return {
               ...prev,
               events: newEvents,
@@ -265,14 +229,15 @@ useEffect(() => {
 
       agent.on('tool_call', (data: any) => {
         setState(prev => {
-          const newEvents = [...prev.events, { 
-            type: 'tool_call', 
-            toolName: data.name, 
+          const newEvent: Event = {
+            type: 'tool_call',
+            toolName: data.name,
             toolArguments: data.arguments,
-            toolStatus: 'running', 
-            content: '', 
+            toolStatus: 'running',
+            content: '',
             timestamp: new Date(),
-          }];
+          };
+          const newEvents = [...prev.events, newEvent];
           return {
             ...prev,
             events: newEvents,
@@ -283,9 +248,10 @@ useEffect(() => {
 
       agent.on('tool_result', (data: any) => {
         setState(prev => {
-          const newEvents = prev.events.map(e => 
+          const newStatus: 'success' | 'error' = data.success ? 'success' : 'error';
+          const newEvents = prev.events.map(e =>
             e.type === 'tool_call' && e.toolName === data.name && e.toolStatus === 'running'
-              ? { ...e, toolStatus: data.success ? 'success' : 'error', content: data.output || data.error || '' }
+              ? { ...e, toolStatus: newStatus, content: data.output || data.error || '' } as Event
               : e
           );
           return {
@@ -303,26 +269,32 @@ useEffect(() => {
       agent.init().then(() => {
         agentInitializedRef.current = true;
         const projectContext = loadProjectContext(agent.getWorkspacePath());
-        const historyEvents = projectContext
+        const historyEvents: Event[] = projectContext
           .filter(m => m.role === 'user' || m.role === 'assistant')
           .map(m => ({
-            type: 'message',
-            role: m.role,
+            type: 'message' as const,
+            role: m.role as 'user' | 'assistant',
             content: m.content,
             timestamp: new Date(),
           }));
-        
-const newEvents = historyEvents.length > 0 
-          ? [...historyEvents, { type: 'message', role: 'assistant', content: '✓ Ready', timestamp: new Date() }]
-          : [{ type: 'message', role: 'assistant', content: '✓ Ready', timestamp: new Date() }];
-        
+
+        const readyEvent: Event = {
+          type: 'message',
+          role: 'assistant',
+          content: '✓ Ready',
+          timestamp: new Date(),
+        };
+        const newEvents: Event[] = historyEvents.length > 0
+          ? [...historyEvents, readyEvent]
+          : [readyEvent];
+
         setState(prev => ({
           ...prev,
           sessionStart: new Date(),
           events: newEvents,
           turns: associateEvents(newEvents),
         }));
-        
+
         if (taskQueueRef.current.length > 0) {
           processQueue();
         }
@@ -333,7 +305,7 @@ const newEvents = historyEvents.length > 0
         }));
       });
     }
-    
+
     return () => {
       if (flushTimerRef.current) {
         clearTimeout(flushTimerRef.current);
@@ -344,7 +316,7 @@ const newEvents = historyEvents.length > 0
     };
   }, []);
 
-const interrupt = () => {
+  const interrupt = () => {
     interruptFlagRef.current = true;
     if (agentRef.current) {
       agentRef.current.interrupt();
@@ -353,9 +325,9 @@ const interrupt = () => {
 
   const startTask = async (request: string) => {
     taskQueueRef.current.push(request);
-    
+
     setState(prev => {
-      const userEvent = {
+      const userEvent: Event = {
         type: 'message',
         role: 'user',
         content: request,
@@ -370,7 +342,7 @@ const interrupt = () => {
         turns: associateEvents(newEvents),
       };
     });
-    
+
     processQueue();
   };
 

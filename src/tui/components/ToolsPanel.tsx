@@ -4,7 +4,7 @@ import { useMarquee } from '../hooks/useMarquee';
 
 interface ToolDisplay {
   name: string;
-  status: string;
+  status: 'running' | 'success' | 'error';
   output?: string;
 }
 
@@ -16,41 +16,63 @@ interface ToolsPanelProps {
 
 export const ToolsPanel = React.memo(({ tools, height = 10, isRunning }: ToolsPanelProps) => {
   const title = isRunning ? 'Toolcalling' : 'Toolcalled';
-  const headerHeight = 1;
-  const maxLines = height - headerHeight;
 
-  const visibleCount = isRunning ? Math.min(tools.length, maxLines) : maxLines;
-  const startIndex = isRunning ? Math.max(0, tools.length - visibleCount) : 0;
+  // 外部容器固定总高度，内部border = 总高度 - 2
+  const totalHeight = height;
+  const innerHeight = totalHeight - 2;
+  const titleHeight = 1;
+  const contentLines = Math.max(1, innerHeight - titleHeight);
 
-  const toolTexts = tools.slice(startIndex, startIndex + visibleCount).map(t => {
+  const toolTexts = tools.map(t => {
     const icon = t.status === 'running' ? '...' : t.status === 'success' ? '[OK]' : '[ERR]';
-    return `${icon} ${t.name}${t.output ? ` : ${t.output}` : ''}`;
+    // 截断输出防止长文本撑开
+    const outputPreview = t.output ? t.output.replace(/\n/g, ' ').slice(0, 30) : '';
+    return `${icon} ${t.name}${outputPreview ? `:${outputPreview}` : ''}`;
   });
 
-  const displayLines = isRunning ? toolTexts : (
-    tools.length > maxLines
-      ? useMarquee(toolTexts.join('\n'), maxLines).split('\n')
-      : toolTexts
-  );
+  let displayLines: string[];
+
+  if (isRunning) {
+    displayLines = toolTexts.slice(-contentLines);
+  } else {
+    if (toolTexts.length > contentLines) {
+      const marqueeText = useMarquee(toolTexts.join('\n'), contentLines);
+      displayLines = marqueeText.split('\n');
+    } else {
+      displayLines = toolTexts;
+    }
+  }
+
+  displayLines = displayLines.slice(0, contentLines);
 
   return (
-    <Box flexDirection="column" height={height}>
-      <Box borderStyle="single" borderColor="green" height={headerHeight}>
-        <Text bold color="green" backgroundColor="black">{title} ({tools.length})</Text>
-      </Box>
-      <Box flexDirection="column" height={maxLines} paddingX={1}>
+    <Box flexDirection="column" height={totalHeight} overflow="hidden" flexGrow={0} flexShrink={0}>
+      <Box
+        flexDirection="column"
+        height={innerHeight}
+        borderStyle="single"
+        borderColor="green"
+      >
+        {/* 标题 */}
+        <Box flexShrink={0}>
+          <Text bold color="green" backgroundColor="black">{title} ({tools.length})</Text>
+        </Box>
+        {/* 内容 */}
         {displayLines.length > 0 ? (
-          displayLines.slice(0, maxLines).map((line, i) => {
-            const tool = tools[startIndex + i];
+          displayLines.map((line, i) => {
+            const toolIndex = Math.min(i, tools.length - 1);
+            const tool = tools[toolIndex];
             const color = tool?.status === 'running' ? 'yellow' : tool?.status === 'success' ? 'green' : 'red';
             return (
-              <Box key={i} minHeight={1} maxHeight={1}>
-                <Text color={color} bold>{line}</Text>
+              <Box key={i} flexShrink={0}>
+                <Text color={color} bold wrap="truncate">{line}</Text>
               </Box>
             );
           })
         ) : (
-          <Text dimColor color="cyan">No tools used</Text>
+          <Box flexShrink={0}>
+            <Text dimColor color="cyan">No tools in this round</Text>
+          </Box>
         )}
       </Box>
     </Box>

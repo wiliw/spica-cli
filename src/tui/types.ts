@@ -24,3 +24,11 @@ export interface Event {
   role?: 'user' | 'assistant';
   timestamp: Date;
 }
+
+export interface MessageWithContext {
+  role: 'user' | 'assistant';
+  content: string;
+  tools?: ToolCall[];
+  reasoning?: string;
+  timestamp: Date;
+}

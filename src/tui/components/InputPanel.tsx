@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, useInput } from 'ink';
+import { Box } from 'ink';
 import TextInput from 'ink-text-input';
 
 interface InputPanelProps {
@@ -18,7 +18,6 @@ export const InputPanel = React.memo(({ onSubmit, onQuit, isRunning }: InputPane
       setValue('');
       return;
     }
-    
     if (value.trim()) {
       onSubmit(value.trim());
       setValue('');
@@ -26,16 +25,18 @@ export const InputPanel = React.memo(({ onSubmit, onQuit, isRunning }: InputPane
   };
 
   const borderColor = isRunning ? 'yellow' : 'gray';
-  const placeholder = isRunning ? 'Running... (ESC ESC to interrupt)' : 'Input (quit to exit)';
+  const placeholder = isRunning ? 'Running... (ESC to interrupt)' : 'Input (quit to exit)';
 
   return (
-    <Box borderStyle="single" borderColor={borderColor} paddingX={1} minHeight={3} maxHeight={3}>
-      <TextInput
-        value={value}
-        onChange={setValue}
-        onSubmit={handleSubmit}
-        placeholder={placeholder}
-      />
+    <Box height={3} overflow="hidden" flexGrow={0} flexShrink={0}>
+      <Box height={1} borderStyle="single" borderColor={borderColor} paddingX={1}>
+        <TextInput
+          value={value}
+          onChange={setValue}
+          onSubmit={handleSubmit}
+          placeholder={placeholder}
+        />
+      </Box>
     </Box>
   );
 });

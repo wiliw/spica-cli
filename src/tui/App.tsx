@@ -11,9 +11,23 @@ import { ToolsPanel } from './components/ToolsPanel';
 export function App() {
   const { stdout } = useStdout();
   const terminalHeight = stdout?.rows || 40;
-  const contentHeight = terminalHeight - 3;
+  const terminalWidth = stdout?.columns || 100;
+
+  // Input占用固定3行
+  const inputHeight = 3;
+  const contentHeight = terminalHeight - inputHeight;
+
   const { state, startTask, interrupt } = useAgent();
-  const { focusIndex, contentOffset, autoFollow, scrollUp, scrollDown, jumpToLatest } = useScroll(state.turns.length);
+  const {
+    focusIndex,
+    contentOffset,
+    autoFollow,
+    scrollUp,
+    scrollDown,
+    jumpToLatest,
+    setMaxContentOffset
+  } = useScroll(state.turns.length);
+
   const [showSetup, setShowSetup] = React.useState(false);
   const [showInterruptConfirm, setShowInterruptConfirm] = React.useState(false);
   const [showExitSummary, setShowExitSummary] = React.useState(false);
@@ -26,12 +40,12 @@ export function App() {
     setShowInterruptConfirm(true);
   };
 
-useInput((ch, key) => {
+  useInput((ch, key) => {
     if (showExitSummary) {
       if (key.return) process.exit(0);
       return;
     }
-    
+
     if (showInterruptConfirm) {
       if (key.escape) {
         interrupt();
@@ -41,13 +55,14 @@ useInput((ch, key) => {
       }
       return;
     }
-    
+
+    // 滚动控制
     if (key.upArrow) scrollUp();
     if (key.downArrow) scrollDown();
     if (key.pageDown || ch === 'G') jumpToLatest();
-    
+
     if (key.ctrl && ch === 'p') setShowSetup(true);
-    
+
     if (state.isRunning && key.escape) {
       setShowInterruptConfirm(true);
     }
@@ -56,15 +71,14 @@ useInput((ch, key) => {
   if (showSetup) return <ProviderSetupTUI onComplete={() => setShowSetup(false)} />;
 
   if (showExitSummary) {
-    const duration = state.sessionStart 
+    const duration = state.sessionStart
       ? Math.round((new Date().getTime() - state.sessionStart.getTime()) / 1000 / 60)
       : 0;
-    
+
     return (
       <Box flexDirection="column" alignItems="center" justifyContent="center">
         <Box borderStyle="double" borderColor="green" padding={2} flexDirection="column">
           <Text bold color="green">Session Summary</Text>
-          <Text>━━━━━━━━━━━━━━━</Text>
           <Text>Duration: {duration} min</Text>
           <Text>Tasks: {state.taskCount}</Text>
           <Text dimColor>Enter to exit</Text>
@@ -88,7 +102,9 @@ useInput((ch, key) => {
 
   const focusedTurn = state.turns[focusIndex];
   const displayReasoning = state.currentReasoning || focusedTurn?.reasoning || '';
-  const displayTools = state.isRunning 
+
+  // ed状态显示focusedTurn的工具，ing状态显示当前运行的工具
+  const displayTools: Array<{ name: string; status: 'running' | 'success' | 'error'; output?: string }> = state.isRunning
     ? state.events.filter(e => e.type === 'tool_call').map(e => ({
         name: e.toolName || 'unknown',
         status: e.toolStatus || 'running',
@@ -100,10 +116,20 @@ useInput((ch, key) => {
         output: t.output || '',
       }));
 
+  // 60/40 左右分屏
+  const leftWidth = Math.floor(terminalWidth * 0.6);
+  const rightWidth = terminalWidth - leftWidth;
+
+  // 60/40 右侧上下分屏
+  const thinkingHeight = Math.floor(contentHeight * 0.6);
+  const toolsHeight = contentHeight - thinkingHeight;
+
   return (
-    <Box flexDirection="column" minHeight={terminalHeight} maxHeight={terminalHeight}>
-      <Box flexDirection="row" minHeight={contentHeight} maxHeight={contentHeight}>
-        <Box width="60%" minHeight={contentHeight} maxHeight={contentHeight} flexDirection="column">
+    <Box flexDirection="column" width={terminalWidth} height={terminalHeight}>
+      {/* 内容区域 */}
+      <Box flexDirection="row" height={contentHeight} width={terminalWidth}>
+        {/* 左侧 - AI输出 */}
+        <Box width={leftWidth} height={contentHeight} flexDirection="column">
           <AIOutputPanel
             turns={state.turns}
             focusIndex={focusIndex}
@@ -111,19 +137,32 @@ useInput((ch, key) => {
             autoFollow={autoFollow}
             height={contentHeight}
             pendingInput={state.pendingInput}
+            onMaxOffsetChange={setMaxContentOffset}
           />
         </Box>
-        <Box width="40%" minHeight={contentHeight} maxHeight={contentHeight} flexDirection="column">
-          <ThinkingPanel content={displayReasoning} isRunning={state.isRunning} height={Math.floor(contentHeight * 0.6)} />
-          <ToolsPanel tools={displayTools} isRunning={state.isRunning} height={Math.floor(contentHeight * 0.4)} />
+        {/* 右侧 - Thinking + Tools */}
+        <Box width={rightWidth} height={contentHeight} flexDirection="column">
+          <ThinkingPanel
+            content={displayReasoning}
+            isRunning={state.isRunning}
+            height={thinkingHeight}
+          />
+          <ToolsPanel
+            tools={displayTools}
+            isRunning={state.isRunning}
+            height={toolsHeight}
+          />
         </Box>
       </Box>
-      <InputPanel 
-        onSubmit={startTask} 
-        onQuit={handleQuit}
-        onInterrupt={handleInterrupt}
-        isRunning={state.isRunning} 
-      />
+      {/* 输入框 */}
+      <Box height={inputHeight} width={terminalWidth}>
+        <InputPanel
+          onSubmit={startTask}
+          onQuit={handleQuit}
+          onInterrupt={handleInterrupt}
+          isRunning={state.isRunning}
+        />
+      </Box>
     </Box>
   );
 }
