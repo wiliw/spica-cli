@@ -281,7 +281,6 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
 
   // 从当前历史发起生成请求（不添加新的user消息）
   async generateFromHistory(tools?: ToolDefinition[], signal?: AbortSignal): Promise<LLMResponse> {
-    console.error(`[DEBUG] generateFromHistory, messages=${this.messages.length}`);
     try {
       const stream = await this.client.chat.completions.create({
         model: this.config.model,
@@ -346,24 +345,19 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
           toolCalls: parsedToolCalls,
         });
 
-        console.error(`[DEBUG] generateFromHistory returning toolCalls=${parsedToolCalls.length}`);
         return { toolCalls: parsedToolCalls, finished: false };
       }
 
       if (fullContent) {
         this.messages.push({ role: 'assistant', content: fullContent });
-        console.error(`[DEBUG] generateFromHistory returning content=${fullContent.length} chars`);
         return { content: fullContent, finished: true };
       }
 
-      console.error(`[DEBUG] generateFromHistory returning finished=true (empty)`);
       return { finished: true };
     } catch (error: any) {
       if (signal?.aborted) {
-        console.error(`[DEBUG] generateFromHistory aborted`);
         return { finished: true };
       }
-      console.error(`[DEBUG] generateFromHistory error: ${error.message}`);
       throw new Error(`${this.providerName} API error: ${error.message}`);
     }
   }

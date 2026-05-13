@@ -357,20 +357,16 @@ Project Context (from .spica.md):
 
     while (!response.finished && iterations < maxIterations && !this.interruptFlag) {
       iterations++;
-      console.error(`[DEBUG] Loop iteration ${iterations}, finished=${response.finished}, toolCalls=${response.toolCalls?.length || 0}`);
 
       if (this.interruptFlag) {
-        console.error(`[DEBUG] Interrupted at iteration ${iterations}`);
         break;
       }
 
       // 检查response状态
       if (!response.toolCalls || response.toolCalls.length === 0) {
         if (response.content) {
-          console.error(`[DEBUG] No toolCalls, has content - breaking`);
           break;
         }
-        console.error(`[DEBUG] Empty response at iteration ${iterations}`);
         break;
       }
 
