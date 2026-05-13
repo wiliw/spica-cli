@@ -26,12 +26,12 @@ function setupAgentEvents(agent: SpicaAgent, interactive: boolean = false) {
   });
 
   agent.on('reasoning', (data: any) => {
-    // 实时显示思考内容（紫色）
+    // 实时显示思考内容（紫色，带💭标记）
     process.stderr.write(chalk.magenta(data.content));
   });
 
   agent.on('tool_call', (data: any) => {
-    // 工具调用前换行
+    // 工具调用前换行，分隔思考
     console.log(chalk.cyan(`\n→ ${data.name}`));
   });
 
