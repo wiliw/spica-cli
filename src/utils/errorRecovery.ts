@@ -54,7 +54,7 @@ export async function restoreCheckpoint(commitHash?: string): Promise<boolean> {
       return false;
     }
 
-    await git.reset(target, 'hard');
+    await git.reset(['--hard', target]);
     return true;
   } catch (error) {
     return false;

@@ -73,11 +73,25 @@ export class SpicaAgent extends EventEmitter {
     }
 
     if (toolName === 'bash') {
-      const dangerousCommands = ['rm', 'chmod', 'chown', 'sudo', 'dd', 'mkfs', '>', 'mv '];
       const cmd = args.command || '';
-      for (const dangerous of dangerousCommands) {
-        if (cmd.includes(dangerous)) {
-          return `Dangerous: ${cmd.slice(0, 50)}`;
+
+      // 更精确的危险命令检测
+      const dangerousPatterns = [
+        { pattern: 'rm -rf', name: '删除整个目录' },
+        { pattern: 'rm /*', name: '删除根目录' },
+        { pattern: 'chmod 777', name: '开放所有权限' },
+        { pattern: 'sudo ', name: '使用sudo权限' },
+        { pattern: 'dd if=', name: '磁盘操作' },
+        { pattern: 'mkfs', name: '格式化磁盘' },
+        { pattern: '> /dev/', name: '写入设备文件' },
+        { pattern: 'mv /', name: '移动根目录文件' },
+        { pattern: 'git push --force', name: '强制推送' },
+        { pattern: 'git reset --hard', name: '硬重置' },
+      ];
+
+      for (const { pattern, name } of dangerousPatterns) {
+        if (cmd.includes(pattern)) {
+          return `${name}: ${cmd.slice(0, 60)}`;
         }
       }
     }

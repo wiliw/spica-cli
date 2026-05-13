@@ -18,20 +18,27 @@ const program = new Command();
 // 当前agent引用（用于中断）
 let currentAgent: SpicaAgent | null = null;
 
+// reasoning累积（只在完成时打印一次）
+let reasoningBuffer = '';
+
 // 设置agent事件监听
 function setupAgentEvents(agent: SpicaAgent, interactive: boolean = false) {
   agent.on('stream', (data: any) => {
+    // assistant回复，不打印reasoning（让用户看到回复）
     process.stdout.write(data.chunk);
   });
 
   agent.on('reasoning', (data: any) => {
-    // reasoning只在interactive模式显示
-    if (interactive) {
-      process.stderr.write(chalk.magenta(`\n💭 ${data.content.slice(0, 100)}...\n`));
-    }
+    // 只累积，不打印
+    reasoningBuffer += data.content;
   });
 
   agent.on('tool_call', (data: any) => {
+    // 工具调用时如果有reasoning，打印完整内容
+    if (reasoningBuffer.trim()) {
+      console.log(chalk.magenta(`\n💭 ${reasoningBuffer.trim()}\n`));
+      reasoningBuffer = '';
+    }
     console.log(chalk.cyan(`→ ${data.name}`));
   });
 
@@ -43,17 +50,31 @@ function setupAgentEvents(agent: SpicaAgent, interactive: boolean = false) {
 
   agent.on('diff_preview', (data: any) => {
     console.log(chalk.blue(`\n📄 ${data.filePath}`));
-    console.log(chalk.gray(`  ${data.diff}`));
+    // diff already has colors from formatDiff, so don't wrap it
+    if (data.diff) {
+      console.log(data.diff);
+    }
   });
 
   agent.on('permission_request', async (data: any) => {
-    console.log(chalk.yellow(`⚠ Permission required: ${data.reason}`));
+    // 权限请求前，如果有reasoning打印
+    if (reasoningBuffer.trim()) {
+      console.log(chalk.magenta(`\n💭 ${reasoningBuffer.trim()}\n`));
+      reasoningBuffer = '';
+    }
+    // 清晰的权限提示
+    console.log('\n' + chalk.yellow('═'.repeat(50)));
+    console.log(chalk.yellow.bold('⚠  PERMISSION REQUIRED'));
+    console.log(chalk.yellow('═'.repeat(50)));
+    console.log(chalk.white(`  Action: ${data.reason}`));
+    console.log(chalk.gray('─'.repeat(50)));
     const answer = await prompts({
       type: 'confirm',
       name: 'approve',
-      message: 'Allow this action?',
+      message: chalk.bold('Do you want to allow this action?'),
       initial: false,
     });
+    console.log(chalk.yellow('═'.repeat(50)) + '\n');
     if (answer.approve) {
       agent.approvePermission();
     } else {
@@ -67,6 +88,14 @@ function setupAgentEvents(agent: SpicaAgent, interactive: boolean = false) {
 
   agent.on('workspace_changed', (data: any) => {
     console.log(chalk.blue(`📁 Workspace: ${data.path}`));
+  });
+
+  // message事件 - 结束时若有剩余reasoning则打印
+  agent.on('message', (data: any) => {
+    if (data.role === 'assistant' && reasoningBuffer.trim()) {
+      console.log(chalk.magenta(`\n💭 ${reasoningBuffer.trim()}\n`));
+      reasoningBuffer = '';
+    }
   });
 
   // 子agent事件
@@ -226,8 +255,14 @@ Skills (use /skill_name args):
           if (skill) {
             const prompt = buildSkillPrompt(skill, skillInput.args);
             console.log(chalk.gray(`\n[${skill.name}] ${skill.description}`));
+            reasoningBuffer = '';
             try {
               await agent.runLoop(prompt);
+              // 结束时若有剩余reasoning则打印
+              if (reasoningBuffer.trim()) {
+                console.log(chalk.magenta(`\n💭 ${reasoningBuffer.trim()}\n`));
+                reasoningBuffer = '';
+              }
               console.log(chalk.green('\n✓ Done\n'));
             } catch (error: any) {
               console.log(chalk.red(`\n✗ Error: ${error.message}\n`));
@@ -239,8 +274,14 @@ Skills (use /skill_name args):
 
         // 执行请求
         console.log('');
+        reasoningBuffer = '';
         try {
           await agent.runLoop(trimmed);
+          // 结束时若有剩余reasoning则打印
+          if (reasoningBuffer.trim()) {
+            console.log(chalk.magenta(`\n💭 ${reasoningBuffer.trim()}\n`));
+            reasoningBuffer = '';
+          }
           console.log(chalk.green('\n✓ Done\n'));
         } catch (error: any) {
           console.log(chalk.red(`\n✗ Error: ${error.message}\n`));

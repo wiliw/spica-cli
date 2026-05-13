@@ -5,6 +5,7 @@ import { resolve, isAbsolute, dirname, join } from 'path';
 import fastGlob from 'fast-glob';
 import { SpicaAgent } from '../agent';
 import { SubAgentTask, getSubAgentConfig, isToolAllowed, summarizeResult } from './subAgent';
+import { computeDiff, formatDiff, generateEditDiff } from '../utils/diffDisplay';
 
 let WORKSPACE = process.cwd();
 
@@ -456,16 +457,16 @@ export async function executeTool(
         const writePath = resolvePath(args.path);
         await fs.ensureDir(dirname(writePath));
 
-        // 读取旧内容（如果存在）生成diff摘要
+        // 读取旧内容（如果存在）生成实际diff
         let diff = '';
         try {
           const oldContent = await fs.readFile(writePath, 'utf-8');
-          const oldLines = oldContent.split('\n').length;
-          const newLines = args.content.split('\n').length;
-          const change = newLines - oldLines;
-          diff = `Updated: ${oldLines}→${newLines} lines (${change > 0 ? '+' : ''}${change})`;
+          if (oldContent !== args.content) {
+            const diffLines = computeDiff(oldContent, args.content);
+            diff = formatDiff(diffLines, 3);
+          }
         } catch {
-          diff = `Created: ${args.content.split('\n').length} lines`;
+          diff = `Created new file: ${args.content.split('\n').length} lines`;
         }
 
         await fs.writeFile(writePath, args.content, 'utf-8');
@@ -481,11 +482,8 @@ export async function executeTool(
         }
 
         const newContent = fileContent.replace(args.oldString, args.newString);
-        // diff摘要
-        const oldLen = args.oldString.length;
-        const newLen = args.newString.length;
-        const change = newLen - oldLen;
-        const diff = `Edit: ${oldLen}→${newLen} chars (${change > 0 ? '+' : ''}${change})`;
+        // 使用generateEditDiff生成实际diff
+        const diff = generateEditDiff(args.oldString, args.newString);
 
         await fs.writeFile(editPath, newContent, 'utf-8');
         return { success: true, output: `Edited ${editPath}`, diff };
