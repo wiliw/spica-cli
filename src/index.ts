@@ -3,9 +3,11 @@ import { Command } from 'commander';
 import { SpicaAgent } from './agent';
 import {
   loadConfig,
+  saveConfig,
   setProviderConfig,
   getProviderConfig,
   listProviders,
+  setDefaultProvider,
   BUILTIN_PROVIDERS,
 } from './utils/config';
 import { loadSession, saveSession } from './utils/session';
@@ -308,49 +310,124 @@ program
 program
   .command('providers')
   .description('Manage LLM providers')
-  .argument('[action]', 'list|set|show')
+  .argument('[action]', 'list|set|add|show|default|remove')
   .argument('[name]', 'Provider name')
-  .argument('[value]', 'API key')
-  .action(async (action?: string, name?: string, value?: string) => {
+  .argument('[value]', 'API key or URL')
+  .option('-u, --url <url>', 'Base URL for custom provider')
+  .option('-m, --model <model>', 'Model name')
+  .action(async (action?: string, name?: string, value?: string, options?: { url?: string; model?: string }) => {
     if (!action) {
       const configured = await listProviders();
       const defaultProvider = (await loadConfig()).defaultProvider;
 
-      console.log(chalk.bold('Configured:'));
-      configured.forEach(p => console.log(`  ${p}${p === defaultProvider ? ' (default)' : ''}`));
+      console.log(chalk.bold('Configured providers:'));
+      if (configured.length === 0) {
+        console.log(chalk.gray('  (none)'));
+      } else {
+        configured.forEach(p => {
+          const isDefault = p === defaultProvider;
+          console.log(`  ${isDefault ? chalk.green('●') : '○'} ${p}${isDefault ? chalk.green(' (default)') : ''}`);
+        });
+      }
 
-      console.log(chalk.bold('\nAvailable:'));
+      console.log(chalk.bold('\nBuilt-in providers:'));
       Object.entries(BUILTIN_PROVIDERS).forEach(([key, config]) => {
-        console.log(`  ${key} - ${config.name}`);
+        const isConfigured = configured.includes(key);
+        console.log(`  ${isConfigured ? '✓' : ' '} ${key} - ${config.name}`);
+        if (config.description) {
+          console.log(chalk.gray(`      ${config.description}`));
+        }
       });
+
+      console.log(chalk.gray('\nUsage:'));
+      console.log(chalk.gray('  spica providers set <name> <api-key>   # 配置已有provider'));
+      console.log(chalk.gray('  spica providers add <name> <api-key> --url <url>  # 添加自定义provider'));
+      console.log(chalk.gray('  spica providers default <name>        # 设置默认provider'));
       return;
     }
 
     switch (action) {
       case 'set':
         if (!name || !value) {
-          console.log('Usage: spica providers set <name> <api-key>');
+          console.log(chalk.yellow('Usage: spica providers set <name> <api-key> [--url <url>] [--model <model>]'));
           return;
         }
-        await setProviderConfig(name, value);
-        console.log(chalk.green(`✓ ${name} configured`));
+        await setProviderConfig(name, value, options?.url, options?.model);
+        console.log(chalk.green(`✓ Provider '${name}' configured`));
+        if (options?.url) console.log(chalk.gray(`  URL: ${options.url}`));
+        if (options?.model) console.log(chalk.gray(`  Model: ${options.model}`));
+        break;
+
+      case 'add':
+        if (!name || !value) {
+          console.log(chalk.yellow('Usage: spica providers add <name> <api-key> --url <url> [--model <model>]'));
+          console.log(chalk.gray('Example: spica providers add myapi sk-xxx --url https://api.example.com/v1 --model gpt-4'));
+          return;
+        }
+        if (!options?.url) {
+          console.log(chalk.red('Error: --url is required for custom provider'));
+          console.log(chalk.yellow('Usage: spica providers add <name> <api-key> --url <url> [--model <model>]'));
+          return;
+        }
+        await setProviderConfig(name, value, options.url, options.model);
+        console.log(chalk.green(`✓ Custom provider '${name}' added`));
+        console.log(chalk.gray(`  URL: ${options.url}`));
+        console.log(chalk.gray(`  Model: ${options.model || 'gpt-4'}`));
         break;
 
       case 'show':
         if (!name) name = (await loadConfig()).defaultProvider || 'openai';
         try {
           const config = await getProviderConfig(name);
-          console.log(chalk.bold(config.name));
-          console.log(`  Key: ${config.apiKey.substring(0, 10)}...`);
-          console.log(`  URL: ${config.baseUrl}`);
+          console.log(chalk.bold(`\nProvider: ${config.name}`));
+          console.log(chalk.gray('─'.repeat(40)));
+          console.log(`  API Key: ${config.apiKey.substring(0, 10)}...${config.apiKey.length > 20 ? config.apiKey.slice(-4) : ''}`);
+          console.log(`  Base URL: ${config.baseUrl}`);
           console.log(`  Model: ${config.model}`);
+          if (config.description) {
+            console.log(chalk.gray(`  Description: ${config.description}`));
+          }
         } catch (error: any) {
           console.log(chalk.red(error.message));
+          console.log(chalk.yellow(`Configure it first: spica providers set ${name} YOUR_API_KEY`));
+        }
+        break;
+
+      case 'default':
+        if (!name) {
+          const config = await loadConfig();
+          console.log(`Current default: ${config.defaultProvider || 'openai'}`);
+          return;
+        }
+        try {
+          await setDefaultProvider(name);
+          console.log(chalk.green(`✓ Default provider set to '${name}'`));
+        } catch (error: any) {
+          console.log(chalk.red(error.message));
+          console.log(chalk.yellow(`Configure it first: spica providers set ${name} YOUR_API_KEY`));
+        }
+        break;
+
+      case 'remove':
+        if (!name) {
+          console.log(chalk.yellow('Usage: spica providers remove <name>'));
+          return;
+        }
+        const config = await loadConfig();
+        if (config.providers?.[name]) {
+          delete config.providers[name];
+          if (config.defaultProvider === name) {
+            config.defaultProvider = Object.keys(config.providers || {})[0] || 'openai';
+          }
+          await saveConfig(config);
+          console.log(chalk.green(`✓ Provider '${name}' removed`));
+        } else {
+          console.log(chalk.red(`Provider '${name}' not found in configured providers`));
         }
         break;
 
       default:
-        console.log('Actions: list, set, show');
+        console.log(chalk.yellow('Available actions: list, set, add, show, default, remove'));
     }
   });
 

@@ -39,8 +39,8 @@ export class SpicaAgent extends EventEmitter {
   private _providerName?: string;
 
   // 权限确认状态
+  private permissionQueue: Array<{ reason: string; resolve: (approved: boolean) => void }> = [];
   private permissionPending = false;
-  private permissionApproved = false;
   private permissionResolve: ((approved: boolean) => void) | null = null;
 
   constructor(providerName?: string, workspacePath?: string) {
@@ -59,11 +59,9 @@ export class SpicaAgent extends EventEmitter {
       this.llm.interrupt();
     }
     // 拒绝所有待处理的权限请求
-    if (this.permissionPending && this.permissionResolve) {
-      this.permissionResolve(false);
-      this.permissionPending = false;
-      this.permissionResolve = null;
-    }
+    this.permissionQueue.forEach(p => p.resolve(false));
+    this.permissionQueue = [];
+    this.permissionPending = false;
   }
 
   // 权限检查
@@ -99,37 +97,61 @@ export class SpicaAgent extends EventEmitter {
     return null;
   }
 
-  // 等待权限确认
+  // 等待权限确认（串行处理）
   async waitForPermission(reason: string): Promise<boolean> {
-    this.emit('permission_request', { reason });
-    this.permissionPending = true;
-    this.permissionApproved = false;
-
-    return new Promise((resolve) => {
-      this.permissionResolve = resolve;
+    // 将请求加入队列
+    const request = { reason, resolve: null as ((approved: boolean) => void) | null };
+    const promise = new Promise<boolean>((resolve) => {
+      request.resolve = resolve;
     });
+    this.permissionQueue.push(request as any);
+
+    // 如果当前没有正在处理的请求，开始处理队列
+    if (!this.permissionPending) {
+      this.processPermissionQueue();
+    }
+
+    return promise;
   }
 
-  // 用户批准
-  approvePermission() {
-    this.permissionApproved = true;
+  // 处理权限队列
+  private async processPermissionQueue(): Promise<void> {
+    while (this.permissionQueue.length > 0 && !this.interruptFlag) {
+      this.permissionPending = true;
+      const request = this.permissionQueue.shift()!;
+
+      // 发送事件给CLI
+      this.emit('permission_request', { reason: request.reason });
+
+      // 等待用户响应（通过 approvePermission/denyPermission）
+      const approved = await new Promise<boolean>((resolve) => {
+        this.permissionResolve = resolve;
+      });
+
+      // 处理结果
+      if (request.resolve) {
+        request.resolve(approved);
+      }
+      this.emit('permission_result', { approved });
+    }
     this.permissionPending = false;
+    this.permissionResolve = null;
+  }
+
+  // 用户批准（处理当前请求）
+  approvePermission() {
     if (this.permissionResolve) {
       this.permissionResolve(true);
       this.permissionResolve = null;
     }
-    this.emit('permission_result', { approved: true });
   }
 
-  // 用户拒绝
+  // 用户拒绝（处理当前请求）
   denyPermission() {
-    this.permissionApproved = false;
-    this.permissionPending = false;
     if (this.permissionResolve) {
       this.permissionResolve(false);
       this.permissionResolve = null;
     }
-    this.emit('permission_result', { approved: false });
   }
 
   get isPermissionPending(): boolean {
