@@ -53,18 +53,38 @@ process.on('exit', () => {
 
 // 设置agent事件监听
 function setupAgentEvents(agent: SpicaAgent, interactive: boolean = false) {
+  let lastWasReasoning = false;
+
+  // 连接错误事件
+  agent.on('connection_error', (data: any) => {
+    console.log(LAIN_COLORS.error('\n✗ API连接失败'));
+    console.log(LAIN_COLORS.error(`  类型: ${data.type}`));
+    console.log(LAIN_COLORS.warning(`  提示: ${data.hint}`));
+    console.log(LAIN_COLORS.muted(`  详情: ${data.error}`));
+    console.log(LAIN_COLORS.muted(`  Provider: ${data.provider}, Model: ${data.model}`));
+    console.log('');
+  });
+
   agent.on('stream', (data: any) => {
-    // assistant回复，实时显示（青色）
+    if (lastWasReasoning) {
+      process.stdout.write('\n');
+      lastWasReasoning = false;
+    }
     process.stdout.write(LAIN_COLORS.primary(data.chunk));
   });
 
   agent.on('reasoning', (data: any) => {
-    // 思考内容实时显示（紫色）
     process.stderr.write(LAIN_COLORS.reasoning(data.content));
+    lastWasReasoning = true;
   });
 
   agent.on('tool_call', (data: any) => {
-    console.log(LAIN_COLORS.tool(`\n→ ${data.name}`));
+    // 工具调用前换行（如果之前是reasoning也要换行）
+    if (lastWasReasoning) {
+      process.stdout.write('\n');
+      lastWasReasoning = false;
+    }
+    console.log(LAIN_COLORS.tool(`→ ${data.name}`));
   });
 
   agent.on('tool_result', (data: any) => {
@@ -184,10 +204,8 @@ program
     // 设置Lain背景色
     enableBackground();
 
-    // 显示启动banner（仅在交互模式）
-    if (process.stdout.isTTY) {
-      BG.banner();
-    }
+    // 极简banner
+    BG.banner();
 
     try {
       await agent.init();
@@ -197,15 +215,11 @@ program
         const session = loadSession(process.cwd());
         if (session) {
           agent.setMessages(session.messages);
-          console.log(LAIN_COLORS.success('✓ Restored previous session'));
-        } else {
-          console.log(LAIN_COLORS.warning('No previous session found'));
+          console.log(LAIN_COLORS.success('restored'));
         }
       }
 
-      console.log(LAIN_COLORS.muted(`\nModel: ${providerConfig.model}`));
-      console.log(LAIN_COLORS.muted('Type your request, Ctrl+C to interrupt, "quit" to exit'));
-      console.log(LAIN_COLORS.muted('Commands: /bypass, /strict, /status, /h (help)\n'));
+      console.log(LAIN_COLORS.muted(`${providerConfig.model} | /h for help`));
 
       // REPL循环
       while (true) {

@@ -1,5 +1,5 @@
 import { LLMClient } from './llm/LLMClient';
-import { executeTool, TOOLS_DEFINITIONS } from './tools/index';
+import { executeTool, TOOLS_DEFINITIONS, setWorkspace, getWorkspace } from './tools/index';
 import { getProviderConfig } from './utils/config';
 import { getSystemPrompt } from './prompts/system';
 import { loadHistory, saveHistory } from './utils/history';
@@ -194,7 +194,20 @@ async init() {
       model: config.model,
       name: config.name,
     });
-    
+
+    // 检查API连接
+    const connectionResult = await this.llm.checkConnection();
+    if (!connectionResult.success) {
+      this.emit('connection_error', {
+        type: connectionResult.type,
+        error: connectionResult.error,
+        hint: connectionResult.hint,
+        provider: this._providerName,
+        model: config.model,
+      });
+      throw new Error(`API连接失败: ${connectionResult.type}\n${connectionResult.hint}\n详情: ${connectionResult.error}`);
+    }
+
     ensureProjectDir(this.workspacePath);
     const projectContext = loadProjectContext(this.workspacePath);
     if (projectContext.length > 0) {
@@ -458,6 +471,9 @@ Project Context (from .spica.md):
           }
 
           this.emit('tool_call', { name: tc.name, arguments: tc.arguments });
+
+          // 同步 workspace 到 tools 模块
+          setWorkspace(this.workspacePath);
 
           // 事件回调 - 用于转发子agent事件
           const eventCallback = (event: string, data: any) => {

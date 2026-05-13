@@ -7,7 +7,18 @@ import { SpicaAgent } from '../agent';
 import { SubAgentTask, getSubAgentConfig, isToolAllowed, summarizeResult } from './subAgent';
 import { computeDiff, formatDiff, generateEditDiff } from '../utils/diffDisplay';
 
+// WORKSPACE 可以通过 setWorkspace 函数更新
 let WORKSPACE = process.cwd();
+
+// 设置工作目录
+export function setWorkspace(path: string): void {
+  WORKSPACE = path;
+}
+
+// 获取当前工作目录
+export function getWorkspace(): string {
+  return WORKSPACE;
+}
 
 export interface ToolDefinition {
   name: string;
@@ -412,10 +423,6 @@ name: 'task',
   },
 ];
 
-export function getWorkspace(): string {
-  return WORKSPACE;
-}
-
 export interface ToolEventCallback {
   (event: string, data: any): void;
 }
@@ -617,8 +624,16 @@ export async function executeTool(
 
       case 'git_checkout': {
         const git = simpleGit(WORKSPACE);
-        await git.checkout(args.branch);
-        return { success: true, output: `Switched to ${args.branch}` };
+        // 检查分支是否存在
+        const branches = await git.branchLocal();
+        if (branches.all.includes(args.branch)) {
+          await git.checkout(args.branch);
+          return { success: true, output: `Switched to ${args.branch}` };
+        } else {
+          // 分支不存在，创建并切换
+          await git.checkoutLocalBranch(args.branch);
+          return { success: true, output: `Created and switched to ${args.branch}` };
+        }
       }
 
       case 'web_search': {

@@ -2,6 +2,76 @@ import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { BaseProvider, ToolDefinition, LLMResponse, LLMProviderConfig, ChatMessage, ToolCall } from './BaseProvider';
 
+// 错误类型和提示
+const ERROR_MESSAGES: Record<string, { type: string; hint: string }> = {
+  // 网络错误
+  ECONNREFUSED: { type: '连接被拒绝', hint: '请检查API地址是否正确，或服务器是否在线' },
+  ENOTFOUND: { type: '域名无法解析', hint: '请检查API地址是否正确' },
+  ETIMEDOUT: { type: '连接超时', hint: '网络不稳定或服务器响应慢，请稍后重试' },
+  ECONNRESET: { type: '连接被重置', hint: '网络不稳定，请稍后重试' },
+  ENETUNREACH: { type: '网络不可达', hint: '请检查网络连接' },
+  EHOSTUNREACH: { type: '主机不可达', hint: '请检查网络连接或防火墙设置' },
+
+  // HTTP状态码
+  '401': { type: '认证失败', hint: 'API Key 无效或已过期，请检查配置' },
+  '402': { type: '余额不足', hint: 'API额度已用尽，请充值或更换账户' },
+  '403': { type: '权限不足', hint: '没有访问此模型的权限' },
+  '404': { type: '资源不存在', hint: '模型名称错误或API地址不正确' },
+  '429': { type: '请求过于频繁', hint: '请等待一段时间后重试' },
+  '500': { type: '服务器内部错误', hint: 'API服务暂时不可用，请稍后重试' },
+  '502': { type: '服务器网关错误', hint: 'API服务暂时不可用，请稍后重试' },
+  '503': { type: '服务暂时不可用', hint: 'API服务维护或过载，请稍后重试' },
+};
+
+// 解析错误并返回友好提示
+function parseError(error: any): { type: string; message: string; hint: string } {
+  const code = String(error.code || error.status || '');
+  const message = error.message || '';
+
+  // 查找预定义的错误
+  if (ERROR_MESSAGES[code]) {
+    return {
+      type: ERROR_MESSAGES[code].type,
+      message: message,
+      hint: ERROR_MESSAGES[code].hint,
+    };
+  }
+
+  // 网络相关错误
+  if (message.includes('network') || message.includes('connection') || message.includes('socket')) {
+    return {
+      type: '网络错误',
+      message: message,
+      hint: '请检查网络连接和API地址',
+    };
+  }
+
+  // 超时
+  if (message.includes('timeout') || message.includes('timed out')) {
+    return {
+      type: '请求超时',
+      message: message,
+      hint: '服务器响应慢或网络不稳定',
+    };
+  }
+
+  // API相关错误
+  if (message.includes('API')) {
+    return {
+      type: 'API错误',
+      message: message,
+      hint: '请检查API配置是否正确',
+    };
+  }
+
+  // 其他错误
+  return {
+    type: '未知错误',
+    message: message,
+    hint: '请查看错误详情或联系支持',
+  };
+}
+
 export class OpenAICompatibleProvider extends BaseProvider {
   private client: OpenAI;
   private providerName: string;
@@ -10,13 +80,35 @@ export class OpenAICompatibleProvider extends BaseProvider {
   constructor(config: LLMProviderConfig) {
     super(config);
     this.providerName = config.name || 'OpenAI-compatible';
-    
+
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseUrl,
-      timeout: 60000,
-      maxRetries: 2,
+      timeout: 30000,  // 30秒超时
+      maxRetries: 1,
     });
+  }
+
+  // 快速连接检测
+  async checkConnection(): Promise<{ success: boolean; type?: string; error?: string; hint?: string }> {
+    try {
+      const response = await this.client.chat.completions.create({
+        model: this.config.model,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+      }, {
+        timeout: 5000,
+      });
+      return { success: true };
+    } catch (error: any) {
+      const parsed = parseError(error);
+      return {
+        success: false,
+        type: parsed.type,
+        error: parsed.message,
+        hint: parsed.hint,
+      };
+    }
   }
 
   setChunkHandler(handler: (chunk: string) => void): void {

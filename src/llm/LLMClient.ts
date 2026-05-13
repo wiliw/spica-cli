@@ -44,6 +44,11 @@ export class LLMClient extends EventEmitter {
     this.functionCaller = new FunctionCaller();
   }
 
+  // 检查API连接
+  async checkConnection(): Promise<{ success: boolean; type?: string; error?: string; hint?: string }> {
+    return this.provider.checkConnection();
+  }
+
   setSystemPrompt(prompt: string): void {
     this.provider.setSystemPrompt(prompt);
   }
