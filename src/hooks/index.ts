@@ -49,8 +49,14 @@ const DEFAULT_HOOKS: HooksConfig = {
         action: 'confirm',
         message: '确认修改环境配置文件？',
       },
+      // 只有修改操作才需要确认package.json，读取不需要
       {
-        matcher: { tool: 'file_*', args: { path: '*package.json' } },
+        matcher: { tool: 'file_write', args: { path: '*package.json' } },
+        action: 'confirm',
+        message: '确认修改 package.json？',
+      },
+      {
+        matcher: { tool: 'file_edit', args: { path: '*package.json' } },
         action: 'confirm',
         message: '确认修改 package.json？',
       },
