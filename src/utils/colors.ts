@@ -39,6 +39,52 @@ export const LAIN_COLORS = {
 
   // 子agent
   subAgent: chalk.hex('#708090'),     // 板岩灰 - 子agent信息
+
+  // 背景 - Lain深色风格
+  bg: chalk.bgHex('#0D1117'),         // GitHub深色背景风格
+  bgAlt: chalk.bgHex('#1A1B26'),      // 更深的背景
+  bgBorder: chalk.bgHex('#161B22'),   // 边框背景色
+};
+
+// ANSI背景色控制
+export const BG = {
+  // 设置深色背景（Lain风格）
+  set: () => {
+    // 使用ANSI escape code设置深蓝黑背景
+    process.stdout.write('\x1b[48;2;13;17;23m'); // RGB(13,17,23) = #0D1117
+  },
+
+  // 恢复默认背景
+  reset: () => {
+    process.stdout.write('\x1b[49m');
+  },
+
+  // 清屏并设置背景
+  clear: () => {
+    process.stdout.write('\x1b[2J\x1b[H\x1b[48;2;13;17;23m');
+  },
+
+  // 打印带背景的横幅
+  banner: () => {
+    const bg = '\x1b[48;2;13;17;23m';
+    const fg = '\x1b[38;2;0;206;209m';  // 青色
+    const reset = '\x1b[0m\x1b[49m';
+
+    console.log(`
+${bg}                                                        ${reset}
+${bg}  ${fg}▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓${reset}
+${bg}  ${fg}   ███████╗██╗██╗  ██╗██╗   ██╗██╗  █████╗ ${reset}
+${bg}  ${fg}   ██╔════╝██║██║ ██╗██║██║   ██║██║██╔══██╗${reset}
+${bg}  ${fg}   ███████╗██║███████║██║██║   ██║██║███████║${reset}
+${bg}  ${fg}   ██╔═══██║██║██╔══██║██║██║   ██║██║██╔══██║${reset}
+${bg}  ${fg}   ██║   ██║██║██║  ██║██║╚██████╗██║██║  ██║${reset}
+${bg}  ${fg}   ╚═╝   ╚═╝╚═╝╚═╝  ╚═╝╚═╝ ╚═════╝╚═╝╚═╝  ╚═╝${reset}
+${bg}  ${fg}▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓${reset}
+${bg}  ${fg}          spica - AI coding agent v1.0        ${reset}
+${bg}  ${fg}    Serial Experiments Lain Color Scheme     ${reset}
+${bg}                                                        ${reset}
+`);
+  },
 };
 
 // 格式化函数

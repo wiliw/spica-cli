@@ -12,13 +12,44 @@ import {
 } from './utils/config';
 import { loadSession, saveSession } from './utils/session';
 import { parseSkillInput, getSkill, buildSkillPrompt, listSkills } from './skills';
-import { LAIN_COLORS, format } from './utils/colors';
+import { LAIN_COLORS, format, BG } from './utils/colors';
 import prompts from 'prompts';
 
 const program = new Command();
 
 // 当前agent引用（用于中断）
 let currentAgent: SpicaAgent | null = null;
+
+// 设置背景色
+function enableBackground(): void {
+  // 检查是否是交互式终端
+  if (process.stdout.isTTY) {
+    BG.set();
+  }
+}
+
+// 恢复默认背景
+function disableBackground(): void {
+  if (process.stdout.isTTY) {
+    BG.reset();
+  }
+}
+
+// Ctrl+C中断处理
+process.on('SIGINT', () => {
+  if (currentAgent) {
+    currentAgent.interrupt();
+    console.log(LAIN_COLORS.warning('\n⚠ Interrupted'));
+  } else {
+    disableBackground();
+    process.exit(0);
+  }
+});
+
+// 退出时恢复背景
+process.on('exit', () => {
+  disableBackground();
+});
 
 // 设置agent事件监听
 function setupAgentEvents(agent: SpicaAgent, interactive: boolean = false) {
@@ -123,16 +154,6 @@ function setupAgentEvents(agent: SpicaAgent, interactive: boolean = false) {
   });
 }
 
-// Ctrl+C中断处理
-process.on('SIGINT', () => {
-  if (currentAgent) {
-    currentAgent.interrupt();
-    console.log(LAIN_COLORS.warning('\n⚠ Interrupted'));
-  } else {
-    process.exit(0);
-  }
-});
-
 program
   .name('spica')
   .description('AI coding agent')
@@ -160,6 +181,14 @@ program
 
     setupAgentEvents(agent, true);
 
+    // 设置Lain背景色
+    enableBackground();
+
+    // 显示启动banner（仅在交互模式）
+    if (process.stdout.isTTY) {
+      BG.banner();
+    }
+
     try {
       await agent.init();
 
@@ -175,8 +204,8 @@ program
       }
 
       console.log(LAIN_COLORS.muted(`\nModel: ${providerConfig.model}`));
-      console.log(LAIN_COLORS.muted('Type your request, Ctrl+C to interrupt, "quit" to exit\n'));
-      console.log(LAIN_COLORS.muted('Commands: /bypass (skip permissions), /strict (require permissions), /status\n'));
+      console.log(LAIN_COLORS.muted('Type your request, Ctrl+C to interrupt, "quit" to exit'));
+      console.log(LAIN_COLORS.muted('Commands: /bypass, /strict, /status, /h (help)\n'));
 
       // REPL循环
       while (true) {
@@ -331,9 +360,11 @@ Skills (use /skill_name args):
       // 退出时保存
       saveSession(process.cwd(), agent.getMessages());
       console.log(LAIN_COLORS.muted('\nGoodbye!\n'));
+      disableBackground();
 
     } catch (error: any) {
       console.log(LAIN_COLORS.error(`Error: ${error.message}`));
+      disableBackground();
     }
 
     currentAgent = null;
