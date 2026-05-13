@@ -54,12 +54,13 @@ export function getSubAgentConfig(type?: SubAgentType): SubAgentConfig {
 // 检查工具是否允许
 export function isToolAllowed(toolName: string, config: SubAgentConfig): boolean {
   if (config.allowedTools === '*') return true;
+  if (!config.allowedTools) return false;  // 保护
   return config.allowedTools.includes(toolName);
 }
 
 // 摘要结果
 export function summarizeResult(result: string, maxLength: number = 300): string {
-  if (result.length <= maxLength) return result;
+  if (!result || result.length <= maxLength) return result || '';
 
   // 提取关键信息
   const lines = result.split('\n');

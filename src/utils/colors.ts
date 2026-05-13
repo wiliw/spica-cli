@@ -2,113 +2,146 @@
 // 赛博朋克风格：冷色调、深色背景、红色警告
 
 import chalk from 'chalk';
+import readline from 'readline';
+import { padRight, getStringWidth } from './stringWidth';
 
 // Lain经典配色
 export const LAIN_COLORS = {
   // 主色调 - 冷色系
-  primary: chalk.hex('#00CED1'),      // 深青色 (Dark Turquoise) - 主文字
-  secondary: chalk.hex('#7B68EE'),    // 中紫色 - 思考/神秘感
-  accent: chalk.hex('#00BFFF'),       // 深天蓝 - 强调
+  primary: chalk.hex('#00CED1'),
+  secondary: chalk.hex('#7B68EE'),
+  accent: chalk.hex('#00BFFF'),
 
   // 状态色
-  success: chalk.hex('#00FA9A'),      // 春绿 - 成功（CRT终端风格）
-  error: chalk.hex('#FF4444'),        // 纯红 - 错误（Lain红色警告）
-  warning: chalk.hex('#FF6B6B'),      // 淡红 - 警告
+  success: chalk.hex('#00FA9A'),
+  error: chalk.hex('#FF4444'),
+  warning: chalk.hex('#FF6B6B'),
 
   // 界面色
-  border: chalk.hex('#4169E1'),       // 皇家蓝 - 边框
-  prompt: chalk.hex('#00CED1'),       // 深青色 - 输入提示
-  muted: chalk.hex('#696969'),        // 暗灰 - 次要信息
-  dim: chalk.hex('#4A4A4A'),          // 深灰 - 最次要
+  border: chalk.hex('#4169E1'),
+  prompt: chalk.hex('#00CED1'),
+  muted: chalk.hex('#696969'),
+  dim: chalk.hex('#4A4A4A'),
 
   // 特殊色
-  reasoning: chalk.hex('#9370DB'),    // 中紫色 - 思考过程
-  tool: chalk.hex('#20B2AA'),         // 浅海绿 - 工具调用
-  file: chalk.hex('#5F9EA0'),         // 军校蓝 - 文件路径
-  diffAdd: chalk.hex('#00FA9A'),      // 春绿 - 新增行
-  diffRemove: chalk.hex('#FF6B6B'),   // 淡红 - 删除行
+  reasoning: chalk.hex('#9370DB'),
+  tool: chalk.hex('#20B2AA'),
+  file: chalk.hex('#5F9EA0'),
+  diffAdd: chalk.hex('#00FA9A'),
+  diffRemove: chalk.hex('#FF6B6B'),
 
-  // 权限请求 - Lain红色警示框
-  permissionBorder: chalk.hex('#DC143C'),    // 深红 - 权限边框
-  permissionTitle: chalk.hex('#FF0000').bold, // 纯红加粗 - 权限标题
-  permissionText: chalk.hex('#F0F0F0'),      // 淡白 - 权限内容
+  // 权限请求
+  permissionBorder: chalk.hex('#DC143C'),
+  permissionTitle: chalk.hex('#FF0000').bold,
+  permissionText: chalk.hex('#F0F0F0'),
 
   // Bypass模式
-  bypass: chalk.hex('#FF8C00'),       // 深橙 - bypass警告
-  bypassAuto: chalk.hex('#FFA500'),   // 橙色 - 自动批准
+  bypass: chalk.hex('#FF8C00'),
+  bypassAuto: chalk.hex('#FFA500'),
 
   // 子agent
-  subAgent: chalk.hex('#708090'),     // 板岩灰 - 子agent信息
+  subAgent: chalk.hex('#708090'),
 
-  // 背景 - Lain深色风格
-  bg: chalk.bgHex('#0D1117'),         // GitHub深色背景风格
-  bgAlt: chalk.bgHex('#1A1B26'),      // 更深的背景
-  bgBorder: chalk.bgHex('#161B22'),   // 边框背景色
+  // 背景
+  bg: chalk.bgHex('#0D1117'),
+  bgAlt: chalk.bgHex('#1A1B26'),
+  bgBorder: chalk.bgHex('#161B22'),
 };
 
 // ANSI背景色控制
 export const BG = {
-  // 设置深色背景（Lain风格）
-  set: () => {
-    if (process.stdout.isTTY) {
-      process.stdout.write('\x1b[48;2;13;17;23m');
-    }
-  },
+  _bannerStopSignal: false,
 
-  // 恢复默认背景
-  reset: () => {
-    if (process.stdout.isTTY) {
-      process.stdout.write('\x1b[49m');
-    }
-  },
-
-  // 清屏
-  clear: () => {
-    if (process.stdout.isTTY) {
-      process.stdout.write('\x1b[2J\x1b[H');
-    }
-  },
-
-  // 极简横幅
-  banner: () => {
-    const cyan = '\x1b[38;2;0;206;209m';
+  banner: (): Promise<void> => {
     const reset = '\x1b[0m';
-    console.log(`${cyan}spica${reset}`);
+    const esc = '\x1b';
+    const lines = [
+      '              _)              ',
+      '   __|  __ \\   |   __|   _` | ',
+      ' \\__ \\  |   |  |  (     (   | ',
+      ' ____/  .__/  _| \\___| \\__,_| ',
+      '       _|                     ',
+    ];
+
+    BG._bannerStopSignal = false;
+
+    return new Promise<void>((resolve) => {
+      // 先打印初始空行（一行）和banner（5行）
+      process.stdout.write('\n');
+      const dimColor = esc + '[38;2;0;60;63m';
+      lines.forEach(line => process.stdout.write(dimColor + line + reset + '\n'));
+
+      // 入场渐变
+      const fadeIn = async () => {
+        for (let t = 1; t <= 5; t++) {
+          const g = 60 + t * 35;
+          const color = esc + `[38;2;0;${g};${g+3}m`;
+          // 上移5行重写
+          process.stdout.write(esc + '[5A');
+          lines.forEach(line => process.stdout.write(color + line + reset + '\n'));
+          await new Promise(r => setTimeout(r, 80));
+        }
+      };
+
+      // 呼吸渐变（持续直到收到停止信号）
+      const breathe = async () => {
+        while (!BG._bannerStopSignal) {
+          // 渐暗
+          for (let dim = 0; dim < 6 && !BG._bannerStopSignal; dim++) {
+            const g = 206 - dim * 15;
+            const color = esc + `[38;2;0;${g};${g+3}m`;
+            process.stdout.write(esc + '[5A');
+            lines.forEach(line => process.stdout.write(color + line + reset + '\n'));
+            await new Promise(r => setTimeout(r, 100));
+          }
+          // 渐亮
+          for (let dim = 5; dim >= 0 && !BG._bannerStopSignal; dim--) {
+            const g = 206 - dim * 15;
+            const color = esc + `[38;2;0;${g};${g+3}m`;
+            process.stdout.write(esc + '[5A');
+            lines.forEach(line => process.stdout.write(color + line + reset + '\n'));
+            await new Promise(r => setTimeout(r, 100));
+          }
+        }
+
+        // 停止后恢复最亮状态并空一行
+        const cyan = esc + '[38;2;0;206;209m';
+        process.stdout.write(esc + '[5A');
+        lines.forEach(line => process.stdout.write(cyan + line + reset + '\n'));
+        process.stdout.write('\n');
+
+        resolve();
+      };
+
+      fadeIn().then(breathe);
+    });
+  },
+
+  stopBanner: () => {
+    BG._bannerStopSignal = true;
   },
 };
 
 // 格式化函数
 export const format = {
-  // 主提示符
   prompt: () => LAIN_COLORS.prompt('>'),
-
-  // 成功/错误
   success: (text: string) => LAIN_COLORS.success(text),
   error: (text: string) => LAIN_COLORS.error(text),
   warning: (text: string) => LAIN_COLORS.warning(text),
-
-  // 工具调用
   toolCall: (name: string) => LAIN_COLORS.tool(`→ ${name}`),
   toolResult: (name: string, success: boolean, output: string) => {
     const icon = success ? LAIN_COLORS.success('✓') : LAIN_COLORS.error('✗');
     return `${icon} ${name}: ${output}`;
   },
-
-  // Reasoning
   reasoning: (content: string) => LAIN_COLORS.reasoning(content),
-
-  // Diff
   diffFile: (path: string) => LAIN_COLORS.file(`📄 ${path}`),
   diffAdd: (line: string) => LAIN_COLORS.diffAdd(`+ ${line}`),
   diffRemove: (line: string) => LAIN_COLORS.diffRemove(`- ${line}`),
-
-  // 权限框
   permissionBox: (reason: string) => {
     const border = LAIN_COLORS.permissionBorder;
     const title = LAIN_COLORS.permissionTitle;
     const text = LAIN_COLORS.permissionText;
     const dimBorder = LAIN_COLORS.muted('─'.repeat(50));
-
     return `
 ${border('═'.repeat(50))}
 ${title('  ⚠  PERMISSION REQUIRED')}
@@ -117,12 +150,8 @@ ${text(`  Action: ${reason}`)}
 ${dimBorder}
 `;
   },
-
-  // 状态
   status: (bypass: boolean, msgs: number, workspace: string) => {
-    const mode = bypass
-      ? LAIN_COLORS.warning('BYPASS')
-      : LAIN_COLORS.success('STRICT');
+    const mode = bypass ? LAIN_COLORS.warning('BYPASS') : LAIN_COLORS.success('STRICT');
     return `
 ${LAIN_COLORS.primary.bold('Current Status:')}
   Permission mode: ${mode}
@@ -130,8 +159,21 @@ ${LAIN_COLORS.primary.bold('Current Status:')}
   Workspace: ${workspace}
 `;
   },
-
-  // 次要信息
   muted: (text: string) => LAIN_COLORS.muted(text),
   dim: (text: string) => LAIN_COLORS.dim(text),
+  // 表格格式化（支持中英文对齐）
+  tableRow: (columns: string[], widths: number[]) => {
+    return columns.map((col, i) => {
+      const padded = padRight(col, widths[i] || 10);
+      return LAIN_COLORS.muted(padded);
+    }).join(' | ');
+  },
+  // 状态表格
+  statusTable: (items: Array<{ label: string; value: string }>) => {
+    const maxLabelWidth = Math.max(...items.map(i => getStringWidth(i.label))) + 2;
+    return items.map(i => {
+      const label = padRight(i.label + ':', maxLabelWidth);
+      return `  ${LAIN_COLORS.muted(label)} ${LAIN_COLORS.primary(i.value)}`;
+    }).join('\n');
+  },
 };

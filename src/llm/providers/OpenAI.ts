@@ -13,6 +13,25 @@ export class OpenAIProvider extends BaseProvider {
     });
   }
 
+  async checkConnection(signal?: AbortSignal): Promise<{ success: boolean; type?: string; error?: string; hint?: string }> {
+    try {
+      await this.client.chat.completions.create({
+        model: this.config.model,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+      }, {
+        timeout: 15000,
+        signal: signal,
+      });
+      return { success: true };
+    } catch (error: any) {
+      if (signal?.aborted) {
+        return { success: false, type: '中断', error: 'User interrupted', hint: '用户取消' };
+      }
+      return { success: false, type: '连接错误', error: error.message, hint: '检查API配置' };
+    }
+  }
+
   async generate(prompt: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
     this.messages.push({ role: 'user', content: prompt });
 

@@ -8,6 +8,27 @@ export class LocalProvider extends BaseProvider {
     this.baseUrl = config.baseUrl || 'http://localhost:8080/v1';
   }
 
+  async checkConnection(signal?: AbortSignal): Promise<{ success: boolean; type?: string; error?: string; hint?: string }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: this.config.model,
+          messages: [{ role: 'user', content: 'ping' }],
+          max_tokens: 1,
+        }),
+        signal: signal,
+      });
+      return { success: response.ok };
+    } catch (error: any) {
+      if (signal?.aborted) {
+        return { success: false, type: '中断', error: 'User interrupted', hint: '用户取消' };
+      }
+      return { success: false, type: '连接错误', error: error.message, hint: '检查本地服务是否运行' };
+    }
+  }
+
   async generate(prompt: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
     if (prompt) {
       this.messages.push({ role: 'user', content: prompt });

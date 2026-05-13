@@ -89,18 +89,22 @@ export class OpenAICompatibleProvider extends BaseProvider {
     });
   }
 
-  // 快速连接检测
-  async checkConnection(): Promise<{ success: boolean; type?: string; error?: string; hint?: string }> {
+  // 快速连接检测（支持中断）
+  async checkConnection(signal?: AbortSignal): Promise<{ success: boolean; type?: string; error?: string; hint?: string }> {
     try {
       const response = await this.client.chat.completions.create({
         model: this.config.model,
         messages: [{ role: 'user', content: 'ping' }],
         max_tokens: 1,
       }, {
-        timeout: 5000,
+        timeout: 15000,
+        signal: signal,
       });
       return { success: true };
     } catch (error: any) {
+      if (signal?.aborted) {
+        return { success: false, type: '中断', error: 'User interrupted', hint: '用户取消' };
+      }
       const parsed = parseError(error);
       return {
         success: false,
@@ -173,8 +177,8 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
       if (hasToolCalls && toolCalls.length > 0) {
         const parsedToolCalls: ToolCall[] = toolCalls.map(tc => ({
           id: tc.id,
-          name: tc.name,
-          arguments: JSON.parse(tc.arguments),
+          name: tc.name || '',
+          arguments: tc.arguments ? JSON.parse(tc.arguments) : {},
         }));
 
         this.messages.push({
@@ -308,8 +312,8 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
       if (hasToolCalls && toolCalls.length > 0) {
         const parsedToolCalls: ToolCall[] = toolCalls.map(tc => ({
           id: tc.id,
-          name: tc.name,
-          arguments: JSON.parse(tc.arguments),
+          name: tc.name || '',
+          arguments: tc.arguments ? JSON.parse(tc.arguments) : {},
         }));
 
         this.messages.push({
@@ -427,8 +431,8 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
       if (hasToolCalls && toolCalls.length > 0) {
         const parsedToolCalls: ToolCall[] = toolCalls.map(tc => ({
           id: tc.id,
-          name: tc.name,
-          arguments: JSON.parse(tc.arguments),
+          name: tc.name || '',
+          arguments: tc.arguments ? JSON.parse(tc.arguments) : {},
         }));
 
         this.messages.push({

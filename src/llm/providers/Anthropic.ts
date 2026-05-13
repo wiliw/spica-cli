@@ -10,6 +10,31 @@ export class AnthropicProvider extends BaseProvider {
     this.baseUrl = config.baseUrl || 'https://api.anthropic.com/v1';
   }
 
+  async checkConnection(signal?: AbortSignal): Promise<{ success: boolean; type?: string; error?: string; hint?: string }> {
+    try {
+      const response = await fetch(`${this.baseUrl}/messages`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': this.apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: this.config.model,
+          max_tokens: 1,
+          messages: [{ role: 'user', content: 'ping' }],
+        }),
+        signal: signal,
+      });
+      return { success: response.ok };
+    } catch (error: any) {
+      if (signal?.aborted) {
+        return { success: false, type: '中断', error: 'User interrupted', hint: '用户取消' };
+      }
+      return { success: false, type: '连接错误', error: error.message, hint: '检查API配置' };
+    }
+  }
+
   async generate(prompt: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
     this.messages.push({ role: 'user', content: prompt });
 

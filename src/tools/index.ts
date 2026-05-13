@@ -6,6 +6,8 @@ import fastGlob from 'fast-glob';
 import { SpicaAgent } from '../agent';
 import { SubAgentTask, getSubAgentConfig, isToolAllowed, summarizeResult } from './subAgent';
 import { computeDiff, formatDiff, generateEditDiff } from '../utils/diffDisplay';
+import { restoreCheckpoint, getLastCheckpoint, setWorkspace as setCheckpointWorkspace } from '../utils/errorRecovery';
+import { getMCPManager } from '../mcp/client';
 
 // WORKSPACE 可以通过 setWorkspace 函数更新
 let WORKSPACE = process.cwd();
@@ -13,6 +15,7 @@ let WORKSPACE = process.cwd();
 // 设置工作目录
 export function setWorkspace(path: string): void {
   WORKSPACE = path;
+  setCheckpointWorkspace(path);  // 同步到errorRecovery
 }
 
 // 获取当前工作目录
@@ -265,6 +268,15 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: 'checkpoint_restore',
+    description: 'Restore to last git checkpoint created by spica. Use when errors are unrecoverable.',
+    parameters: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
     name: 'web_search',
     description: 'Search the web for information. Use for: documentation, tutorials, error solutions.',
     parameters: {
@@ -423,6 +435,18 @@ name: 'task',
   },
 ];
 
+// 获取所有工具定义（内置 + MCP动态工具）
+export function getAllToolDefinitions(): ToolDefinition[] {
+  const mcpTools = getMCPManager().getToolDefinitions();
+  // MCP工具转换为ToolDefinition格式
+  const mcpConverted: ToolDefinition[] = mcpTools.map(t => ({
+    name: t.name,
+    description: `[MCP] ${t.description}`,
+    parameters: t.inputSchema,
+  }));
+  return [...TOOLS_DEFINITIONS, ...mcpConverted];
+}
+
 export interface ToolEventCallback {
   (event: string, data: any): void;
 }
@@ -432,27 +456,43 @@ export async function executeTool(
   args: Record<string, any>,
   eventCallback?: ToolEventCallback
 ): Promise<ToolResult> {
+  // 保护 args 参数，确保不为 undefined
+  const safeArgs = args || {};
+
   try {
     switch (name) {
       case 'workspace':
-        if (args.path) {
-          const newPath = resolve(args.path);
+        if (safeArgs.path) {
+          const newPath = resolve(safeArgs.path);
           if (!await fs.pathExists(newPath)) {
             return { success: false, error: `Path does not exist: ${newPath}` };
           }
           WORKSPACE = newPath;
+          setCheckpointWorkspace(newPath);  // 同步到errorRecovery
           return { success: true, output: `Workspace: ${WORKSPACE}` };
         }
         return { success: true, output: `Workspace: ${WORKSPACE}` };
 
+      case 'checkpoint_restore': {
+        const lastCp = getLastCheckpoint();
+        if (!lastCp) {
+          return { success: false, error: 'No checkpoint available to restore' };
+        }
+        const success = await restoreCheckpoint();
+        return {
+          success,
+          output: success ? `Restored to checkpoint: ${lastCp}` : 'Failed to restore checkpoint',
+        };
+      }
+
       case 'file_read': {
-        const readPath = resolvePath(args.path);
+        const readPath = resolvePath(safeArgs.path);
         const content = await fs.readFile(readPath, 'utf-8');
         const lines = content.split('\n');
         
-        if (args.offset || args.limit) {
-          const start = args.offset ? args.offset - 1 : 0;
-          const end = args.limit ? start + args.limit : lines.length;
+        if (safeArgs.offset || safeArgs.limit) {
+          const start = safeArgs.offset ? safeArgs.offset - 1 : 0;
+          const end = safeArgs.limit ? start + safeArgs.limit : lines.length;
           const selectedLines = lines.slice(start, end);
           return { success: true, output: selectedLines.join('\n') };
         }
@@ -461,81 +501,83 @@ export async function executeTool(
       }
 
       case 'file_write': {
-        const writePath = resolvePath(args.path);
+        const writePath = resolvePath(safeArgs.path);
         await fs.ensureDir(dirname(writePath));
 
         // 读取旧内容（如果存在）生成实际diff
         let diff = '';
         try {
           const oldContent = await fs.readFile(writePath, 'utf-8');
-          if (oldContent !== args.content) {
-            const diffLines = computeDiff(oldContent, args.content);
+          if (oldContent !== safeArgs.content) {
+            const diffLines = computeDiff(oldContent, safeArgs.content);
             diff = formatDiff(diffLines, 3);
           }
         } catch {
-          diff = `Created new file: ${args.content.split('\n').length} lines`;
+          diff = `Created new file: ${safeArgs.content.split('\n').length} lines`;
         }
 
-        await fs.writeFile(writePath, args.content, 'utf-8');
+        await fs.writeFile(writePath, safeArgs.content, 'utf-8');
         return { success: true, output: `Wrote ${writePath}`, diff };
       }
 
       case 'file_edit': {
-        const editPath = resolvePath(args.path);
+        const editPath = resolvePath(safeArgs.path);
         const fileContent = await fs.readFile(editPath, 'utf-8');
 
-        if (!fileContent.includes(args.oldString)) {
+        const oldStr = String(safeArgs.oldString || '');
+        const newStr = String(safeArgs.newString || '');
+
+        if (!fileContent.includes(oldStr)) {
           return { success: false, error: `Text not found in file. Read the file to get exact text.` };
         }
 
-        const newContent = fileContent.replace(args.oldString, args.newString);
-        // 使用generateEditDiff生成实际diff
-        const diff = generateEditDiff(args.oldString, args.newString);
+        const newContent = fileContent.replace(oldStr, newStr);
+        const diff = generateEditDiff(oldStr, newStr);
 
         await fs.writeFile(editPath, newContent, 'utf-8');
         return { success: true, output: `Edited ${editPath}`, diff };
       }
 
       case 'file_exists': {
-        const existsPath = resolvePath(args.path);
+        const existsPath = resolvePath(safeArgs.path);
         const exists = await fs.pathExists(existsPath);
         return { success: true, output: exists ? 'exists' : 'not found' };
       }
 
       case 'file_delete': {
-        const deletePath = resolvePath(args.path);
+        const deletePath = resolvePath(safeArgs.path);
         await fs.remove(deletePath);
         return { success: true, output: `Deleted ${deletePath}` };
       }
 
       case 'file_copy': {
-        const srcPath = resolvePath(args.source);
-        const dstPath = resolvePath(args.destination);
+        const srcPath = resolvePath(safeArgs.source);
+        const dstPath = resolvePath(safeArgs.destination);
         await fs.copy(srcPath, dstPath);
         return { success: true, output: `Copied ${srcPath} → ${dstPath}` };
       }
 
       case 'file_move': {
-        const moveSrc = resolvePath(args.source);
-        const moveDst = resolvePath(args.destination);
+        const moveSrc = resolvePath(safeArgs.source);
+        const moveDst = resolvePath(safeArgs.destination);
         await fs.move(moveSrc, moveDst);
         return { success: true, output: `Moved ${moveSrc} → ${moveDst}` };
       }
 
       case 'directory_create': {
-        const dirPath = resolvePath(args.path);
+        const dirPath = resolvePath(safeArgs.path);
         await fs.ensureDir(dirPath);
         return { success: true, output: `Created directory ${dirPath}` };
       }
 
       case 'directory_list': {
-        const listPath = args.path ? resolvePath(args.path) : WORKSPACE;
+        const listPath = safeArgs.path ? resolvePath(safeArgs.path) : WORKSPACE;
         const items = await fs.readdir(listPath);
         return { success: true, output: items.join('\n') };
       }
 
       case 'glob': {
-        const files = await fastGlob(args.pattern, {
+        const files = await fastGlob(safeArgs.pattern, {
           cwd: WORKSPACE,
           absolute: true,
           ignore: ['node_modules', '.git', 'dist', 'build', '*.lock'],
@@ -549,10 +591,10 @@ export async function executeTool(
       }
 
       case 'grep': {
-        const grepPath = args.path ? resolvePath(args.path) : WORKSPACE;
-        const includePattern = args.include ? `--include="${args.include}"` : '';
+        const grepPath = safeArgs.path ? resolvePath(safeArgs.path) : WORKSPACE;
+        const includePattern = safeArgs.include ? `--include="${safeArgs.include}"` : '';
         
-        const grepResult = await execa(`grep -r ${includePattern} "${args.pattern}" ${grepPath} | head -100`, {
+        const grepResult = await execa(`grep -r ${includePattern} "${safeArgs.pattern}" ${grepPath} | head -100`, {
           shell: true,
           cwd: WORKSPACE,
           reject: false,
@@ -565,18 +607,27 @@ export async function executeTool(
       }
 
       case 'bash': {
-        const timeout = args.timeout ? args.timeout * 1000 : 120000;
-        const bashResult = await execa(args.command, {
-          shell: true,
-          cwd: WORKSPACE,
-          timeout: timeout,
-          reject: false,
-        });
-        
-        return {
-          success: bashResult.exitCode === 0,
-          output: bashResult.stdout || bashResult.stderr,
-        };
+        const command = String(safeArgs.command || '');
+        if (!command) {
+          return { success: false, error: 'Command is required' };
+        }
+        const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
+        try {
+          const bashResult = await execa(command, {
+            shell: true,
+            cwd: WORKSPACE,
+            timeout: timeout,
+            reject: false,
+          });
+          const output = bashResult.stdout || bashResult.stderr || '';
+          return {
+            success: bashResult.exitCode === 0,
+            output: output,
+            error: bashResult.exitCode !== 0 ? output : undefined,
+          };
+        } catch (bashError: any) {
+          return { success: false, error: bashError.message };
+        }
       }
 
       case 'git_status': {
@@ -593,7 +644,7 @@ export async function executeTool(
 
       case 'git_log': {
         const git = simpleGit(WORKSPACE);
-        const log = await git.log({ maxCount: args.limit || 10 });
+        const log = await git.log({ maxCount: safeArgs.limit || 10 });
         return { 
           success: true, 
           output: log.all.map(c => `${c.hash.substring(0,7)} ${c.message}`).join('\n')
@@ -602,48 +653,50 @@ export async function executeTool(
 
       case 'git_add': {
         const git = simpleGit(WORKSPACE);
-        await git.add(args.files || '.');
+        await git.add(safeArgs.files || '.');
         return { success: true, output: 'Files added' };
       }
 
       case 'git_commit': {
         const git = simpleGit(WORKSPACE);
-        await git.commit(args.message);
-        return { success: true, output: `Committed: ${args.message}` };
+        await git.commit(safeArgs.message);
+        return { success: true, output: `Committed: ${safeArgs.message}` };
       }
 
       case 'git_branch': {
         const git = simpleGit(WORKSPACE);
-        if (args.name) {
-          await git.branch(args.name);
-          return { success: true, output: `Created branch: ${args.name}` };
+        if (safeArgs.name) {
+          await git.branch(safeArgs.name);
+          return { success: true, output: `Created branch: ${safeArgs.name}` };
         }
         const branches = await git.branchLocal();
         return { success: true, output: branches.all.join('\n') };
       }
 
       case 'git_checkout': {
+        const branchName = String(safeArgs.branch || '');
+        if (!branchName) {
+          return { success: false, error: 'Branch name is required' };
+        }
         const git = simpleGit(WORKSPACE);
-        // 检查分支是否存在
         const branches = await git.branchLocal();
-        if (branches.all.includes(args.branch)) {
-          await git.checkout(args.branch);
-          return { success: true, output: `Switched to ${args.branch}` };
+        if (branches.all.includes(branchName)) {
+          await git.checkout(branchName);
+          return { success: true, output: `Switched to ${branchName}` };
         } else {
-          // 分支不存在，创建并切换
-          await git.checkoutLocalBranch(args.branch);
-          return { success: true, output: `Created and switched to ${args.branch}` };
+          await git.checkoutLocalBranch(branchName);
+          return { success: true, output: `Created and switched to ${branchName}` };
         }
       }
 
       case 'web_search': {
-        const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`;
+        const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(safeArgs.query)}`;
         const searchResult = await execa(`curl -s "${searchUrl}"`, { shell: true, timeout: 30000 });
         return { success: true, output: searchResult.stdout.substring(0, 5000) };
       }
 
       case 'web_fetch': {
-        const fetchResult = await execa(`curl -sL "${args.url}"`, { 
+        const fetchResult = await execa(`curl -sL "${safeArgs.url}"`, { 
           shell: true, 
           timeout: 30000,
         });
@@ -653,13 +706,13 @@ export async function executeTool(
       case 'question': {
         return {
           success: true,
-          output: `QUESTION: ${args.text}\nWaiting for user response...`
+          output: `QUESTION: ${safeArgs.text}\nWaiting for user response...`
         };
       }
 
       case 'gh_pr_view': {
-        const jsonFlag = args.json ? '--json title,body,state,author,additions,deletions,changed_files' : '';
-        const ghResult = await execa(`gh pr view ${args.number} ${jsonFlag}`, {
+        const jsonFlag = safeArgs.json ? '--json title,body,state,author,additions,deletions,changed_files' : '';
+        const ghResult = await execa(`gh pr view ${safeArgs.number} ${jsonFlag}`, {
           shell: true,
           cwd: WORKSPACE,
           timeout: 30000,
@@ -672,9 +725,9 @@ export async function executeTool(
       }
 
       case 'gh_issue_list': {
-        const state = args.state || 'open';
-        const limit = args.limit || 20;
-        const label = args.label ? `--label "${args.label}"` : '';
+        const state = safeArgs.state || 'open';
+        const limit = safeArgs.limit || 20;
+        const label = safeArgs.label ? `--label "${safeArgs.label}"` : '';
         const ghResult = await execa(`gh issue list --state ${state} --limit ${limit} ${label}`, {
           shell: true,
           cwd: WORKSPACE,
@@ -688,7 +741,7 @@ export async function executeTool(
       }
 
       case 'gh_issue_view': {
-        const ghResult = await execa(`gh issue view ${args.number}`, {
+        const ghResult = await execa(`gh issue view ${safeArgs.number}`, {
           shell: true,
           cwd: WORKSPACE,
           timeout: 30000,
@@ -714,7 +767,7 @@ export async function executeTool(
       }
 
       case 'gh_run_list': {
-        const limit = args.limit || 10;
+        const limit = safeArgs.limit || 10;
         const ghResult = await execa(`gh run list --limit ${limit}`, {
           shell: true,
           cwd: WORKSPACE,
@@ -728,14 +781,29 @@ export async function executeTool(
       }
 
       case 'todo_write': {
-        const todos = args.todos.map((t: any, i: number) => 
-          `${i+1}. [${t.status}] ${t.content}`
-        ).join('\n');
-        return { success: true, output: `Todos:\n${todos}` };
+        const todos = safeArgs.todos || [];
+        const total = todos.length;
+        const completed = todos.filter((t: any) => t.status === 'completed').length;
+        const inProgress = todos.filter((t: any) => t.status === 'in_progress').length;
+        const pending = todos.filter((t: any) => t.status === 'pending').length;
+
+        const statusLabels: Record<string, string> = {
+          'completed': '[done]',
+          'in_progress': '[active]',
+          'pending': '[pending]',
+        };
+
+        const lines = [`Progress: ${completed}/${total} done, ${inProgress} active, ${pending} pending`];
+        todos.forEach((t: any, i: number) => {
+          const label = statusLabels[t.status] || '[pending]';
+          lines.push(`  ${i+1}. ${label} ${t.content}`);
+        });
+
+        return { success: true, output: lines.join('\n') };
       }
 
       case 'task': {
-        const tasks = args.tasks as SubAgentTask[];
+        const tasks = safeArgs.tasks as SubAgentTask[];
 
         // 限制最多3个并行任务
         if (tasks.length > 3) {
@@ -807,8 +875,8 @@ export async function executeTool(
 
       case 'lint': {
         const projectType = await detectProjectType(WORKSPACE);
-        const fixFlag = args.fix ? '--fix' : '';
-        const files = args.files || '.';
+        const fixFlag = safeArgs.fix ? '--fix' : '';
+        const files = safeArgs.files || '.';
 
         const lintCmd = projectType === 'typescript'
           ? `npx tsc --noEmit 2>&1; npx eslint ${files} ${fixFlag}`
@@ -848,8 +916,8 @@ export async function executeTool(
 
       case 'test': {
         const projectType = await detectProjectType(WORKSPACE);
-        const filter = args.filter || '';
-        const coverage = args.coverage ? '--coverage' : '';
+        const filter = safeArgs.filter || '';
+        const coverage = safeArgs.coverage ? '--coverage' : '';
 
         const testCmd = projectType === 'typescript'
           ? `npx vitest run ${filter ? `--grep "${filter}"` : ''} ${coverage}`
@@ -894,6 +962,13 @@ export async function executeTool(
       }
 
       default:
+        // 检查是否是MCP工具（格式：servername/toolname）
+        if (name.includes('/')) {
+          const mcpManager = getMCPManager();
+          if (mcpManager.hasTool(name)) {
+            return await mcpManager.callTool(name, safeArgs);
+          }
+        }
         return { success: false, error: `Unknown tool: ${name}` };
     }
   } catch (error: any) {

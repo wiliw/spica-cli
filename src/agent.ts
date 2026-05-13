@@ -1,11 +1,12 @@
 import { LLMClient } from './llm/LLMClient';
-import { executeTool, TOOLS_DEFINITIONS, setWorkspace, getWorkspace } from './tools/index';
+import { executeTool, getAllToolDefinitions, setWorkspace, getWorkspace } from './tools/index';
+import { initMCP, shutdownMCP } from './mcp/client';
 import { getProviderConfig } from './utils/config';
 import { getSystemPrompt } from './prompts/system';
 import { loadHistory, saveHistory } from './utils/history';
 import { loadProjectState, saveProjectState, updateProjectTodos, loadProjectContext, saveProjectContext, ensureProjectDir } from './utils/projectState';
 import { runPreHooks, runPostHooks } from './hooks';
-import { createCheckpoint, analyzeError, getRecoveryStrategy } from './utils/errorRecovery';
+import { createCheckpoint, analyzeError, getRecoveryStrategy, restoreCheckpoint, getLastCheckpoint } from './utils/errorRecovery';
 import { EventEmitter } from 'events';
 import fs from 'fs-extra';
 import * as path from 'path';
@@ -37,6 +38,7 @@ export class SpicaAgent extends EventEmitter {
   private _initialized = false;
   private _initPromise: Promise<void> | null = null;
   private _providerName?: string;
+  private _initAbortController: AbortController | null = null;
 
   // 权限确认状态
   private permissionQueue: Array<{ reason: string; resolve: (approved: boolean) => void }> = [];
@@ -56,6 +58,10 @@ export class SpicaAgent extends EventEmitter {
 
   interrupt() {
     this.interruptFlag = true;
+    // 中断 init 中的连接检测
+    if (this._initAbortController) {
+      this._initAbortController.abort();
+    }
     if (this.llm) {
       this.llm.interrupt();
     }
@@ -67,12 +73,14 @@ export class SpicaAgent extends EventEmitter {
 
   // 权限检查
   private checkNeedsPermission(toolName: string, args: Record<string, any>): string | null {
+    const safeArgs = args || {};
+
     if (toolName === 'file_delete') {
-      return `Delete: ${args.path}`;
+      return `Delete: ${safeArgs.path || 'unknown'}`;
     }
 
     if (toolName === 'bash') {
-      const cmd = args.command || '';
+      const cmd = String(safeArgs.command || '');
 
       // 更精确的危险命令检测
       const dangerousPatterns = [
@@ -186,6 +194,16 @@ async init() {
   }
   
   private async _doInit(): Promise<void> {
+    this._initAbortController = new AbortController();
+
+    // 初始化MCP服务器连接
+    try {
+      await initMCP();
+    } catch (error) {
+      // MCP初始化失败不影响主流程
+      console.log('MCP init skipped (no config or servers unavailable)');
+    }
+
     const config = await getProviderConfig(this._providerName);
     this.llm = new LLMClient({
       provider: this._providerName || 'openai',
@@ -195,8 +213,10 @@ async init() {
       name: config.name,
     });
 
-    // 检查API连接
-    const connectionResult = await this.llm.checkConnection();
+    // 检查API连接（支持中断）
+    const connectionResult = await this.llm.checkConnection(this._initAbortController.signal);
+    this._initAbortController = null;
+
     if (!connectionResult.success) {
       this.emit('connection_error', {
         type: connectionResult.type,
@@ -212,7 +232,6 @@ async init() {
     const projectContext = loadProjectContext(this.workspacePath);
     if (projectContext.length > 0) {
       this.llm.setMessages(projectContext);
-      console.log(`Loaded ${projectContext.length} messages from project context`);
     }
     
     const projectState = loadProjectState(this.workspacePath);
@@ -401,8 +420,9 @@ Project Context (from .spica.md):
 
     this.emit('message', { role: 'user', content: prompt });
 
-    let response = await this.llm.generate(prompt + projectContext, TOOLS_DEFINITIONS);
-    
+    const toolDefinitions = getAllToolDefinitions();
+    let response = await this.llm.generate(prompt + projectContext, toolDefinitions);
+
     let iterations = 0;
 
     const allToolResults: Array<{ name: string; id: string; result: string }> = [];
@@ -426,8 +446,10 @@ Project Context (from .spica.md):
         const toolResults = await Promise.all(response.toolCalls.map(async (tc) => {
           if (this.interruptFlag) return { name: tc.name, id: tc.id, result: 'interrupted' };
 
+          const tcArgs = tc.arguments || {};  // 确保 arguments 存在
+
           // Hooks检查（优先于权限检查）
-          const hookResult = runPreHooks(tc.name, tc.arguments);
+          const hookResult = runPreHooks(tc.name, tcArgs);
           if (hookResult.matched) {
             if (hookResult.action === 'block') {
               this.emit('tool_result', {
@@ -457,7 +479,7 @@ Project Context (from .spica.md):
           }
 
           // 权限检查（原有逻辑）
-          const permissionReason = this.checkNeedsPermission(tc.name, tc.arguments);
+          const permissionReason = this.checkNeedsPermission(tc.name, tcArgs);
           if (permissionReason) {
             const approved = await this.waitForPermission(permissionReason);
             if (!approved) {
@@ -470,7 +492,7 @@ Project Context (from .spica.md):
             }
           }
 
-          this.emit('tool_call', { name: tc.name, arguments: tc.arguments });
+          this.emit('tool_call', { name: tc.name, arguments: tcArgs });
 
           // 同步 workspace 到 tools 模块
           setWorkspace(this.workspacePath);
@@ -480,20 +502,20 @@ Project Context (from .spica.md):
             this.emit(event, data);
           };
 
-          const result = await executeTool(tc.name, tc.arguments, eventCallback);
+          const result = await executeTool(tc.name, tcArgs, eventCallback);
 
           if (!result.success) {
             this.emit('error_suggestion', {
               toolName: tc.name,
               error: result.error,
-              suggestion: this.generateErrorSuggestion(tc.name, result.error, tc.arguments),
+              suggestion: this.generateErrorSuggestion(tc.name, result.error, tcArgs),
             });
           }
 
           // 文件编辑成功时发送diff预览
           if (result.success && (tc.name === 'file_write' || tc.name === 'file_edit') && result.diff) {
             this.emit('diff_preview', {
-              filePath: tc.arguments.path || tc.arguments.file_path,
+              filePath: tcArgs.path || tcArgs.file_path,
               diff: result.diff,
             });
           }
@@ -507,14 +529,14 @@ Project Context (from .spica.md):
           });
 
           // PostToolUse hooks
-          const postHookMessage = runPostHooks(tc.name, tc.arguments, result);
+          const postHookMessage = runPostHooks(tc.name, tcArgs, result);
           if (postHookMessage) {
             this.emit('hook_log', { tool: tc.name, message: postHookMessage });
           }
 
           // workspace切换处理
-          if (tc.name === 'workspace' && result.success && tc.arguments.path) {
-            await this.switchWorkspace(tc.arguments.path);
+          if (tc.name === 'workspace' && result.success && tcArgs.path) {
+            await this.switchWorkspace(tcArgs.path);
           }
 
           return { name: tc.name, id: tc.id, result: result.output || result.error || '' };
@@ -528,7 +550,7 @@ Project Context (from .spica.md):
         if (toolResults.length > 0) {
           response = await this.llm.continueWithAllToolResults(
             toolResults.map(t => ({ name: t.name, result: t.result })),
-            TOOLS_DEFINITIONS
+            toolDefinitions
           );
         }
       } else {
@@ -625,6 +647,7 @@ Project Context (from .spica.md):
   }
 
   private generateErrorSuggestion(toolName: string, error: string, args: any): string {
+    const lastCp = getLastCheckpoint();
     const suggestions: Record<string, (e: string, a: any) => string> = {
       file_read: (e, a) =>
         e.includes('ENOENT') ? `文件不存在: ${a.path}. 建议: 检查路径或使用glob查找`
@@ -642,8 +665,14 @@ Project Context (from .spica.md):
       grep: (e, a) => `搜索失败. 建议: 检查pattern和路径`,
     };
 
-    const generator = suggestions[toolName];
-    return generator ? generator(error, args) : `工具 ${toolName} 失败. 建议: 检查参数`;
+    let baseSuggestion = suggestions[toolName]?.(error, args) || `工具 ${toolName} 失败. 建议: 检查参数`;
+
+    // 如果有checkpoint，添加回滚选项
+    if (lastCp && (toolName === 'file_write' || toolName === 'file_edit' || toolName === 'bash')) {
+      baseSuggestion += `. 如需回滚，可恢复到checkpoint`;
+    }
+
+    return baseSuggestion;
   }
 
   private compressHistory(messages: ChatMessage[]): ChatMessage[] {

@@ -127,12 +127,12 @@ function mergeHooks(base: HooksConfig, override: HooksConfig): HooksConfig {
 function matchesMatcher(toolName: string, args: Record<string, any>, matcher: HookMatcher): boolean {
   // 检查工具名匹配
   if (matcher.tool) {
-    if (matcher.tool.includes('*')) {
-      // 通配符匹配
-      const pattern = matcher.tool.replace('*', '');
+    const toolPattern = matcher.tool || '';
+    if (toolPattern.includes('*')) {
+      const pattern = toolPattern.replace('*', '');
       if (!toolName.includes(pattern)) return false;
     } else {
-      if (toolName !== matcher.tool) return false;
+      if (toolName !== toolPattern) return false;
     }
   }
 
@@ -140,12 +140,12 @@ function matchesMatcher(toolName: string, args: Record<string, any>, matcher: Ho
   if (matcher.args) {
     for (const [key, pattern] of Object.entries(matcher.args)) {
       const value = String(args[key] || '');
-      if (pattern.includes('*')) {
-        // 通配符匹配
-        const prefix = pattern.replace('*', '');
+      const patternStr = String(pattern || '');
+      if (patternStr.includes('*')) {
+        const prefix = patternStr.replace('*', '');
         if (!value.includes(prefix)) return false;
       } else {
-        if (value !== pattern) return false;
+        if (value !== patternStr) return false;
       }
     }
   }
@@ -155,11 +155,12 @@ function matchesMatcher(toolName: string, args: Record<string, any>, matcher: Ho
 
 // 执行PreToolUse hooks
 export function runPreHooks(toolName: string, args: Record<string, any>): HookResult {
+  const safeArgs = args || {};  // 保护 args 参数
   const hooks = loadHooks();
   const preHooks = hooks.hooks.PreToolUse || [];
 
   for (const hook of preHooks) {
-    if (matchesMatcher(toolName, args, hook.matcher)) {
+    if (matchesMatcher(toolName, safeArgs, hook.matcher)) {
       return {
         matched: true,
         action: hook.action,
@@ -173,11 +174,12 @@ export function runPreHooks(toolName: string, args: Record<string, any>): HookRe
 
 // 执行PostToolUse hooks（返回日志消息）
 export function runPostHooks(toolName: string, args: Record<string, any>, result: any): string | null {
+  const safeArgs = args || {};  // 保护 args 参数
   const hooks = loadHooks();
   const postHooks = hooks.hooks.PostToolUse || [];
 
   for (const hook of postHooks) {
-    if (matchesMatcher(toolName, args, hook.matcher)) {
+    if (matchesMatcher(toolName, safeArgs, hook.matcher)) {
       return hook.message;
     }
   }
