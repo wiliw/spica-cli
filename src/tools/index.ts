@@ -1,9 +1,10 @@
 import fs from 'fs-extra';
 import { execa } from 'execa';
 import simpleGit from 'simple-git';
-import { resolve, isAbsolute, dirname } from 'path';
+import { resolve, isAbsolute, dirname, join } from 'path';
 import fastGlob from 'fast-glob';
 import { SpicaAgent } from '../agent';
+import { SubAgentTask, getSubAgentConfig, isToolAllowed, summarizeResult } from './subAgent';
 
 let WORKSPACE = process.cwd();
 
@@ -285,6 +286,62 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: 'gh_pr_view',
+    description: 'View GitHub PR details. Use to see PR info, files changed, reviews.',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        number: { type: 'number', description: 'PR number' },
+        json: { type: 'boolean', description: 'Output as JSON (optional)' },
+      },
+      required: ['number'],
+    },
+  },
+  {
+    name: 'gh_issue_list',
+    description: 'List GitHub issues in the repository.',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        state: { type: 'string', description: 'Issue state: open/closed/all (optional)' },
+        limit: { type: 'number', description: 'Max issues to show (optional)' },
+        label: { type: 'string', description: 'Filter by label (optional)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'gh_issue_view',
+    description: 'View GitHub issue details.',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        number: { type: 'number', description: 'Issue number' },
+      },
+      required: ['number'],
+    },
+  },
+  {
+    name: 'gh_repo_view',
+    description: 'View current repository info (name, description, stats).',
+    parameters: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'gh_run_list',
+    description: 'List recent GitHub Actions workflow runs.',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        limit: { type: 'number', description: 'Max runs to show (optional)' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'todo_write',
     description: 'Write todos to track progress on complex tasks.',
     parameters: {
@@ -328,13 +385,45 @@ name: 'task',
       required: ['tasks'],
     },
   },
+  {
+    name: 'lint',
+    description: 'Run linting and type checking. Auto-detects eslint/tsc/golangci/pylint/clippy based on project type.',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        fix: { type: 'boolean', description: 'Auto-fix issues where possible (optional)' },
+        files: { type: 'string', description: 'Specific files or directories to lint (optional)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'test',
+    description: 'Run tests. Auto-detects vitest/jest/go test/pytest/cargo test based on project type.',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        filter: { type: 'string', description: 'Test name pattern to filter (optional)' },
+        coverage: { type: 'boolean', description: 'Run with coverage report (optional)' },
+      },
+      required: [],
+    },
+  },
 ];
 
 export function getWorkspace(): string {
   return WORKSPACE;
 }
 
-export async function executeTool(name: string, args: Record<string, any>): Promise<ToolResult> {
+export interface ToolEventCallback {
+  (event: string, data: any): void;
+}
+
+export async function executeTool(
+  name: string,
+  args: Record<string, any>,
+  eventCallback?: ToolEventCallback
+): Promise<ToolResult> {
   try {
     switch (name) {
       case 'workspace':
@@ -366,21 +455,40 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
       case 'file_write': {
         const writePath = resolvePath(args.path);
         await fs.ensureDir(dirname(writePath));
+
+        // 读取旧内容（如果存在）生成diff摘要
+        let diff = '';
+        try {
+          const oldContent = await fs.readFile(writePath, 'utf-8');
+          const oldLines = oldContent.split('\n').length;
+          const newLines = args.content.split('\n').length;
+          const change = newLines - oldLines;
+          diff = `Updated: ${oldLines}→${newLines} lines (${change > 0 ? '+' : ''}${change})`;
+        } catch {
+          diff = `Created: ${args.content.split('\n').length} lines`;
+        }
+
         await fs.writeFile(writePath, args.content, 'utf-8');
-        return { success: true, output: `Wrote ${writePath}` };
+        return { success: true, output: `Wrote ${writePath}`, diff };
       }
 
       case 'file_edit': {
         const editPath = resolvePath(args.path);
         const fileContent = await fs.readFile(editPath, 'utf-8');
-        
+
         if (!fileContent.includes(args.oldString)) {
           return { success: false, error: `Text not found in file. Read the file to get exact text.` };
         }
-        
+
         const newContent = fileContent.replace(args.oldString, args.newString);
+        // diff摘要
+        const oldLen = args.oldString.length;
+        const newLen = args.newString.length;
+        const change = newLen - oldLen;
+        const diff = `Edit: ${oldLen}→${newLen} chars (${change > 0 ? '+' : ''}${change})`;
+
         await fs.writeFile(editPath, newContent, 'utf-8');
-        return { success: true, output: `Edited ${editPath}` };
+        return { success: true, output: `Edited ${editPath}`, diff };
       }
 
       case 'file_exists': {
@@ -530,9 +638,79 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
       }
 
       case 'question': {
-        return { 
-          success: true, 
+        return {
+          success: true,
           output: `QUESTION: ${args.text}\nWaiting for user response...`
+        };
+      }
+
+      case 'gh_pr_view': {
+        const jsonFlag = args.json ? '--json title,body,state,author,additions,deletions,changed_files' : '';
+        const ghResult = await execa(`gh pr view ${args.number} ${jsonFlag}`, {
+          shell: true,
+          cwd: WORKSPACE,
+          timeout: 30000,
+          reject: false,
+        });
+        return {
+          success: ghResult.exitCode === 0,
+          output: ghResult.stdout || ghResult.stderr,
+        };
+      }
+
+      case 'gh_issue_list': {
+        const state = args.state || 'open';
+        const limit = args.limit || 20;
+        const label = args.label ? `--label "${args.label}"` : '';
+        const ghResult = await execa(`gh issue list --state ${state} --limit ${limit} ${label}`, {
+          shell: true,
+          cwd: WORKSPACE,
+          timeout: 30000,
+          reject: false,
+        });
+        return {
+          success: ghResult.exitCode === 0,
+          output: ghResult.stdout || 'No issues found',
+        };
+      }
+
+      case 'gh_issue_view': {
+        const ghResult = await execa(`gh issue view ${args.number}`, {
+          shell: true,
+          cwd: WORKSPACE,
+          timeout: 30000,
+          reject: false,
+        });
+        return {
+          success: ghResult.exitCode === 0,
+          output: ghResult.stdout || ghResult.stderr,
+        };
+      }
+
+      case 'gh_repo_view': {
+        const ghResult = await execa(`gh repo view`, {
+          shell: true,
+          cwd: WORKSPACE,
+          timeout: 30000,
+          reject: false,
+        });
+        return {
+          success: ghResult.exitCode === 0,
+          output: ghResult.stdout || 'Not in a GitHub repository',
+        };
+      }
+
+      case 'gh_run_list': {
+        const limit = args.limit || 10;
+        const ghResult = await execa(`gh run list --limit ${limit}`, {
+          shell: true,
+          cwd: WORKSPACE,
+          timeout: 30000,
+          reject: false,
+        });
+        return {
+          success: ghResult.exitCode === 0,
+          output: ghResult.stdout || 'No workflow runs found',
         };
       }
 
@@ -544,30 +722,162 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
       }
 
       case 'task': {
-        const tasks = args.tasks as Array<{ description: string; prompt: string }>;
-        
+        const tasks = args.tasks as SubAgentTask[];
+
         // 限制最多3个并行任务
         if (tasks.length > 3) {
-          return { 
-            success: false, 
-            error: '最多支持3个并行任务。请将任务拆分为多次调用。' 
+          return {
+            success: false,
+            error: '最多支持3个并行任务。请将任务拆分为多次调用。'
           };
         }
-        
+
         const results = await Promise.all(tasks.map(async (task, i) => {
-          const subTaskId = `task-${i}-${Date.now()}`;
+          const subTaskId = `sub-${i}-${Date.now()}`;
+          const config = getSubAgentConfig(task.type);
+
+          // 发送子agent启动事件
+          if (eventCallback) {
+            eventCallback('sub_agent_start', {
+              id: subTaskId,
+              type: task.type,
+              description: task.description || task.prompt.slice(0, 50),
+            });
+          }
+
           const taskAgent = new SpicaAgent(undefined, WORKSPACE);
-          
+
+          // 转发子agent事件到主agent
+          taskAgent.on('tool_call', (data: any) => {
+            if (eventCallback) {
+              eventCallback('sub_agent_tool_call', { id: subTaskId, ...data });
+            }
+          });
+
+          taskAgent.on('tool_result', (data: any) => {
+            if (eventCallback) {
+              eventCallback('sub_agent_tool_result', { id: subTaskId, ...data });
+            }
+          });
+
+          // 设置timeout
+          const timeoutPromise = new Promise<string>((_, reject) => {
+            setTimeout(() => reject(new Error('Timeout')), config.timeout);
+          });
+
           try {
             await taskAgent.init();
-            const result = await taskAgent.runLoop(task.prompt);
-            return `✓ ${task.description}: ${result.substring(0, 200)}`;
+
+            // 如果有工具限制，设置工具白名单（需要在agent添加支持）
+            // taskAgent.setToolWhitelist(config.allowedTools);
+
+            const resultPromise = taskAgent.runLoop(task.prompt);
+            const result = await Promise.race([resultPromise, timeoutPromise]);
+
+            const summary = summarizeResult(result);
+
+            if (eventCallback) {
+              eventCallback('sub_agent_done', { id: subTaskId, summary });
+            }
+
+            return `✓ ${task.description || task.prompt.slice(0, 30)}: ${summary}`;
           } catch (err: any) {
-            return `✗ ${task.description}: ${err.message}`;
+            if (eventCallback) {
+              eventCallback('sub_agent_error', { id: subTaskId, error: err.message });
+            }
+            return `✗ ${task.description || task.prompt.slice(0, 30)}: ${err.message}`;
           }
         }));
-        
-        return { success: true, output: `并行任务完成:\n${results.join('\n')}` };
+
+        return { success: true, output: results.join('\n') };
+      }
+
+      case 'lint': {
+        const projectType = await detectProjectType(WORKSPACE);
+        const fixFlag = args.fix ? '--fix' : '';
+        const files = args.files || '.';
+
+        const lintCmd = projectType === 'typescript'
+          ? `npx tsc --noEmit 2>&1; npx eslint ${files} ${fixFlag}`
+          : projectType === 'javascript'
+          ? `npx eslint ${files} ${fixFlag}`
+          : projectType === 'go'
+          ? `golangci-lint run ${fixFlag}`
+          : projectType === 'python'
+          ? `pylint ${files} 2>&1`
+          : projectType === 'rust'
+          ? `cargo clippy --all-targets 2>&1`
+          : null;
+
+        if (!lintCmd) {
+          return { success: false, error: `No linter configured for project type: ${projectType}` };
+        }
+
+        const lintResult = await execa(lintCmd, {
+          shell: true,
+          cwd: WORKSPACE,
+          timeout: 60000,
+          reject: false,
+        });
+
+        const output = lintResult.stdout + '\n' + lintResult.stderr;
+        const issues = output.split('\n').filter(l =>
+          l.includes('error') || l.includes('warning') || l.includes('Error') || l.includes('Warning')
+        );
+
+        return {
+          success: lintResult.exitCode === 0,
+          output: issues.length > 0
+            ? `Found ${issues.length} issues:\n${issues.slice(0, 20).join('\n')}`
+            : 'No lint issues found',
+        };
+      }
+
+      case 'test': {
+        const projectType = await detectProjectType(WORKSPACE);
+        const filter = args.filter || '';
+        const coverage = args.coverage ? '--coverage' : '';
+
+        const testCmd = projectType === 'typescript'
+          ? `npx vitest run ${filter ? `--grep "${filter}"` : ''} ${coverage}`
+          : projectType === 'javascript'
+          ? `npm test ${filter ? `-- --grep "${filter}"` : ''}`
+          : projectType === 'go'
+          ? `go test ./... ${filter ? `-run "${filter}"` : ''} ${coverage ? '-cover' : ''}`
+          : projectType === 'python'
+          ? `pytest ${filter ? `-k "${filter}"` : ''} ${coverage ? '--cov' : ''}`
+          : projectType === 'rust'
+          ? `cargo test ${filter}`
+          : null;
+
+        if (!testCmd) {
+          return { success: false, error: `No test runner configured for project type: ${projectType}` };
+        }
+
+        const testResult = await execa(testCmd, {
+          shell: true,
+          cwd: WORKSPACE,
+          timeout: 120000,
+          reject: false,
+        });
+
+        const output = testResult.stdout + '\n' + testResult.stderr;
+
+        // Parse summary
+        const passedMatch = output.match(/(\d+) passed/i);
+        const failedMatch = output.match(/(\d+) failed/i);
+
+        let summary = '';
+        if (passedMatch || failedMatch) {
+          const passed = passedMatch ? passedMatch[1] : '0';
+          const failed = failedMatch ? failedMatch[1] : '0';
+          summary = `Tests: ${passed} passed, ${failed} failed\n`;
+        }
+
+        return {
+          success: testResult.exitCode === 0,
+          output: summary + output.slice(-500),
+        };
       }
 
       default:
@@ -580,4 +890,16 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
 
 function resolvePath(path: string): string {
   return isAbsolute(path) ? path : resolve(WORKSPACE, path);
+}
+
+async function detectProjectType(workspace: string): Promise<string> {
+  if (await fs.pathExists(join(workspace, 'package.json'))) {
+    const pkg = await fs.readJson(join(workspace, 'package.json'));
+    if (pkg.devDependencies?.typescript) return 'typescript';
+    return 'javascript';
+  }
+  if (await fs.pathExists(join(workspace, 'go.mod'))) return 'go';
+  if (await fs.pathExists(join(workspace, 'requirements.txt'))) return 'python';
+  if (await fs.pathExists(join(workspace, 'Cargo.toml'))) return 'rust';
+  return 'unknown';
 }

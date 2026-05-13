@@ -4,6 +4,8 @@ import { getProviderConfig } from './utils/config';
 import { getSystemPrompt } from './prompts/system';
 import { loadHistory, saveHistory } from './utils/history';
 import { loadProjectState, saveProjectState, updateProjectTodos, loadProjectContext, saveProjectContext, ensureProjectDir } from './utils/projectState';
+import { runPreHooks, runPostHooks } from './hooks';
+import { createCheckpoint, analyzeError, getRecoveryStrategy } from './utils/errorRecovery';
 import { EventEmitter } from 'events';
 import fs from 'fs-extra';
 import * as path from 'path';
@@ -36,6 +38,11 @@ export class SpicaAgent extends EventEmitter {
   private _initPromise: Promise<void> | null = null;
   private _providerName?: string;
 
+  // 权限确认状态
+  private permissionPending = false;
+  private permissionApproved = false;
+  private permissionResolve: ((approved: boolean) => void) | null = null;
+
   constructor(providerName?: string, workspacePath?: string) {
     super();
     this._providerName = providerName;
@@ -51,6 +58,68 @@ export class SpicaAgent extends EventEmitter {
     if (this.llm) {
       this.llm.interrupt();
     }
+    // 拒绝所有待处理的权限请求
+    if (this.permissionPending && this.permissionResolve) {
+      this.permissionResolve(false);
+      this.permissionPending = false;
+      this.permissionResolve = null;
+    }
+  }
+
+  // 权限检查
+  private checkNeedsPermission(toolName: string, args: Record<string, any>): string | null {
+    if (toolName === 'file_delete') {
+      return `Delete: ${args.path}`;
+    }
+
+    if (toolName === 'bash') {
+      const dangerousCommands = ['rm', 'chmod', 'chown', 'sudo', 'dd', 'mkfs', '>', 'mv '];
+      const cmd = args.command || '';
+      for (const dangerous of dangerousCommands) {
+        if (cmd.includes(dangerous)) {
+          return `Dangerous: ${cmd.slice(0, 50)}`;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  // 等待权限确认
+  async waitForPermission(reason: string): Promise<boolean> {
+    this.emit('permission_request', { reason });
+    this.permissionPending = true;
+    this.permissionApproved = false;
+
+    return new Promise((resolve) => {
+      this.permissionResolve = resolve;
+    });
+  }
+
+  // 用户批准
+  approvePermission() {
+    this.permissionApproved = true;
+    this.permissionPending = false;
+    if (this.permissionResolve) {
+      this.permissionResolve(true);
+      this.permissionResolve = null;
+    }
+    this.emit('permission_result', { approved: true });
+  }
+
+  // 用户拒绝
+  denyPermission() {
+    this.permissionApproved = false;
+    this.permissionPending = false;
+    if (this.permissionResolve) {
+      this.permissionResolve(false);
+      this.permissionResolve = null;
+    }
+    this.emit('permission_result', { approved: false });
+  }
+
+  get isPermissionPending(): boolean {
+    return this.permissionPending;
   }
 
 async init() {
@@ -234,15 +303,28 @@ async init() {
     }
   }
 
+  getMessages(): ChatMessage[] {
+    return this.llm?.getMessages() || [];
+  }
+
+  setMessages(messages: ChatMessage[]) {
+    if (this.llm) {
+      this.llm.setMessages(messages);
+    }
+  }
+
   async runLoop(prompt: string, maxIterations = 50): Promise<string> {
     this.interruptFlag = false;
     if (!this.llm) {
       await this.init();
     }
-    
+
     if (!this.llm) {
       throw new Error('LLM client not initialized');
     }
+
+    // 创建checkpoint（在开始任务前）
+    await createCheckpoint(`Task: ${prompt.slice(0, 50)}`);
 
     const projectContext = this.projectConfig.type ? `
 Project Context (from .spica.md):
@@ -261,16 +343,95 @@ Project Context (from .spica.md):
 
     while (!response.finished && iterations < maxIterations && !this.interruptFlag) {
       iterations++;
+      console.error(`[DEBUG] Loop iteration ${iterations}, finished=${response.finished}, toolCalls=${response.toolCalls?.length || 0}`);
 
-      if (this.interruptFlag) break;
+      if (this.interruptFlag) {
+        console.error(`[DEBUG] Interrupted at iteration ${iterations}`);
+        break;
+      }
+
+      // 检查response状态
+      if (!response.toolCalls || response.toolCalls.length === 0) {
+        if (response.content) {
+          console.error(`[DEBUG] No toolCalls, has content - breaking`);
+          break;
+        }
+        console.error(`[DEBUG] Empty response at iteration ${iterations}`);
+        break;
+      }
 
       if (response.toolCalls && response.toolCalls.length > 0) {
         const toolResults = await Promise.all(response.toolCalls.map(async (tc) => {
           if (this.interruptFlag) return { name: tc.name, id: tc.id, result: 'interrupted' };
 
+          // Hooks检查（优先于权限检查）
+          const hookResult = runPreHooks(tc.name, tc.arguments);
+          if (hookResult.matched) {
+            if (hookResult.action === 'block') {
+              this.emit('tool_result', {
+                name: tc.name,
+                success: false,
+                error: `Blocked: ${hookResult.message}`,
+              });
+              this.emit('hook_blocked', { tool: tc.name, reason: hookResult.message });
+              return { name: tc.name, id: tc.id, result: `Blocked: ${hookResult.message}` };
+            }
+
+            if (hookResult.action === 'confirm') {
+              const approved = await this.waitForPermission(hookResult.message);
+              if (!approved) {
+                this.emit('tool_result', {
+                  name: tc.name,
+                  success: false,
+                  error: 'Permission denied by user',
+                });
+                return { name: tc.name, id: tc.id, result: 'Permission denied by user' };
+              }
+            }
+
+            if (hookResult.action === 'warn') {
+              this.emit('hook_warning', { tool: tc.name, message: hookResult.message });
+            }
+          }
+
+          // 权限检查（原有逻辑）
+          const permissionReason = this.checkNeedsPermission(tc.name, tc.arguments);
+          if (permissionReason) {
+            const approved = await this.waitForPermission(permissionReason);
+            if (!approved) {
+              this.emit('tool_result', {
+                name: tc.name,
+                success: false,
+                error: 'Permission denied by user',
+              });
+              return { name: tc.name, id: tc.id, result: 'Permission denied by user' };
+            }
+          }
+
           this.emit('tool_call', { name: tc.name, arguments: tc.arguments });
 
-          const result = await executeTool(tc.name, tc.arguments);
+          // 事件回调 - 用于转发子agent事件
+          const eventCallback = (event: string, data: any) => {
+            this.emit(event, data);
+          };
+
+          const result = await executeTool(tc.name, tc.arguments, eventCallback);
+
+          if (!result.success) {
+            this.emit('error_suggestion', {
+              toolName: tc.name,
+              error: result.error,
+              suggestion: this.generateErrorSuggestion(tc.name, result.error, tc.arguments),
+            });
+          }
+
+          // 文件编辑成功时发送diff预览
+          if (result.success && (tc.name === 'file_write' || tc.name === 'file_edit') && result.diff) {
+            this.emit('diff_preview', {
+              filePath: tc.arguments.path || tc.arguments.file_path,
+              diff: result.diff,
+            });
+          }
 
           this.emit('tool_result', {
             name: tc.name,
@@ -280,6 +441,17 @@ Project Context (from .spica.md):
             diff: result.diff,
           });
 
+          // PostToolUse hooks
+          const postHookMessage = runPostHooks(tc.name, tc.arguments, result);
+          if (postHookMessage) {
+            this.emit('hook_log', { tool: tc.name, message: postHookMessage });
+          }
+
+          // workspace切换处理
+          if (tc.name === 'workspace' && result.success && tc.arguments.path) {
+            await this.switchWorkspace(tc.arguments.path);
+          }
+
           return { name: tc.name, id: tc.id, result: result.output || result.error || '' };
         }));
 
@@ -287,8 +459,12 @@ Project Context (from .spica.md):
 
         if (this.interruptFlag) break;
 
-        for (const { name, id, result } of toolResults) {
-          response = await this.llm.continueWithToolResult(name, result, TOOLS_DEFINITIONS);
+        // 所有工具完成后，一次性发送所有结果给LLM继续生成
+        if (toolResults.length > 0) {
+          response = await this.llm.continueWithAllToolResults(
+            toolResults.map(t => ({ name: t.name, result: t.result })),
+            TOOLS_DEFINITIONS
+          );
         }
       } else {
         break;
@@ -305,7 +481,10 @@ Project Context (from .spica.md):
     if (this.llm) {
       const allMessages = this.llm.getMessages();
 
-      const simplifiedMessages = allMessages.map(m => {
+      // 上下文压缩：保留最近20条消息，压缩旧消息
+      const compressedMessages = this.compressHistory(allMessages);
+
+      const simplifiedMessages = compressedMessages.map(m => {
         if (m.role === 'tool') {
           return { role: 'tool', content: m.content, toolCallId: m.toolCallId };
         }
@@ -332,7 +511,7 @@ Project Context (from .spica.md):
           toolCalls: m.toolCalls,
         };
       }).filter(m => m.role === 'user' || m.role === 'assistant');
-      
+
       saveProjectContext(this.workspacePath, simplifiedMessages);
       
       if (this._todos.length > 0) {
@@ -357,5 +536,137 @@ Project Context (from .spica.md):
 
   getWorkspacePath(): string {
     return this.workspacePath;
+  }
+
+  async switchWorkspace(newPath: string): Promise<void> {
+    this.workspacePath = newPath;
+
+    // 重置状态
+    this.projectConfig = {};
+    this._todos = [];
+    this._initialized = false;
+    this._initPromise = null;
+
+    // 清空LLM消息历史
+    if (this.llm) {
+      this.llm.setMessages([]);
+    }
+
+    // 发送workspace变更事件
+    this.emit('workspace_changed', { path: newPath });
+
+    // 重新初始化（检测新项目）
+    await this.init();
+  }
+
+  private generateErrorSuggestion(toolName: string, error: string, args: any): string {
+    const suggestions: Record<string, (e: string, a: any) => string> = {
+      file_read: (e, a) =>
+        e.includes('ENOENT') ? `文件不存在: ${a.path}. 建议: 检查路径或使用glob查找`
+        : e.includes('EACCES') ? `无权限读取: ${a.path}. 建议: 检查文件权限`
+        : `读取失败. 建议: 确认路径正确`,
+      file_write: (e, a) =>
+        e.includes('EACCES') ? `无权限写入: ${a.path}. 建议: 检查文件权限`
+        : e.includes('ENOENT') ? `目录不存在: ${a.path}. 建议: 先创建目录`
+        : `写入失败. 建议: 确认路径和内容`,
+      bash: (e, a) =>
+        e.includes('command not found') ? `命令不存在: ${a.command}. 建议: 安装对应工具`
+        : e.includes('Permission denied') ? `权限不足: ${a.command}. 建议: 检查权限或使用sudo`
+        : `执行失败. 建议: 检查命令语法`,
+      glob: (e, a) => `搜索失败. 建议: 检查pattern: ${a.pattern}`,
+      grep: (e, a) => `搜索失败. 建议: 检查pattern和路径`,
+    };
+
+    const generator = suggestions[toolName];
+    return generator ? generator(error, args) : `工具 ${toolName} 失败. 建议: 检查参数`;
+  }
+
+  private compressHistory(messages: ChatMessage[]): ChatMessage[] {
+    const MAX_MESSAGES = 20;
+
+    if (messages.length <= MAX_MESSAGES) {
+      return messages;
+    }
+
+    // 1. 识别重要消息（决策、成功、失败、错误）
+    const importantKeywords = ['决定', '决策', '成功', '完成', '失败', '错误', '结论', '重要'];
+    const importantMessages: ChatMessage[] = [];
+
+    messages.forEach(m => {
+      const content = m.content || '';
+      if (importantKeywords.some(k => content.includes(k)) ||
+          (m.role === 'assistant' && content.length > 100)) {
+        // 保留完整的重要assistant消息
+        importantMessages.push(m);
+      }
+    });
+
+    // 2. 压缩工具调用结果（只保留摘要）
+    const compressedMessages: ChatMessage[] = [];
+    let lastWasTool = false;
+    let toolSummary = '';
+
+    messages.forEach(m => {
+      if (m.role === 'tool') {
+        // 工具结果压缩为简短摘要
+        const content = m.content || '';
+        if (content.length > 50) {
+          toolSummary += content.slice(0, 30) + '... ';
+        } else {
+          toolSummary += content + ' ';
+        }
+        lastWasTool = true;
+      } else {
+        if (lastWasTool && toolSummary) {
+          // 插入工具摘要
+          compressedMessages.push({
+            role: 'assistant',
+            content: `[工具执行] ${toolSummary.slice(0, 200)}`,
+          });
+          toolSummary = '';
+        }
+        compressedMessages.push(m);
+        lastWasTool = false;
+      }
+    });
+
+    // 3. 合并：保留重要消息 + 最近消息
+    const recentCount = Math.min(MAX_MESSAGES - importantMessages.length, 10);
+    const recentMessages = compressedMessages.slice(-recentCount);
+
+    // 组合结果
+    const result: ChatMessage[] = [];
+
+    // 插入重要消息（排除已在recent中的）
+    importantMessages.forEach(m => {
+      if (!recentMessages.includes(m)) {
+        result.push(m);
+      }
+    });
+
+    // 插入摘要
+    if (messages.length > MAX_MESSAGES + 5) {
+      const summary = this.createSummary(messages.slice(0, -MAX_MESSAGES));
+      result.push({
+        role: 'assistant',
+        content: `[历史摘要] ${summary}`,
+      });
+    }
+
+    // 添加最近消息
+    result.push(...recentMessages);
+
+    // 确保不超过限制
+    return result.slice(-MAX_MESSAGES);
+  }
+
+  private createSummary(messages: ChatMessage[]): string {
+    const userMessages = messages.filter(m => m.role === 'user').map(m => m.content);
+    const assistantMessages = messages.filter(m => m.role === 'assistant').map(m => m.content);
+
+    const userTopics = userMessages.map(c => c.slice(0, 50)).join('; ');
+    const assistantTopics = assistantMessages.map(c => c.slice(0, 50)).join('; ');
+
+    return `之前讨论: ${userTopics.slice(0, 200)}. 已完成: ${assistantTopics.slice(0, 200)}`;
   }
 }

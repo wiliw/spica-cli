@@ -269,4 +269,102 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
       return { role: m.role, content: m.content } as any;
     });
   }
+
+  // 添加tool结果消息
+  addToolMessage(toolCallId: string, result: string): void {
+    this.messages.push({
+      role: 'tool',
+      content: result,
+      toolCallId: toolCallId,
+    });
+  }
+
+  // 从当前历史发起生成请求（不添加新的user消息）
+  async generateFromHistory(tools?: ToolDefinition[], signal?: AbortSignal): Promise<LLMResponse> {
+    console.error(`[DEBUG] generateFromHistory, messages=${this.messages.length}`);
+    try {
+      const stream = await this.client.chat.completions.create({
+        model: this.config.model,
+        messages: this.convertMessages(),
+        tools: tools?.map(t => ({
+          type: 'function',
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+          },
+        })),
+        stream: true,
+      }, { signal });
+
+      let fullContent = '';
+      let toolCalls: any[] = [];
+      let hasToolCalls = false;
+
+      for await (const chunk of stream) {
+        if (signal?.aborted) break;
+
+        const delta = chunk.choices[0]?.delta;
+
+        if (delta?.content) {
+          fullContent += delta.content;
+          this.emit('chunk', delta.content);
+        }
+
+        if ((delta as any)?.reasoning_content) {
+          this.emit('reasoning', (delta as any).reasoning_content);
+        }
+
+        if (delta?.tool_calls) {
+          hasToolCalls = true;
+          delta.tool_calls.forEach((tc: any) => {
+            if (tc.index !== undefined) {
+              if (!toolCalls[tc.index]) {
+                toolCalls[tc.index] = { id: tc.id, name: '', arguments: '' };
+              }
+              if (tc.function?.name) {
+                toolCalls[tc.index].name += tc.function.name;
+              }
+              if (tc.function?.arguments) {
+                toolCalls[tc.index].arguments += tc.function.arguments;
+              }
+            }
+          });
+        }
+      }
+
+      if (hasToolCalls && toolCalls.length > 0) {
+        const parsedToolCalls: ToolCall[] = toolCalls.map(tc => ({
+          id: tc.id,
+          name: tc.name,
+          arguments: JSON.parse(tc.arguments),
+        }));
+
+        this.messages.push({
+          role: 'assistant',
+          content: fullContent || '',
+          toolCalls: parsedToolCalls,
+        });
+
+        console.error(`[DEBUG] generateFromHistory returning toolCalls=${parsedToolCalls.length}`);
+        return { toolCalls: parsedToolCalls, finished: false };
+      }
+
+      if (fullContent) {
+        this.messages.push({ role: 'assistant', content: fullContent });
+        console.error(`[DEBUG] generateFromHistory returning content=${fullContent.length} chars`);
+        return { content: fullContent, finished: true };
+      }
+
+      console.error(`[DEBUG] generateFromHistory returning finished=true (empty)`);
+      return { finished: true };
+    } catch (error: any) {
+      if (signal?.aborted) {
+        console.error(`[DEBUG] generateFromHistory aborted`);
+        return { finished: true };
+      }
+      console.error(`[DEBUG] generateFromHistory error: ${error.message}`);
+      throw new Error(`${this.providerName} API error: ${error.message}`);
+    }
+  }
 }

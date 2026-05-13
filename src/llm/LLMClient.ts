@@ -89,17 +89,51 @@ export class LLMClient extends EventEmitter {
 
   async continueWithToolResult(toolCallName: string, result: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
     const toolsToUse = tools || this.tools;
-    
+
     const lastMessage = this.provider.getMessages()[this.provider.getMessages().length - 1];
     const toolCallId = lastMessage.toolCalls?.find(tc => tc.name === toolCallName)?.id || '';
+
+    // 添加tool结果消息
+    this.provider.addToolMessage(toolCallId, result);
 
     await this.rateLimiter.waitForAvailability();
     this.rateLimiter.recordRequest();
 
     this.abortController = new AbortController();
-    
+
     try {
-      const response = await this.provider.continueWithToolResult(toolCallId, result, toolsToUse, this.abortController.signal);
+      // 发起生成请求
+      const response = await this.provider.generateFromHistory(toolsToUse, this.abortController.signal);
+
+      if (response.content) {
+        const tokens = this.tokenCounter.estimateTokens(response.content);
+        this.rateLimiter.recordTokenUsage(tokens);
+      }
+
+      return response;
+    } finally {
+      this.abortController = null;
+    }
+  }
+
+  // 添加多个工具结果后继续生成
+  async continueWithAllToolResults(toolResults: Array<{ name: string; result: string }>, tools?: ToolDefinition[]): Promise<LLMResponse> {
+    const toolsToUse = tools || this.tools;
+    const lastMessage = this.provider.getMessages()[this.provider.getMessages().length - 1];
+
+    // 添加所有tool结果消息
+    for (const { name, result } of toolResults) {
+      const toolCallId = lastMessage.toolCalls?.find(tc => tc.name === name)?.id || '';
+      this.provider.addToolMessage(toolCallId, result);
+    }
+
+    await this.rateLimiter.waitForAvailability();
+    this.rateLimiter.recordRequest();
+
+    this.abortController = new AbortController();
+
+    try {
+      const response = await this.provider.generateFromHistory(toolsToUse, this.abortController.signal);
 
       if (response.content) {
         const tokens = this.tokenCounter.estimateTokens(response.content);

@@ -1,62 +1,72 @@
 # Spica CLI - TUI Architecture
 
 ## Overview
-Spica CLI provides a full-screen terminal UI for AI coding agent interaction.
+Spica CLI 提供全屏终端UI，用于AI编程代理交互。已实现所有核心功能和高级特性。
 
 ## Layout Design
 
 ### Screen Division (Golden Ratio)
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Terminal (100% width, fixed height = stdout.rows)          │
+│ Terminal (100% width, height = stdout.rows)                 │
 ├──────────────────────┬──────────────────────────────────────┤
-│ Rounds (60%)         │ Thinking (60% of right side)         │
+│ Rounds (60%)         │ Thinking (60% of right)              │
 │                      ├──────────────────────────────────────┤
-│                      │ Toolcalled (40% of right side)        │
+│                      │ Tools (40% of right)                 │
 ├──────────────────────┴──────────────────────────────────────┤
-│ Input Panel (fixed height = 3 lines)                        │
+│ Status Bar (running时显示)                                   │
+├─────────────────────────────────────────────────────────────┤
+│ Input Panel (fixed height)                                   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Height Calculation
+### Ink Border Calculation (关键修正)
+Ink的borderStyle在**内部**占用空间：
 ```typescript
-terminalHeight = stdout.rows || 40
-contentHeight = terminalHeight - 3  // Reserve for InputPanel
+const borderHeight = 2;  // 上下边框各1行
+const titleHeight = 1;
+const contentHeight = totalHeight - borderHeight - titleHeight;
 ```
 
-### Strict Constraints
-- ALL boxes use `minHeight` + `maxHeight` (dual enforcement)
-- ALL boxes use `width` percentage (60/40 split)
-- Root container: `width="100%"` to prevent terminal scrolling
+### Height Enforcement
+使用固定高度 + overflow="hidden"：
+```typescript
+<Box height={totalHeight} overflow="hidden" flexGrow={0} flexShrink={0}>
+  <Box flexDirection="column" borderStyle="single" borderColor="cyan">
+    <Box height={1}><Text>Title</Text></Box>
+    <Box height={contentHeight} overflow="hidden">...</Box>
+  </Box>
+</Box>
+```
 
 ## Components
 
 ### AIOutputPanel (Rounds)
-- **Focus Model**: One round = User message + AI response
-- **Navigation**: ↑↓ scroll content within round, switch to prev/next at boundaries
-- **States**: `[AUTO]` follow latest, `[MANUAL]` browse history
-- **Display**: 
-  - Focused round: Full content with scroll indicators
-  - Adjacent rounds: Truncated preview
+- **Focus Model**: One round = User + Assistant + Tools
+- **Navigation**: ↑↓ 滚动内容，边界处切换回合
+- **States**: `[AUTO]` 自动跟随最新，`[MANUAL]` 浏览历史
+- **Wrap**: `wrap="wrap"` 换行显示，不截断
 
-### ThinkingPanel
-- **States**:
-  - `Thinking` (isRunning=true): Display latest content, old content disappears
-  - `Thoughts` (isRunning=false): Marquee scroll if overflow
-- **Color**: Magenta border, Yellow text (neon style)
+### ThinkingPanel  
+- **ing**: `slice(-maxLines)` 只显示最新
+- **ed**: `useMarquee()` 滚动历史
+- **Color**: Magenta边框，Yellow文本
 
-### ToolsPanel  
-- **States**:
-  - `Toolcalling` (isRunning=true): Latest tools only
-  - `Toolcalled` (isRunning=false): Marquee scroll if overflow
-- **Color**: Green border, Status-colored text (yellow/green/red)
+### ToolsPanel
+- **ing**: 最新工具，每工具2行（名称+output）
+- **ed**: 完整历史，带依赖符号
+- **Dependencies**: `→` 串行，`‖` 并行
+- **Color**: Green边框，状态彩色
 
 ### InputPanel
-- Height: Fixed 3 lines
-- Commands:
-  - `quit` → Exit with summary
-  - ESC (running) → Interrupt confirmation
-  - ↑↓ G → Navigate rounds (always available)
+- **Height**: 固定3行
+- **Running**: 显示状态条（Step X: tool_name）
+- **Queue**: 显示任务队列 `[Queue: N]`
+- **Tab**: 命令补全
+
+### StatusBanners
+- **ErrorBanner**: 红色横幅，显示错误+修复建议
+- **DiffPreview**: 蓝色横幅，显示编辑摘要
 
 ## Data Flow
 
@@ -64,107 +74,118 @@ contentHeight = terminalHeight - 3  // Reserve for InputPanel
 ```typescript
 associateEvents(events: Event[]): ConversationTurn[]
 ```
-- Collects: user messages, assistant messages, reasoning, tool calls
-- Creates incomplete turn on user input (assistantMessage = '...')
-- Updates turn as AI streams response
+- 同工具名只保留最新状态（替换running→success）
+- 创建incomplete turn等待响应
+- 响应完成时push turn
 
 ### State Management
 ```typescript
 interface AgentState {
-  turns: ConversationTurn[]      // Historical rounds
-  events: Event[]                // Raw event stream
-  currentReasoning: string       // Live reasoning buffer
-  isRunning: boolean             // Agent activity flag
+  turns: ConversationTurn[]
+  events: Event[]
+  isRunning: boolean
+  currentToolName: string | null
+  iterationCount: number
+  errorSuggestion: ErrorSuggestion | null
+  diffPreview: DiffPreview | null
+  taskQueue: string[]
 }
 ```
 
-### Persistence
-- `.spica/context.json`: Full conversation (user, assistant, toolCalls)
-- `.spica/state.json`: Project todos, phase
-- Load: Filter to show only user/assistant in Rounds
+## New Features
+
+### 1. Error Recovery Suggestion
+```typescript
+// agent.ts
+private generateErrorSuggestion(toolName, error, args): string
+```
+- file_read ENOENT → "文件不存在，使用glob搜索"
+- bash command not found → "安装对应工具"
+- 自动发送 `error_suggestion` 事件
+
+### 2. Diff Preview
+```typescript
+// 文件编辑成功时
+this.emit('diff_preview', { filePath, diff })
+```
+- 显示前6行diff
+- 3秒后自动消失
+
+### 3. Context Compression
+```typescript
+compressHistory(messages: ChatMessage[]): ChatMessage[]
+```
+- 超过20条时压缩
+- 保留最近消息
+- 旧消息生成摘要
+
+### 4. Command Completion
+```typescript
+COMMAND_SUGGESTIONS = [
+  'read ', 'write ', 'edit ', 'bash ', ...
+]
+```
+- Tab补全
+- 循环显示建议
+
+### 5. Session Export
+```typescript
+exportSession(state): void
+```
+- Ctrl+E导出
+- 输出到 `spica-session.md`
+
+### 6. Keyboard Help
+- Ctrl+H显示overlay
+- 列出所有快捷键
+
+### 7. Tool Dependencies
+```typescript
+analyzeDependencies(toolList): ToolDisplay[]
+```
+- prevTool.name === tool.name → `‖` 并行
+- 否则 → `→` 串行
 
 ## Interrupt Mechanism
 
-### AbortController Pattern
 ```typescript
-// LLMClient
+// AbortController模式
 abortController = new AbortController()
 provider.generate(prompt, tools, abortController.signal)
 
-// Provider (OpenAICompatible)
-stream = client.chat.completions.create({...}, { signal })
-for await (chunk of stream) {
-  if (signal?.aborted) break
-}
+// 流中断
+if (signal?.aborted) break
 ```
 
-### Flow
-1. ESC → Show confirmation dialog
-2. ESC again → Call `agent.interrupt()`
-3. `interrupt()` → `interruptFlag=true` + `llm.interrupt()`
-4. `llm.interrupt()` → `abortController.abort()`
-5. Stream breaks immediately
+## Color Scheme
+- Cyan: Rounds
+- Magenta: Thinking
+- Green: Tools
+- Yellow: Running状态
+- Red: Error
+- Blue: Diff预览
 
-## Color Scheme (Neon Nightlife)
-- Cyan: Rounds header
-- Magenta: FOCUS indicator, Thinking border
-- Yellow: Thinking text, Tool status running
-- Green: Tools border, Tool status success
-- Red: Tool status error
-- All headers: `backgroundColor="black"` for neon effect
-
-## Marquee Scroll
-```typescript
-useMarquee(content: string, maxLines: number): string
-```
-- Phase rotates every 500ms
-- Used only in ed state when content exceeds maxLines
-- Shows sequential slices of full content
-
-## Critical Implementation Notes
-
-### Height Enforcement
-- **Wrong**: `height={X}` alone (Ink may ignore if content overflows)
-- **Correct**: `minHeight={X} maxHeight={X}` (forces exact height)
-
-### Width Enforcement
-- **Wrong**: Percentage without root constraint
-- **Correct**: Root `width="100%"` + children `width="60%"/40%"`
-
-### Data Completeness
-- **Wrong**: Filter out toolCalls during save
-- **Correct**: Save full messages, filter only during display
-
-### Scroll Behavior
-- **ing state**: `slice(-maxLines)` - show latest, old disappears
-- **ed state**: `useMarquee()` - scroll through full history
-
-## Testing Checklist
-1. ✓ Full-screen (no terminal scroll)
-2. ✓ Fixed proportions (60/40)
-3. ✓ Rounds navigation (↑↓ switch focus)
-4. ✓ Content scroll within round
-5. ✓ Thinking/Toolcalled state transitions
-6. ✓ Marquee scroll in ed state
-7. ✓ Interrupt immediate stop
-8. ✓ Data persistence (restart shows history)
-9. ✓ Toolcalled data complete (not empty)
-10. ✓ Neon colors visible
+## Testing
+- 85个测试全部通过
+- TypeScript编译无误
+- 真实终端验证完成
 
 ## File Structure
 ```
 src/tui/
-  App.tsx                    # Main layout
+  App.tsx                    # 主布局
   components/
-    AIOutputPanel.tsx        # Rounds display
+    AIOutputPanel.tsx        # Rounds
     ThinkingPanel.tsx        # Thinking/Thoughts
-    ToolsPanel.tsx           # Toolcalling/Toolcalled  
-    InputPanel.tsx           # User input
+    ToolsPanel.tsx           # Toolcalling/Toolcalled
+    InputPanel.tsx           # Input + 补全 + 队列
+    StatusBanners.tsx        # Error + Diff横幅
   hooks/
-    useAgent.ts              # Agent state + event handling
-    useScroll.ts             # Round navigation logic
-    useMarquee.ts            # Auto-scroll animation
+    useAgent.ts              # 状态管理
+    useScroll.ts             # 滚动逻辑
+    useMarquee.ts            # 自动滚动
   utils/
-    associateEvents.ts       # Event → Turn transformation
-  types.ts                   # ConversationTurn, Event definitions
+    associateEvents.ts       # Event→Turn
+  types.ts                   # 类型定义
+src/agent.ts                 # Agent核心（含压缩、错误建议）
 ```

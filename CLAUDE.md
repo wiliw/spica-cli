@@ -9,6 +9,8 @@ npm run dev        # Run CLI in development mode (tsx)
 npm run build      # Generate executable bin/spica script
 npm test           # Run tests with Vitest
 npm run test:run   # Run tests once (no watch)
+spica              # Run TUI (after npm link)
+spica run "request" # CLI mode
 ```
 
 ## Architecture Overview
@@ -21,94 +23,97 @@ npm run test:run   # Run tests once (no watch)
 
 **SpicaAgent** (`src/agent.ts`):
 - Orchestrates LLM client, tools, and project state
-- EventEmitter-based: emits `stream`, `reasoning`, `tool_call`, `tool_result`, `message`
-- Auto-detects project type from package.json/go.mod/etc., creates `.spica.md`
-- Maintains todo list with status tracking
-- Interruptible via `interrupt()` which sets flag and aborts LLM stream
+- EventEmitter-based: emits `stream`, `reasoning`, `tool_call`, `tool_result`, `message`, `error_suggestion`, `diff_preview`
+- Auto-detects project type, creates `.spica.md`
+- **New features**:
+  - `generateErrorSuggestion()`: 工具失败时生成修复建议
+  - `compressHistory()`: 超过20条消息自动压缩
+  - Context persistence with simplified messages
 
 **LLMClient** (`src/llm/LLMClient.ts`):
-- Wraps OpenAI-compatible provider with rate limiting and token counting
-- Streaming response with tool call aggregation
-- AbortController pattern for interrupt support
+- OpenAI-compatible provider with rate limiting
+- Streaming + tool calling aggregation
+- AbortController for interrupt
 
 **Tools** (`src/tools/index.ts`):
-- 26 tools: file operations, bash, git, web search/fetch, glob, grep, workspace, question, todo_write, task (parallel subagents)
-- Tool definitions passed to LLM as function calling schema
-- `task` tool spawns up to 3 parallel SpicaAgent instances
+- 26 tools: file ops, bash, git, web, glob, grep, workspace, question, todo_write, task
+- `task` tool spawns parallel SpicaAgent instances
 
 **Project Persistence** (`src/utils/projectState.ts`):
-- `.spica/state.json`: todos, phase, decisions, lastActivity
-- `.spica/context.json`: recent messages (max 20, trimmed on save)
-- Loaded on init to restore conversation context
+- `.spica/state.json`: todos, phase, decisions
+- `.spica/context.json`: recent messages (max 20, compressed)
 
 ### TUI Architecture
 
-Built with Ink (React for terminal). Key design principles from docs/tui-architecture.md:
+Built with Ink (React for terminal). Key principles:
 
 **Layout** (`src/tui/App.tsx`):
-- Full-screen: uses `stdout.rows` for height, root container `width="100%"`
-- Split: 60% left (AIOutputPanel) | 40% right (ThinkingPanel 60% + ToolsPanel 40%)
-- Input: fixed 3 lines at bottom
+- Full-screen: `stdout.rows` for height, `width="100%"`
+- Split: 60% left (AIOutput) | 40% right (Thinking 60% + Tools 40%)
+- Status Bar: running时显示进度
+- Input: fixed height at bottom
 
 **Critical Height Enforcement**:
-Ink ignores single `height={X}` when content overflows. Always use dual constraints:
+Ink border在**内部**占用空间（上下各1行）：
 ```typescript
-// Correct - forces exact height
-<Box minHeight={height} maxHeight={height}>
+const contentHeight = totalHeight - 2 - 1; // border + title
 ```
 
-**State Management** (`src/tui/hooks/useAgent.ts`):
-- `AgentState`: turns, events, currentStream, currentReasoning, isRunning
-- Events → Turns transformation via `associateEvents()`
-- Separate buffers for stream content and reasoning
+**Components** (`src/tui/components/`):
+- `AIOutputPanel.tsx`: Rounds显示，换行wrap
+- `ThinkingPanel.tsx`: ing只显示最新，ed滚动历史
+- `ToolsPanel.tsx`: 每工具2行，带依赖符号（→串行/‖并行）
+- `InputPanel.tsx`: 工作状态条 + 任务队列 + Tab补全
+- `StatusBanners.tsx`: ErrorBanner + DiffPreview
 
-**Panel States (ing/ed)**:
-- `ing` (isRunning=true): Show latest content only, old disappears (`slice(-maxLines)`)
-- `ed` (isRunning=false): Full history with marquee scroll if overflow
+**Hooks** (`src/tui/hooks/`):
+- `useAgent.ts`: 状态管理，事件处理，任务队列
+- `useScroll.ts`: Round导航，autoFollow逻辑
+- `useMarquee.ts`: 内容滚动动画
 
 **Data Flow**:
-- Agent emits events → useAgent buffers → setState updates → associateEvents creates turns → panels display
-- Tool calls tracked with status: running → success/error
+- Agent emits → useAgent buffers → associateEvents creates turns → panels display
+- `associateEvents.ts`: 同工具名只保留最新状态
+
+**New TUI Features**:
+1. 工作状态指示条（Step X: tool_name）
+2. 错误恢复建议横幅
+3. Diff预览横幅（3秒消失）
+4. 多任务队列显示
+5. Ctrl+H快捷键帮助
+6. Ctrl+E会话导出
+7. Tab命令补全
+8. 上下文压缩（超过20条）
 
 ### Provider System
 
-OpenAI-compatible approach - single config for multiple providers:
-
-**Environment Variables** (preferred for security):
+Environment Variables:
 - `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`
 - Provider-specific: `SPICA_TOGETHER_API_KEY`, etc.
 
-**Config File** (`~/.spica/config.json`):
+Config File (`~/.spica/config.json`):
 - Built-in providers: openai, anthropic, together, groq, local, custom
-- `getProviderConfig()` merges env vars + file config + built-in defaults
 
 ### Key Patterns
 
-**Tool Execution Loop** (`agent.ts:runLoop`):
+**Tool Execution Loop**:
 1. Generate with tools
-2. If tool calls: execute all in parallel, emit events
-3. Continue with tool results
-4. Repeat until `finished=true` or max iterations
-5. Save project context on completion
+2. Execute tools in parallel, emit events
+3. Continue with results
+4. Repeat until finished
+5. Save context (compressed if needed)
 
 **Interrupt Flow**:
-- ESC in TUI → confirmation → `agent.interrupt()`
-- Sets `interruptFlag=true` + calls `llm.interrupt()`
-- `abortController.abort()` breaks stream immediately
-
-**Project Detection** (`agent.ts:autoDetectProject`):
-- package.json → Node.js/TypeScript/React CLI/Webapp
-- go.mod → Go
-- requirements.txt → Python
-- Cargo.toml → Rust
-- Creates `.spica.md` with build/test/dev commands
+ESC → confirmation → `agent.interrupt()` → `llm.interrupt()` → `abortController.abort()`
 
 ## Important Files
 
-- `src/agent.ts` - Core agent loop, tool calling, project management
-- `src/tools/index.ts` - All tool definitions and execution
+- `src/agent.ts` - Agent loop, error suggestions, context compression
+- `src/tools/index.ts` - All tool definitions
 - `src/llm/providers/OpenAICompatible.ts` - Streaming + tool calling
 - `src/tui/App.tsx` - Main TUI layout
-- `src/tui/hooks/useAgent.ts` - State management, event handling
-- `src/utils/projectState.ts` - Persistence layer
-- `docs/TUI-REQUIREMENTS.md` - Confirmed TUI design requirements
+- `src/tui/hooks/useAgent.ts` - State management
+- `src/tui/components/*.tsx` - All UI components
+- `src/tui/utils/associateEvents.ts` - Event→Turn transformation
+- `docs/TUI-REQUIREMENTS.md` - 需求文档（已实现）
+- `docs/tui-architecture.md` - 技术架构

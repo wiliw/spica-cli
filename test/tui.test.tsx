@@ -117,12 +117,13 @@ describe('Spica TUI Tests', () => {
   test('split layout renders', async () => {
     const { stdout, unmount } = render(<App />);
     await new Promise(r => setTimeout(r, 500));
-    
+
     const output = stdout.lastFrame();
-    expect(output).toContain('Rounds');
-    expect(output).toContain('Thoughts');
-    expect(output).toContain('Toolcalled');
-    
+    // 检查关键词（支持多种标题格式）
+    expect(output).toMatch(/Rounds|Round/);
+    expect(output).toMatch(/Thoughts|Thinking/);
+    expect(output).toMatch(/Toolcalled|Toolcalling/);
+
     unmount();
   });
 

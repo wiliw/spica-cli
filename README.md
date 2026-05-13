@@ -1,6 +1,6 @@
 # spica-cli
 
-AI coding agent with three-step workflow (MVP → Cycle → Archive).
+AI coding agent with full-screen TUI. 简洁高效的编程助手。
 
 **OpenAI-compatible：调用任何第三方模型**
 
@@ -8,53 +8,100 @@ AI coding agent with three-step workflow (MVP → Cycle → Archive).
 
 ## 快速开始
 
-### 配置（三种方式）
-
-**方式 1：环境变量（推荐，最安全）**
-
 ```bash
-# 临时设置（不写入 ~/.bash_history）
-export HISTCONTROL=ignoreboth
+# 安装
+npm install
+npm link
+
+# 配置环境变量（推荐）
 export OPENAI_API_KEY=your-key
 export OPENAI_BASE_URL=https://api.openai.com/v1
 export OPENAI_MODEL=gpt-4
 
-./bin/spica mvp "build hello world CLI"
+# 启动TUI
+spica
 
-# 退出后清除（可选）
-unset OPENAI_API_KEY
+# CLI模式
+spica run "列出当前目录的文件"
 ```
 
-**安全提示：**
-- ✓ 不写入 shell history（`HISTCONTROL=ignoreboth`）
-- ✓ 不存储在文件中
-- ✓ 仅当前 session 可见
-- ⚠️ 进程列表临时可见（`ps aux`）
+---
 
-**方式 2：TUI 配置（session-only，不存储）**
+## TUI 界面
 
-```bash
-./bin/spica
-# 按 S 进入配置界面
-# 输入 API Key、Base URL、Model
-# ⚠️ 仅保存在内存中，退出后清除
-# ⚠️ 不写入任何文件
+```
+┌──────────────────────┬──────────────────────────────────────┐
+│ Rounds 1/3 [AUTO]    │ Thinking                             │
+│ == FOCUS: Round 1 == │ 现在让我分析项目结构...               │
+│ Q: 列出文件          │                                      │
+│ A: 文件列表如下      │                                      │
+│                      ├──────────────────────────────────────┤
+│                      │ Toolcalled (5)                       │
+│                      │ [OK] bash: ls -la                    │
+│                      │ → [OK] file_read: README.md          │
+│                      │ ‖ [OK] file_read: package.json       │
+├──────────────────────┴──────────────────────────────────────┤
+│ ⠏ Step 3: file_read                                          │  ← 工作状态
+├─────────────────────────────────────────────────────────────┤
+│ Input (quit to exit)                                         │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**方式 3：配置文件（明文存储，不推荐）**
+---
 
-```bash
-./bin/spica providers set custom YOUR_KEY \
-  -b https://api.openai.com/v1 \
-  -m gpt-4
+## 新特性
 
-./bin/spica mvp "build app"
+### 1. 工作状态指示条
+运行时显示当前步骤和工具：
+```
+│ ⠏ Step 3: file_read [Queue: 2]                               │
 ```
 
-**安全警告：**
-- ⚠️ API key 明文存储在 `~/.spica/config.json`
-- ⚠️ Root/备份可读
-- ⚠️ 误 commit 到 git 的风险
+### 2. 错误恢复建议
+工具失败时自动显示修复建议：
+```
+┌─────────────────────────────────┐
+│ ⚠ file_read failed              │
+│ 文件不存在: /path               │
+│ 💡 使用glob搜索正确路径          │
+└─────────────────────────────────┘
+```
+
+### 3. Diff预览
+文件编辑后显示摘要（3秒消失）：
+```
+┌─────────────────────────────────┐
+│ 📝 src/agent.ts (+5/-2)         │
+│ + import { compressHistory }    │
+│ - const oldCode = ...           │
+└─────────────────────────────────┘
+```
+
+### 4. 工具依赖分析
+显示工具执行关系：
+- `→` 串行执行（不同工具类型）
+- `‖` 并行执行（同类型连续）
+
+### 5. 多任务队列
+输入框显示排队任务数，支持连续提交。
+
+### 6. 快捷键
+
+| 快捷键 | 功能 |
+|--------|------|
+| `Ctrl+H` | 显示快捷键帮助 |
+| `Ctrl+E` | 导出会话为markdown |
+| `Ctrl+P` | Provider设置 |
+| `Tab` | 命令补全 |
+| `↑/↓` | 滚动内容/切换回合 |
+| `G` | 跳到最新回合 |
+| `ESC` | 中断任务 |
+
+### 7. 上下文压缩
+超过20条消息自动压缩，生成历史摘要。
+
+### 8. Tab命令补全
+补全常用命令：read, write, edit, bash, glob, grep等。
 
 ---
 
@@ -67,170 +114,31 @@ unset OPENAI_API_KEY
 | Together AI | https://api.together.xyz/v1 | Llama, Mistral |
 | Groq | https://api.groq.com/openai/v1 | Llama, Mixtral |
 | 本地模型 | http://localhost:8000/v1 | llama.cpp, vLLM |
-| Azure OpenAI | https://YOUR_RESOURCE.azure.com | GPT-4 |
 | OpenAI | https://api.openai.com/v1 | GPT-4 |
-
----
-
-## 三步走工作流
-
-### MVP - 启动新项目
-
-```bash
-./bin/spica mvp "build file classifier CLI"
-
-流程：
-  ✓ Gather requirements
-  ✓ Recommend tech stack
-  ✓ Design architecture
-  ✓ Implement core
-  ✓ Create documents
-  ✓ Demo result
-```
-
-### Cycle - 快速迭代
-
-```bash
-./bin/spica cycle "add drag-and-drop interface"
-
-流程：
-  ✓ Judge type (bug/simple/complex)
-  ✓ Implement
-  ✓ Test
-  ✓ Update docs
-  ✓ Demo
-```
-
-### Archive - 归档
-
-```bash
-./bin/spica archive v1.0
-
-流程：
-  ✓ Verify tests
-  ✓ Update CHANGELOG
-  ✓ Git commit + tag
-  ✓ Archive documents
-```
-
----
-
-## 示例：完整流程
-
-### 使用 Together AI
-
-```bash
-# 配置
-export OPENAI_API_KEY=your-together-key
-export OPENAI_BASE_URL=https://api.together.xyz/v1
-export OPENAI_MODEL=meta-llama/Llama-3-70b-chat-hf
-
-cd ~/development/spica/spica-cli
-
-# Step 1: MVP
-./bin/spica mvp "build hello world CLI"
-
-# Step 2: Cycle
-./bin/spica cycle "add color output"
-
-# Step 3: Archive
-./bin/spica archive v1.0
-```
-
-### 使用本地模型（完全隐私）
-
-```bash
-# 启动 llama.cpp
-llama-server -m llama-3-8b.Q4_K_M.gguf --port 8000
-
-# 配置
-export OPENAI_API_KEY=dummy
-export OPENAI_BASE_URL=http://localhost:8000/v1
-export OPENAI_MODEL=llama-3-8b
-
-./bin/spica mvp "build private app"
-```
-
----
-
-## TUI 界面
-
-```bash
-./bin/spica
-
-启动全屏界面：
-┌─────────────┬─────────────────────┐
-│ Workflow    │ [Todos | Messages] │
-│ ▸ MVP       │ Progress: 3/6      │
-│   Cycle     │                     │
-│   Archive   │                     │
-└─────────────┴─────────────────────┘
-
-↑↓ Navigate | Enter Start | S Settings | Q Quit
-```
-
-## TUI Features
-
-### Split-Screen Layout
-- Left: AI Output (scrollable message list with focus indicator)
-- Right Top: Thinking (reasoning for focused message)
-- Right Bottom: Tools (tool calls for focused message)
-
-### Controls
-- ↑↓: Scroll message list, focus auto-follows
-- Enter: Submit input
-- ESC: Interrupt running task
-- Ctrl+C: Exit
-
-### Input Stability
-- Isolated input component prevents character loss during fast typing
-- Works during LLM stream output without interference
-
----
-
-## CLI 命令
-
-```bash
-# 三步走
-./bin/spica mvp "description"
-./bin/spica cycle "request"
-./bin/spica archive "version"
-
-# 配置
-./bin/spica providers set custom KEY -b URL -m MODEL
-./bin/spica providers show custom
-./bin/spica providers
-```
 
 ---
 
 ## 核心特性
 
-- ✅ **OpenAI-compatible** - 一个配置调用所有第三方模型
-- ✅ **三步走工作流** - MVP → Cycle → Archive
-- ✅ **自动执行** - Iron Laws 强制规则
-- ✅ **完整能力** - file/bash/git/web/build/test
-- ✅ **沉浸式 TUI** - 全屏界面，键盘操作
+- ✅ **全屏TUI** - 60/40黄金分割布局
+- ✅ **工作进度显示** - Step + tool_name + spinner
+- ✅ **错误恢复** - 自动建议修复方案
+- ✅ **结果预览** - 文件编辑diff摘要
+- ✅ **多任务队列** - 连续提交自动排队
+- ✅ **上下文压缩** - 长对话自动优化
+- ✅ **命令补全** - Tab补全常用命令
+- ✅ **会话导出** - 导出为markdown
+- ✅ **26种工具** - file/bash/git/web/glob/grep/todo/task
 - ✅ **隐私优先** - 支持本地模型
 
 ---
 
 ## 文档
 
-- [简化使用](docs/SIMPLE_USAGE.md) - OpenAI-compatible 配置
-- [环境变量](docs/ENV_VARS.md) - 环境变量详细说明
-- [安全说明](docs/SECURITY.md) - API key 存储安全
-- [配置](docs/CONFIGURATION.md) - 详细配置指南
-
----
-
-## 安装
-
-```bash
-cd ~/development/spica/spica-cli
-npm install
-./bin/spica --help
-```
+- [TUI需求文档](docs/TUI-REQUIREMENTS.md) - 需求和实现状态
+- [TUI架构](docs/tui-architecture.md) - 技术架构详解
+- [环境变量](docs/ENV_VARS.md) - 环境变量配置
+- [安全说明](docs/SECURITY.md) - API key安全
 
 ---
 
