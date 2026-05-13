@@ -42,6 +42,7 @@ export class SpicaAgent extends EventEmitter {
   private permissionQueue: Array<{ reason: string; resolve: (approved: boolean) => void }> = [];
   private permissionPending = false;
   private permissionResolve: ((approved: boolean) => void) | null = null;
+  private bypassPermissions = false;  // 跳过权限请求模式
 
   constructor(providerName?: string, workspacePath?: string) {
     super();
@@ -99,6 +100,12 @@ export class SpicaAgent extends EventEmitter {
 
   // 等待权限确认（串行处理）
   async waitForPermission(reason: string): Promise<boolean> {
+    // 如果bypass模式开启，自动批准
+    if (this.bypassPermissions) {
+      this.emit('permission_bypassed', { reason });
+      return true;
+    }
+
     // 将请求加入队列
     const request = { reason, resolve: null as ((approved: boolean) => void) | null };
     const promise = new Promise<boolean>((resolve) => {
@@ -156,6 +163,16 @@ export class SpicaAgent extends EventEmitter {
 
   get isPermissionPending(): boolean {
     return this.permissionPending;
+  }
+
+  // 设置bypass模式
+  setBypassPermissions(enabled: boolean): void {
+    this.bypassPermissions = enabled;
+    this.emit('bypass_changed', { enabled });
+  }
+
+  get isBypassPermissions(): boolean {
+    return this.bypassPermissions;
   }
 
 async init() {

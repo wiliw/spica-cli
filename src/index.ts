@@ -80,6 +80,19 @@ function setupAgentEvents(agent: SpicaAgent, interactive: boolean = false) {
     console.log(chalk.blue(`📁 Workspace: ${data.path}`));
   });
 
+  // Bypass模式事件
+  agent.on('bypass_changed', (data: any) => {
+    if (data.enabled) {
+      console.log(chalk.yellow('⚠ Bypass mode activated'));
+    } else {
+      console.log(chalk.green('✓ Strict mode activated'));
+    }
+  });
+
+  agent.on('permission_bypassed', (data: any) => {
+    console.log(chalk.yellow(`⚡ Auto-approved: ${data.reason}`));
+  });
+
   // 子agent事件
   agent.on('sub_agent_start', (data: any) => {
     console.log(chalk.gray(`  [${data.type || 'sub'}] ${data.description}`));
@@ -169,6 +182,7 @@ program
 
       console.log(chalk.gray(`\nModel: ${providerConfig.model}`));
       console.log(chalk.gray('Type your request, Ctrl+C to interrupt, "quit" to exit\n'));
+      console.log(chalk.gray('Commands: /bypass (skip permissions), /strict (require permissions), /status\n'));
 
       // REPL循环
       while (true) {
@@ -194,10 +208,58 @@ program
           continue;
         }
 
-        if (trimmed === 'save') {
-          saveSession(process.cwd(), agent.getMessages());
-          console.log(chalk.green('✓ Session saved'));
-          continue;
+        // 指令处理（控制agent行为）
+        if (trimmed.startsWith('/')) {
+          const cmd = trimmed.slice(1).toLowerCase();
+
+          if (cmd === 'bypass') {
+            agent.setBypassPermissions(true);
+            console.log(chalk.yellow('⚠ Bypass mode ON - All permissions will be auto-approved'));
+            console.log(chalk.gray('Use /strict to restore permission checks'));
+            continue;
+          }
+
+          if (cmd === 'strict') {
+            agent.setBypassPermissions(false);
+            console.log(chalk.green('✓ Strict mode ON - Permissions will be requested'));
+            continue;
+          }
+
+          if (cmd === 'status') {
+            const bypass = agent.isBypassPermissions;
+            const msgs = agent.getMessages().length;
+            console.log(chalk.bold('\nCurrent Status:'));
+            console.log(`  Permission mode: ${bypass ? chalk.yellow('BYPASS (auto-approve)') : chalk.green('STRICT (ask user)')}`);
+            console.log(`  Messages in context: ${msgs}`);
+            console.log(`  Workspace: ${agent.getWorkspacePath()}`);
+            continue;
+          }
+
+          // /help 指令
+          if (cmd === 'help') {
+            console.log(chalk.gray(`
+Commands:
+  quit/exit  - Exit spica
+  clear      - Clear session history
+  save       - Save current session
+  help       - Show this help
+  skills     - List available skills
+  Ctrl+C     - Interrupt current operation
+
+Mode Control:
+  /bypass    - Skip all permission requests (auto-approve)
+  /strict    - Restore permission requests
+  /status    - Show current status
+
+Skills (use /skill_name args):
+  /search <query>   - Quick code search
+  /review <files>   - Code review
+  /fix <issue>      - Fix specific issue
+  /explain <target> - Explain code logic
+  /test <filter>    - Run tests
+`));
+            continue;
+          }
         }
 
         if (trimmed === 'help') {
@@ -210,6 +272,11 @@ Commands:
   skills     - List available skills
   Ctrl+C     - Interrupt current operation
 
+Mode Control:
+  /bypass    - Skip all permission requests (auto-approve)
+  /strict    - Restore permission requests
+  /status    - Show current status
+
 Skills (use /skill_name args):
   /search <query>   - Quick code search
   /review <files>   - Code review
@@ -217,6 +284,12 @@ Skills (use /skill_name args):
   /explain <target> - Explain code logic
   /test <filter>    - Run tests
 `));
+          continue;
+        }
+
+        if (trimmed === 'save') {
+          saveSession(process.cwd(), agent.getMessages());
+          console.log(chalk.green('✓ Session saved'));
           continue;
         }
 
