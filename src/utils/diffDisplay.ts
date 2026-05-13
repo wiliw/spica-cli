@@ -1,6 +1,11 @@
-// Diff显示 - 格式化文件变更对比
+// Diff显示 - 格式化文件变更对比 (Lain配色)
 
 import chalk from 'chalk';
+
+// Lain配色
+const DIFF_ADD = chalk.hex('#00FA9A');   // 春绿 - 新增
+const DIFF_REMOVE = chalk.hex('#FF6B6B'); // 淡红 - 删除
+const DIFF_CONTEXT = chalk.hex('#696969'); // 暗灰 - 上下文
 
 export interface DiffLine {
   type: 'add' | 'remove' | 'context';
@@ -64,7 +69,7 @@ export function computeDiff(oldContent: string, newContent: string): DiffLine[] 
   return diff;
 }
 
-// 格式化diff输出（带颜色）
+// 格式化diff输出（带Lain配色）
 export function formatDiff(diff: DiffLine[], contextLines: number = 3): string {
   const output: string[] = [];
 
@@ -81,18 +86,18 @@ export function formatDiff(diff: DiffLine[], contextLines: number = 3): string {
       if (!inChange) {
         // 开始变更区域，添加上下文
         if (contextBefore.length > 0) {
-          output.push(chalk.gray('...'));
+          output.push(DIFF_CONTEXT('...'));
           contextBefore.slice(-contextLines).forEach(c => {
-            output.push(chalk.gray(`  ${c.content}`));
+            output.push(DIFF_CONTEXT(`  ${c.content}`));
           });
         }
         inChange = true;
       }
 
       if (line.type === 'add') {
-        output.push(chalk.green(`+ ${line.content}`));
+        output.push(DIFF_ADD(`+ ${line.content}`));
       } else {
-        output.push(chalk.red(`- ${line.content}`));
+        output.push(DIFF_REMOVE(`- ${line.content}`));
       }
 
       lastChangeIdx = i;
@@ -100,10 +105,10 @@ export function formatDiff(diff: DiffLine[], contextLines: number = 3): string {
       if (inChange) {
         // 变更后上下文
         if (i - lastChangeIdx <= contextLines) {
-          output.push(chalk.gray(`  ${line.content}`));
+          output.push(DIFF_CONTEXT(`  ${line.content}`));
         } else {
           inChange = false;
-          output.push(chalk.gray('...'));
+          output.push(DIFF_CONTEXT('...'));
         }
       } else {
         // 变更前上下文
@@ -125,11 +130,11 @@ export function formatDiffSummary(diff: DiffLine[]): string {
 
   let summary = '';
   if (removes.length > 0) {
-    summary += chalk.red(`${removes.length} lines removed`);
+    summary += DIFF_REMOVE(`${removes.length} lines removed`);
   }
   if (adds.length > 0) {
     if (summary) summary += ', ';
-    summary += chalk.green(`${adds.length} lines added`);
+    summary += DIFF_ADD(`${adds.length} lines added`);
   }
 
   return summary;

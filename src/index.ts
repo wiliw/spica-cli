@@ -12,7 +12,7 @@ import {
 } from './utils/config';
 import { loadSession, saveSession } from './utils/session';
 import { parseSkillInput, getSkill, buildSkillPrompt, listSkills } from './skills';
-import chalk from 'chalk';
+import { LAIN_COLORS, format } from './utils/colors';
 import prompts from 'prompts';
 
 const program = new Command();
@@ -23,48 +23,42 @@ let currentAgent: SpicaAgent | null = null;
 // 设置agent事件监听
 function setupAgentEvents(agent: SpicaAgent, interactive: boolean = false) {
   agent.on('stream', (data: any) => {
-    // assistant回复，实时显示
-    process.stdout.write(data.chunk);
+    // assistant回复，实时显示（青色）
+    process.stdout.write(LAIN_COLORS.primary(data.chunk));
   });
 
   agent.on('reasoning', (data: any) => {
-    // 实时显示思考内容（紫色，带💭标记）
-    process.stderr.write(chalk.magenta(data.content));
+    // 思考内容实时显示（紫色）
+    process.stderr.write(LAIN_COLORS.reasoning(data.content));
   });
 
   agent.on('tool_call', (data: any) => {
-    // 工具调用前换行，分隔思考
-    console.log(chalk.cyan(`\n→ ${data.name}`));
+    console.log(LAIN_COLORS.tool(`\n→ ${data.name}`));
   });
 
   agent.on('tool_result', (data: any) => {
-    const icon = data.success ? chalk.green('✓') : chalk.red('✗');
+    const icon = data.success ? LAIN_COLORS.success('✓') : LAIN_COLORS.error('✗');
     const output = (data.output || data.error || '').replace(/\n/g, ' ').slice(0, 80);
     console.log(`${icon} ${data.name}: ${output}`);
   });
 
   agent.on('diff_preview', (data: any) => {
-    console.log(chalk.blue(`\n📄 ${data.filePath}`));
-    // diff already has colors from formatDiff, so don't wrap it
+    console.log(LAIN_COLORS.file(`\n📄 ${data.filePath}`));
     if (data.diff) {
       console.log(data.diff);
     }
   });
 
   agent.on('permission_request', async (data: any) => {
-    // 清晰的权限提示
-    console.log('\n' + chalk.yellow('═'.repeat(50)));
-    console.log(chalk.yellow.bold('⚠  PERMISSION REQUIRED'));
-    console.log(chalk.yellow('═'.repeat(50)));
-    console.log(chalk.white(`  Action: ${data.reason}`));
-    console.log(chalk.gray('─'.repeat(50)));
+    // Lain红色警示框
+    console.log(format.permissionBox(data.reason));
     const answer = await prompts({
       type: 'confirm',
       name: 'approve',
-      message: chalk.bold('Do you want to allow this action?'),
+      message: LAIN_COLORS.primary.bold('Do you want to allow this action?'),
       initial: false,
     });
-    console.log(chalk.yellow('═'.repeat(50)) + '\n');
+    console.log(LAIN_COLORS.permissionBorder('═'.repeat(50)) + '\n');
     if (answer.approve) {
       agent.approvePermission();
     } else {
@@ -73,59 +67,59 @@ function setupAgentEvents(agent: SpicaAgent, interactive: boolean = false) {
   });
 
   agent.on('error_suggestion', (data: any) => {
-    console.log(chalk.yellow(`💡 Suggestion: ${data.suggestion}`));
+    console.log(LAIN_COLORS.warning(`💡 ${data.suggestion}`));
   });
 
   agent.on('workspace_changed', (data: any) => {
-    console.log(chalk.blue(`📁 Workspace: ${data.path}`));
+    console.log(LAIN_COLORS.file(`📁 Workspace: ${data.path}`));
   });
 
   // Bypass模式事件
   agent.on('bypass_changed', (data: any) => {
     if (data.enabled) {
-      console.log(chalk.yellow('⚠ Bypass mode activated'));
+      console.log(LAIN_COLORS.bypass('⚠ Bypass mode activated'));
     } else {
-      console.log(chalk.green('✓ Strict mode activated'));
+      console.log(LAIN_COLORS.success('✓ Strict mode activated'));
     }
   });
 
   agent.on('permission_bypassed', (data: any) => {
-    console.log(chalk.yellow(`⚡ Auto-approved: ${data.reason}`));
+    console.log(LAIN_COLORS.bypassAuto(`⚡ Auto-approved: ${data.reason}`));
   });
 
   // 子agent事件
   agent.on('sub_agent_start', (data: any) => {
-    console.log(chalk.gray(`  [${data.type || 'sub'}] ${data.description}`));
+    console.log(LAIN_COLORS.subAgent(`  [${data.type || 'sub'}] ${data.description}`));
   });
 
   agent.on('sub_agent_tool_call', (data: any) => {
-    console.log(chalk.gray(`    → [sub] ${data.name}`));
+    console.log(LAIN_COLORS.subAgent(`    → [sub] ${data.name}`));
   });
 
   agent.on('sub_agent_tool_result', (data: any) => {
-    const icon = data.success ? chalk.green('✓') : chalk.red('✗');
-    console.log(chalk.gray(`    ${icon} [sub] ${data.name}`));
+    const icon = data.success ? LAIN_COLORS.success('✓') : LAIN_COLORS.error('✗');
+    console.log(LAIN_COLORS.subAgent(`    ${icon} [sub] ${data.name}`));
   });
 
   agent.on('sub_agent_done', (data: any) => {
-    console.log(chalk.green(`  ✓ [sub] Done: ${data.summary.slice(0, 50)}`));
+    console.log(LAIN_COLORS.success(`  ✓ [sub] Done: ${data.summary.slice(0, 50)}`));
   });
 
   agent.on('sub_agent_error', (data: any) => {
-    console.log(chalk.red(`  ✗ [sub] Error: ${data.error}`));
+    console.log(LAIN_COLORS.error(`  ✗ [sub] Error: ${data.error}`));
   });
 
   // Hooks事件
   agent.on('hook_blocked', (data: any) => {
-    console.log(chalk.red(`🚫 Blocked: ${data.tool} - ${data.reason}`));
+    console.log(LAIN_COLORS.error(`🚫 Blocked: ${data.tool} - ${data.reason}`));
   });
 
   agent.on('hook_warning', (data: any) => {
-    console.log(chalk.yellow(`⚠ Warning: ${data.message}`));
+    console.log(LAIN_COLORS.warning(`⚠ ${data.message}`));
   });
 
   agent.on('hook_log', (data: any) => {
-    console.log(chalk.gray(`📋 ${data.message}`));
+    console.log(LAIN_COLORS.muted(`📋 ${data.message}`));
   });
 }
 
@@ -133,7 +127,7 @@ function setupAgentEvents(agent: SpicaAgent, interactive: boolean = false) {
 process.on('SIGINT', () => {
   if (currentAgent) {
     currentAgent.interrupt();
-    console.log(chalk.yellow('\n⚠ Interrupted'));
+    console.log(LAIN_COLORS.warning('\n⚠ Interrupted'));
   } else {
     process.exit(0);
   }
@@ -156,8 +150,8 @@ program
     try {
       providerConfig = await getProviderConfig(providerName);
     } catch (error: any) {
-      console.log(chalk.red(`Provider "${providerName}" not configured.`));
-      console.log(chalk.yellow('Set up with: spica providers set <name> <api-key>'));
+      console.log(LAIN_COLORS.error(`Provider "${providerName}" not configured.`));
+      console.log(LAIN_COLORS.warning('Set up with: spica providers set <name> <api-key>'));
       return;
     }
 
@@ -174,22 +168,22 @@ program
         const session = loadSession(process.cwd());
         if (session) {
           agent.setMessages(session.messages);
-          console.log(chalk.green('✓ Restored previous session'));
+          console.log(LAIN_COLORS.success('✓ Restored previous session'));
         } else {
-          console.log(chalk.yellow('No previous session found'));
+          console.log(LAIN_COLORS.warning('No previous session found'));
         }
       }
 
-      console.log(chalk.gray(`\nModel: ${providerConfig.model}`));
-      console.log(chalk.gray('Type your request, Ctrl+C to interrupt, "quit" to exit\n'));
-      console.log(chalk.gray('Commands: /bypass (skip permissions), /strict (require permissions), /status\n'));
+      console.log(LAIN_COLORS.muted(`\nModel: ${providerConfig.model}`));
+      console.log(LAIN_COLORS.muted('Type your request, Ctrl+C to interrupt, "quit" to exit\n'));
+      console.log(LAIN_COLORS.muted('Commands: /bypass (skip permissions), /strict (require permissions), /status\n'));
 
       // REPL循环
       while (true) {
         const input = await prompts({
           type: 'text',
           name: 'prompt',
-          message: chalk.green('>'),
+          message: LAIN_COLORS.success('>'),
         });
 
         if (!input.prompt) {
@@ -204,7 +198,7 @@ program
 
         if (trimmed === 'clear' || trimmed === 'reset') {
           agent.setMessages([]);
-          console.log(chalk.gray('Session cleared'));
+          console.log(LAIN_COLORS.muted('Session cleared'));
           continue;
         }
 
@@ -214,30 +208,30 @@ program
 
           if (cmd === 'bypass') {
             agent.setBypassPermissions(true);
-            console.log(chalk.yellow('⚠ Bypass mode ON - All permissions will be auto-approved'));
-            console.log(chalk.gray('Use /strict to restore permission checks'));
+            console.log(LAIN_COLORS.warning('⚠ Bypass mode ON - All permissions will be auto-approved'));
+            console.log(LAIN_COLORS.muted('Use /strict to restore permission checks'));
             continue;
           }
 
           if (cmd === 'strict') {
             agent.setBypassPermissions(false);
-            console.log(chalk.green('✓ Strict mode ON - Permissions will be requested'));
+            console.log(LAIN_COLORS.success('✓ Strict mode ON - Permissions will be requested'));
             continue;
           }
 
           if (cmd === 'status') {
             const bypass = agent.isBypassPermissions;
             const msgs = agent.getMessages().length;
-            console.log(chalk.bold('\nCurrent Status:'));
-            console.log(`  Permission mode: ${bypass ? chalk.yellow('BYPASS (auto-approve)') : chalk.green('STRICT (ask user)')}`);
+            console.log(LAIN_COLORS.primary.bold('\nCurrent Status:'));
+            console.log(`  Permission mode: ${bypass ? LAIN_COLORS.warning('BYPASS (auto-approve)') : LAIN_COLORS.success('STRICT (ask user)')}`);
             console.log(`  Messages in context: ${msgs}`);
             console.log(`  Workspace: ${agent.getWorkspacePath()}`);
             continue;
           }
 
-          // /help 指令
-          if (cmd === 'help') {
-            console.log(chalk.gray(`
+          // /help 指令 (包括 /h 简写)
+          if (cmd === 'help' || cmd === 'h') {
+            console.log(LAIN_COLORS.muted(`
 Commands:
   quit/exit  - Exit spica
   clear      - Clear session history
@@ -263,7 +257,7 @@ Skills (use /skill_name args):
         }
 
         if (trimmed === 'help') {
-          console.log(chalk.gray(`
+          console.log(LAIN_COLORS.muted(`
 Commands:
   quit/exit  - Exit spica
   clear      - Clear session history
@@ -289,15 +283,15 @@ Skills (use /skill_name args):
 
         if (trimmed === 'save') {
           saveSession(process.cwd(), agent.getMessages());
-          console.log(chalk.green('✓ Session saved'));
+          console.log(LAIN_COLORS.success('✓ Session saved'));
           continue;
         }
 
         if (trimmed === 'skills') {
           const skills = listSkills();
-          console.log(chalk.bold('\nAvailable skills:'));
+          console.log(LAIN_COLORS.primary.bold('\nAvailable skills:'));
           skills.forEach(s => {
-            console.log(chalk.gray(`  /${s.name} - ${s.description}`));
+            console.log(LAIN_COLORS.muted(`  /${s.name} - ${s.description}`));
           });
           console.log('');
           continue;
@@ -309,12 +303,12 @@ Skills (use /skill_name args):
           const skill = getSkill(skillInput.skillName);
           if (skill) {
             const prompt = buildSkillPrompt(skill, skillInput.args);
-            console.log(chalk.gray(`\n[${skill.name}] ${skill.description}`));
+            console.log(LAIN_COLORS.muted(`\n[${skill.name}] ${skill.description}`));
             try {
               await agent.runLoop(prompt);
-              console.log(chalk.green('\n✓ Done\n'));
+              console.log(LAIN_COLORS.success('\n✓ Done\n'));
             } catch (error: any) {
-              console.log(chalk.red(`\n✗ Error: ${error.message}\n`));
+              console.log(LAIN_COLORS.error(`\n✗ Error: ${error.message}\n`));
             }
             saveSession(process.cwd(), agent.getMessages());
             continue;
@@ -325,9 +319,9 @@ Skills (use /skill_name args):
         console.log('');
         try {
           await agent.runLoop(trimmed);
-          console.log(chalk.green('\n✓ Done\n'));
+          console.log(LAIN_COLORS.success('\n✓ Done\n'));
         } catch (error: any) {
-          console.log(chalk.red(`\n✗ Error: ${error.message}\n`));
+          console.log(LAIN_COLORS.error(`\n✗ Error: ${error.message}\n`));
         }
 
         // 自动保存会话
@@ -336,10 +330,10 @@ Skills (use /skill_name args):
 
       // 退出时保存
       saveSession(process.cwd(), agent.getMessages());
-      console.log(chalk.gray('\nGoodbye!\n'));
+      console.log(LAIN_COLORS.muted('\nGoodbye!\n'));
 
     } catch (error: any) {
-      console.log(chalk.red(`Error: ${error.message}`));
+      console.log(LAIN_COLORS.error(`Error: ${error.message}`));
     }
 
     currentAgent = null;
@@ -358,8 +352,8 @@ program
     try {
       providerConfig = await getProviderConfig(providerName);
     } catch (error: any) {
-      console.log(chalk.red(`Provider "${providerName}" not configured.`));
-      console.log(chalk.yellow('Set up with: spica providers set <name> <api-key>'));
+      console.log(LAIN_COLORS.error(`Provider "${providerName}" not configured.`));
+      console.log(LAIN_COLORS.warning('Set up with: spica providers set <name> <api-key>'));
       return;
     }
 
@@ -371,9 +365,9 @@ program
     try {
       await agent.init();
       const result = await agent.runLoop(request);
-      console.log(chalk.green('\n✓ Completed'));
+      console.log(LAIN_COLORS.success('\n✓ Completed'));
     } catch (error: any) {
-      console.log(chalk.red(`Error: ${error.message}`));
+      console.log(LAIN_COLORS.error(`Error: ${error.message}`));
     }
 
     currentAgent = null;
@@ -393,76 +387,76 @@ program
       const configured = await listProviders();
       const defaultProvider = (await loadConfig()).defaultProvider;
 
-      console.log(chalk.bold('Configured providers:'));
+      console.log(LAIN_COLORS.primary.bold('Configured providers:'));
       if (configured.length === 0) {
-        console.log(chalk.gray('  (none)'));
+        console.log(LAIN_COLORS.muted('  (none)'));
       } else {
         configured.forEach(p => {
           const isDefault = p === defaultProvider;
-          console.log(`  ${isDefault ? chalk.green('●') : '○'} ${p}${isDefault ? chalk.green(' (default)') : ''}`);
+          console.log(`  ${isDefault ? LAIN_COLORS.success('●') : '○'} ${p}${isDefault ? LAIN_COLORS.success(' (default)') : ''}`);
         });
       }
 
-      console.log(chalk.bold('\nBuilt-in providers:'));
+      console.log(LAIN_COLORS.primary.bold('\nBuilt-in providers:'));
       Object.entries(BUILTIN_PROVIDERS).forEach(([key, config]) => {
         const isConfigured = configured.includes(key);
         console.log(`  ${isConfigured ? '✓' : ' '} ${key} - ${config.name}`);
         if (config.description) {
-          console.log(chalk.gray(`      ${config.description}`));
+          console.log(LAIN_COLORS.muted(`      ${config.description}`));
         }
       });
 
-      console.log(chalk.gray('\nUsage:'));
-      console.log(chalk.gray('  spica providers set <name> <api-key>   # 配置已有provider'));
-      console.log(chalk.gray('  spica providers add <name> <api-key> --url <url>  # 添加自定义provider'));
-      console.log(chalk.gray('  spica providers default <name>        # 设置默认provider'));
+      console.log(LAIN_COLORS.muted('\nUsage:'));
+      console.log(LAIN_COLORS.muted('  spica providers set <name> <api-key>   # 配置已有provider'));
+      console.log(LAIN_COLORS.muted('  spica providers add <name> <api-key> --url <url>  # 添加自定义provider'));
+      console.log(LAIN_COLORS.muted('  spica providers default <name>        # 设置默认provider'));
       return;
     }
 
     switch (action) {
       case 'set':
         if (!name || !value) {
-          console.log(chalk.yellow('Usage: spica providers set <name> <api-key> [--url <url>] [--model <model>]'));
+          console.log(LAIN_COLORS.warning('Usage: spica providers set <name> <api-key> [--url <url>] [--model <model>]'));
           return;
         }
         await setProviderConfig(name, value, options?.url, options?.model);
-        console.log(chalk.green(`✓ Provider '${name}' configured`));
-        if (options?.url) console.log(chalk.gray(`  URL: ${options.url}`));
-        if (options?.model) console.log(chalk.gray(`  Model: ${options.model}`));
+        console.log(LAIN_COLORS.success(`✓ Provider '${name}' configured`));
+        if (options?.url) console.log(LAIN_COLORS.muted(`  URL: ${options.url}`));
+        if (options?.model) console.log(LAIN_COLORS.muted(`  Model: ${options.model}`));
         break;
 
       case 'add':
         if (!name || !value) {
-          console.log(chalk.yellow('Usage: spica providers add <name> <api-key> --url <url> [--model <model>]'));
-          console.log(chalk.gray('Example: spica providers add myapi sk-xxx --url https://api.example.com/v1 --model gpt-4'));
+          console.log(LAIN_COLORS.warning('Usage: spica providers add <name> <api-key> --url <url> [--model <model>]'));
+          console.log(LAIN_COLORS.muted('Example: spica providers add myapi sk-xxx --url https://api.example.com/v1 --model gpt-4'));
           return;
         }
         if (!options?.url) {
-          console.log(chalk.red('Error: --url is required for custom provider'));
-          console.log(chalk.yellow('Usage: spica providers add <name> <api-key> --url <url> [--model <model>]'));
+          console.log(LAIN_COLORS.error('Error: --url is required for custom provider'));
+          console.log(LAIN_COLORS.warning('Usage: spica providers add <name> <api-key> --url <url> [--model <model>]'));
           return;
         }
         await setProviderConfig(name, value, options.url, options.model);
-        console.log(chalk.green(`✓ Custom provider '${name}' added`));
-        console.log(chalk.gray(`  URL: ${options.url}`));
-        console.log(chalk.gray(`  Model: ${options.model || 'gpt-4'}`));
+        console.log(LAIN_COLORS.success(`✓ Custom provider '${name}' added`));
+        console.log(LAIN_COLORS.muted(`  URL: ${options.url}`));
+        console.log(LAIN_COLORS.muted(`  Model: ${options.model || 'gpt-4'}`));
         break;
 
       case 'show':
         if (!name) name = (await loadConfig()).defaultProvider || 'openai';
         try {
           const config = await getProviderConfig(name);
-          console.log(chalk.bold(`\nProvider: ${config.name}`));
-          console.log(chalk.gray('─'.repeat(40)));
+          console.log(LAIN_COLORS.primary.bold(`\nProvider: ${config.name}`));
+          console.log(LAIN_COLORS.muted('─'.repeat(40)));
           console.log(`  API Key: ${config.apiKey.substring(0, 10)}...${config.apiKey.length > 20 ? config.apiKey.slice(-4) : ''}`);
           console.log(`  Base URL: ${config.baseUrl}`);
           console.log(`  Model: ${config.model}`);
           if (config.description) {
-            console.log(chalk.gray(`  Description: ${config.description}`));
+            console.log(LAIN_COLORS.muted(`  Description: ${config.description}`));
           }
         } catch (error: any) {
-          console.log(chalk.red(error.message));
-          console.log(chalk.yellow(`Configure it first: spica providers set ${name} YOUR_API_KEY`));
+          console.log(LAIN_COLORS.error(error.message));
+          console.log(LAIN_COLORS.warning(`Configure it first: spica providers set ${name} YOUR_API_KEY`));
         }
         break;
 
@@ -474,16 +468,16 @@ program
         }
         try {
           await setDefaultProvider(name);
-          console.log(chalk.green(`✓ Default provider set to '${name}'`));
+          console.log(LAIN_COLORS.success(`✓ Default provider set to '${name}'`));
         } catch (error: any) {
-          console.log(chalk.red(error.message));
-          console.log(chalk.yellow(`Configure it first: spica providers set ${name} YOUR_API_KEY`));
+          console.log(LAIN_COLORS.error(error.message));
+          console.log(LAIN_COLORS.warning(`Configure it first: spica providers set ${name} YOUR_API_KEY`));
         }
         break;
 
       case 'remove':
         if (!name) {
-          console.log(chalk.yellow('Usage: spica providers remove <name>'));
+          console.log(LAIN_COLORS.warning('Usage: spica providers remove <name>'));
           return;
         }
         const config = await loadConfig();
@@ -493,14 +487,14 @@ program
             config.defaultProvider = Object.keys(config.providers || {})[0] || 'openai';
           }
           await saveConfig(config);
-          console.log(chalk.green(`✓ Provider '${name}' removed`));
+          console.log(LAIN_COLORS.success(`✓ Provider '${name}' removed`));
         } else {
-          console.log(chalk.red(`Provider '${name}' not found in configured providers`));
+          console.log(LAIN_COLORS.error(`Provider '${name}' not found in configured providers`));
         }
         break;
 
       default:
-        console.log(chalk.yellow('Available actions: list, set, add, show, default, remove'));
+        console.log(LAIN_COLORS.warning('Available actions: list, set, add, show, default, remove'));
     }
   });
 
