@@ -517,7 +517,8 @@ program
         // === 执行请求 ===
         console.log('');
         isProcessing = true;
-        console.log(LAIN_COLORS.muted('[PROCESSING] You can continue typing...'));
+        // 保持提示符可见，不显示 [PROCESSING]
+        rl.prompt();
         try {
           await agent.runLoop(trimmed);
           console.log(LAIN_COLORS.success('\n[OK] Done\n'));
