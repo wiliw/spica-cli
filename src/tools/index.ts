@@ -6,7 +6,7 @@ import fastGlob from 'fast-glob';
 import { SpicaAgent } from '../agent';
 import { SubAgentTask, getSubAgentConfig, isToolAllowed, summarizeResult } from './subAgent';
 import { computeDiff, formatDiff, generateEditDiff } from '../utils/diffDisplay';
-import { restoreCheckpoint, getLastCheckpoint, setWorkspace as setCheckpointWorkspace } from '../utils/errorRecovery';
+import { restoreCheckpoint, getLastCheckpoint, setCheckpointWorkspace } from '../utils/errorRecovery';
 import { getMCPManager } from '../mcp/client';
 
 // WORKSPACE 可以通过 setWorkspace 函数更新
@@ -476,14 +476,14 @@ export async function executeTool(
         return { success: true, output: `Workspace: ${WORKSPACE}` };
 
       case 'checkpoint_restore': {
-        const lastCp = getLastCheckpoint();
+        const lastCp = await getLastCheckpoint(WORKSPACE);
         if (!lastCp) {
           return { success: false, error: 'No checkpoint available to restore' };
         }
-        const success = await restoreCheckpoint();
+        const result = await restoreCheckpoint(lastCp.id);
         return {
-          success,
-          output: success ? `Restored to checkpoint: ${lastCp}` : 'Failed to restore checkpoint',
+          success: result.success,
+          output: result.success ? `Restored to checkpoint: ${lastCp.id.slice(0, 7)}` : result.message,
         };
       }
 

@@ -42,7 +42,7 @@
     "@types/fs-extra": "^11.0.4",
     "@types/node": "^20.12.12",
     "@types/prompts": "^2.4.9",
-    "tsx": "^4.10.5",
+    "tsx": "^4.21.1",
     "typescript": "^5.4.5",
     "vitest": "^1.6.0"
   }

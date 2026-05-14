@@ -40,6 +40,7 @@ process.on('SIGINT', () => {
 // 设置agent事件监听
 // 设置agent事件监听
 let connectionErrorShown = false;  // 全局标记
+let isStreamingOutput = false;     // 全局标记：是否正在输出
 
 function setupAgentEvents(agent: SpicaAgent, rl: readline.Interface | null, interactive: boolean = false) {
   let lastWasReasoning = false;
@@ -59,33 +60,40 @@ function setupAgentEvents(agent: SpicaAgent, rl: readline.Interface | null, inte
   };
 
   agent.on('stream', (data: any) => {
+    // 开始输出时清除输入行（只做一次）
+    if (!isStreamingOutput) {
+      isStreamingOutput = true;
+      const esc = '\x1b';
+      process.stdout.write(esc + '[2K' + esc + '[1G');
+    }
     if (lastWasReasoning) {
       process.stdout.write('\n');
       lastWasReasoning = false;
     }
-    // 清除当前输入行，输出后恢复
-    const esc = '\x1b';
-    process.stdout.write(esc + '[2K' + esc + '[1G'); // 清除行，回到行首
+    // 直接输出，不要每次都恢复
     process.stdout.write(LAIN_COLORS.primary(data.chunk));
-    restoreInputLine();
   });
 
   agent.on('reasoning', (data: any) => {
-    const esc = '\x1b';
-    process.stdout.write(esc + '[2K' + esc + '[1G');
+    if (!isStreamingOutput) {
+      isStreamingOutput = true;
+      const esc = '\x1b';
+      process.stdout.write(esc + '[2K' + esc + '[1G');
+    }
     process.stderr.write(LAIN_COLORS.reasoning(data.content));
-    restoreInputLine();
     lastWasReasoning = true;
   });
 
   agent.on('tool_call', (data: any) => {
-    // 工具调用前换行（如果之前是reasoning也要换行）
+    // 工具调用意味着 stream 结束，恢复输入行
+    if (isStreamingOutput) {
+      isStreamingOutput = false;
+      process.stdout.write('\n');
+    }
     if (lastWasReasoning) {
       process.stdout.write('\n');
       lastWasReasoning = false;
     }
-    const esc = '\x1b';
-    process.stdout.write(esc + '[2K' + esc + '[1G');
     console.log(LAIN_COLORS.tool(`-> ${data.name}`));
     if (rl) {
       process.stdout.write('> ' + (rl.line || ''));
@@ -93,14 +101,21 @@ function setupAgentEvents(agent: SpicaAgent, rl: readline.Interface | null, inte
   });
 
   agent.on('tool_result', (data: any) => {
+    // 工具结果意味着 stream 结束
+    if (isStreamingOutput) {
+      isStreamingOutput = false;
+      process.stdout.write('\n');
+    }
     const icon = data.success ? LAIN_COLORS.success('[OK]') : LAIN_COLORS.error('[ERR]');
     const output = data.output || data.error || '';
-    // 显示完整输出，不截断
     console.log(`${icon} ${data.name}:`);
     if (output.length > 0) {
       output.split('\n').forEach(line => {
         console.log(LAIN_COLORS.muted(`  ${line}`));
       });
+    }
+    if (rl) {
+      process.stdout.write('> ' + (rl.line || ''));
     }
   });
 
@@ -521,8 +536,17 @@ program
         rl.prompt();
         try {
           await agent.runLoop(trimmed);
+          // 如果还在 stream 状态，结束它
+          if (isStreamingOutput) {
+            isStreamingOutput = false;
+            process.stdout.write('\n');
+          }
           console.log(LAIN_COLORS.success('\n[OK] Done\n'));
         } catch (error: any) {
+          if (isStreamingOutput) {
+            isStreamingOutput = false;
+            process.stdout.write('\n');
+          }
           console.log(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
         }
         isProcessing = false;
