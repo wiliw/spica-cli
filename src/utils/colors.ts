@@ -51,6 +51,7 @@ export const LAIN_COLORS = {
 // ANSI背景色控制
 export const BG = {
   _bannerStopSignal: false,
+  _compressStopSignal: false,
 
   banner: (): Promise<void> => {
     const reset = '\x1b[0m';
@@ -119,6 +120,39 @@ export const BG = {
 
   stopBanner: () => {
     BG._bannerStopSignal = true;
+  },
+
+  // Compression spinner - shows during context compression
+  compressSpinner: (): Promise<void> => {
+    const reset = '\x1b[0m';
+    const esc = '\x1b';
+    const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    const color = esc + '[38;2;0;206;209m'; // Cyan
+
+    BG._compressStopSignal = false;
+
+    return new Promise<void>((resolve) => {
+      let frameIndex = 0;
+
+      const spin = async () => {
+        while (!BG._compressStopSignal) {
+          const frame = frames[frameIndex % frames.length];
+          // Write spinner frame
+          process.stdout.write(color + frame + ' Compressing...' + reset);
+          await new Promise(r => setTimeout(r, 80));
+          // Clear line
+          process.stdout.write(esc + '[2K' + esc + '[1G');
+          frameIndex++;
+        }
+        resolve();
+      };
+
+      spin();
+    });
+  },
+
+  stopCompress: () => {
+    BG._compressStopSignal = true;
   },
 };
 

@@ -29,7 +29,7 @@ export interface ToolDefinition {
   parameters: {
     type: 'object';
     properties: Record<string, any>;
-    required: string[];
+    required?: string[];
   };
 }
 
@@ -43,37 +43,37 @@ export interface ToolResult {
 export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'file_read',
-    description: 'Read file content. ALWAYS use before file_write or file_edit to understand context.',
+    description: 'Read file. Required before file_write/edit.',
     parameters: {
       type: 'object' as const,
       properties: {
-        path: { type: 'string', description: 'File path (absolute or relative to workspace)' },
-        offset: { type: 'number', description: 'Start reading from line number (optional)' },
-        limit: { type: 'number', description: 'Number of lines to read (optional)' },
+        path: { type: 'string', description: 'File path' },
+        offset: { type: 'number', description: 'Start line (optional)' },
+        limit: { type: 'number', description: 'Lines to read (optional)' },
       },
       required: ['path'],
     },
   },
   {
     name: 'file_write',
-    description: 'Write content to a file. Creates file if not exists, overwrites if exists.',
+    description: 'Write/create file. Overwrites existing.',
     parameters: {
       type: 'object' as const,
       properties: {
         path: { type: 'string', description: 'File path' },
-        content: { type: 'string', description: 'File content' },
+        content: { type: 'string', description: 'Content' },
       },
       required: ['path', 'content'],
     },
   },
   {
     name: 'file_edit',
-    description: 'Edit file by replacing exact text match. MUST read file first to get exact text.',
+    description: 'Edit file by exact text replacement. Read first.',
     parameters: {
       type: 'object' as const,
       properties: {
         path: { type: 'string', description: 'File path' },
-        oldString: { type: 'string', description: 'Exact text to replace (must match exactly)' },
+        oldString: { type: 'string', description: 'Text to replace (exact)' },
         newString: { type: 'string', description: 'New text' },
       },
       required: ['path', 'oldString', 'newString'],
@@ -81,111 +81,111 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'file_exists',
-    description: 'Check if file or directory exists',
+    description: 'Check if path exists.',
     parameters: {
       type: 'object' as const,
       properties: {
-        path: { type: 'string', description: 'Path to check' },
+        path: { type: 'string', description: 'Path' },
       },
       required: ['path'],
     },
   },
   {
     name: 'file_delete',
-    description: 'Delete file or directory. Use carefully.',
+    description: 'Delete file or directory.',
     parameters: {
       type: 'object' as const,
       properties: {
-        path: { type: 'string', description: 'Path to delete' },
+        path: { type: 'string', description: 'Path' },
       },
       required: ['path'],
     },
   },
   {
     name: 'file_copy',
-    description: 'Copy file or directory',
+    description: 'Copy file/directory.',
     parameters: {
       type: 'object' as const,
       properties: {
-        source: { type: 'string', description: 'Source path' },
-        destination: { type: 'string', description: 'Destination path' },
+        source: { type: 'string', description: 'Source' },
+        destination: { type: 'string', description: 'Dest' },
       },
       required: ['source', 'destination'],
     },
   },
   {
     name: 'file_move',
-    description: 'Move/rename file or directory',
+    description: 'Move/rename file/directory.',
     parameters: {
       type: 'object' as const,
       properties: {
-        source: { type: 'string', description: 'Source path' },
-        destination: { type: 'string', description: 'Destination path' },
+        source: { type: 'string', description: 'Source' },
+        destination: { type: 'string', description: 'Dest' },
       },
       required: ['source', 'destination'],
     },
   },
   {
     name: 'directory_create',
-    description: 'Create directory (and parent directories if needed)',
+    description: 'Create directory (with parents).',
     parameters: {
       type: 'object' as const,
       properties: {
-        path: { type: 'string', description: 'Directory path to create' },
+        path: { type: 'string', description: 'Path' },
       },
       required: ['path'],
     },
   },
   {
     name: 'directory_list',
-    description: 'List contents of directory',
+    description: 'List directory contents.',
     parameters: {
       type: 'object' as const,
       properties: {
-        path: { type: 'string', description: 'Directory path (optional, defaults to workspace)' },
+        path: { type: 'string', description: 'Path (default: workspace)' },
       },
       required: [],
     },
   },
   {
     name: 'glob',
-    description: 'Find files matching pattern. Use to discover files in codebase.',
+    description: 'Find files by pattern.',
     parameters: {
       type: 'object' as const,
       properties: {
-        pattern: { type: 'string', description: 'Glob pattern (e.g., "**/*.ts", "src/**/*.tsx")' },
+        pattern: { type: 'string', description: 'Glob pattern' },
       },
       required: ['pattern'],
     },
   },
   {
     name: 'grep',
-    description: 'Search for text pattern in files. Use to find code, functions, imports.',
+    description: 'Search text in files.',
     parameters: {
       type: 'object' as const,
       properties: {
-        pattern: { type: 'string', description: 'Search pattern (regex supported)' },
-        path: { type: 'string', description: 'Directory to search (optional)' },
-        include: { type: 'string', description: 'File pattern to include (e.g., "*.ts")' },
+        pattern: { type: 'string', description: 'Search pattern' },
+        path: { type: 'string', description: 'Directory (optional)' },
+        include: { type: 'string', description: 'File pattern (optional)' },
       },
       required: ['pattern'],
     },
   },
   {
     name: 'bash',
-    description: 'Execute bash command. For file operations, prefer file_* tools. Use for: package managers, build tools, git, system commands.',
+    description: 'Run shell command. For build/test/package ops.',
     parameters: {
       type: 'object' as const,
       properties: {
-        command: { type: 'string', description: 'Command to execute' },
-        timeout: { type: 'number', description: 'Timeout in seconds (optional, default 120)' },
+        command: { type: 'string', description: 'Command' },
+        timeout: { type: 'number', description: 'Timeout (default 120)' },
       },
       required: ['command'],
     },
   },
   {
     name: 'git_status',
-    description: 'Show git working tree status',
+    description: 'Git working tree status.',
     parameters: {
       type: 'object' as const,
       properties: {},
@@ -194,7 +194,7 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'git_diff',
-    description: 'Show git diff (staged and unstaged changes)',
+    description: 'Show git diff.',
     parameters: {
       type: 'object' as const,
       properties: {},
@@ -203,73 +203,73 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'git_log',
-    description: 'Show recent git commits',
+    description: 'Show recent commits.',
     parameters: {
       type: 'object' as const,
       properties: {
-        limit: { type: 'number', description: 'Number of commits to show (optional)' },
+        limit: { type: 'number', description: 'Count (optional)' },
       },
       required: [],
     },
   },
   {
     name: 'git_add',
-    description: 'Add files to git staging area',
+    description: 'Stage files.',
     parameters: {
       type: 'object' as const,
       properties: {
-        files: { type: 'string', description: 'Files to add (default: all)' },
+        files: { type: 'string', description: 'Files (default: all)' },
       },
       required: [],
     },
   },
   {
     name: 'git_commit',
-    description: 'Commit staged changes with message',
+    description: 'Commit staged changes.',
     parameters: {
       type: 'object' as const,
       properties: {
-        message: { type: 'string', description: 'Commit message' },
+        message: { type: 'string', description: 'Message' },
       },
       required: ['message'],
     },
   },
   {
     name: 'git_branch',
-    description: 'List branches or create new branch',
+    description: 'List/create branches.',
     parameters: {
       type: 'object' as const,
       properties: {
-        name: { type: 'string', description: 'New branch name (optional)' },
+        name: { type: 'string', description: 'New branch (optional)' },
       },
       required: [],
     },
   },
   {
     name: 'git_checkout',
-    description: 'Switch to branch or restore files',
+    description: 'Switch branch.',
     parameters: {
       type: 'object' as const,
       properties: {
-        branch: { type: 'string', description: 'Branch name' },
+        branch: { type: 'string', description: 'Branch' },
       },
       required: ['branch'],
     },
   },
   {
     name: 'workspace',
-    description: 'Get current workspace or switch to different project. Use when user wants to work on another project.',
+    description: 'Get/switch workspace.',
     parameters: {
       type: 'object' as const,
       properties: {
-        path: { type: 'string', description: 'New workspace path (optional)' },
+        path: { type: 'string', description: 'New path (optional)' },
       },
       required: [],
     },
   },
   {
     name: 'checkpoint_restore',
-    description: 'Restore to last git checkpoint created by spica. Use when errors are unrecoverable.',
+    description: 'Restore git checkpoint.',
     parameters: {
       type: 'object' as const,
       properties: {},
@@ -278,65 +278,67 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'web_search',
-    description: 'Search the web for information. Use for: documentation, tutorials, error solutions.',
+    description: 'Search web.',
     parameters: {
       type: 'object' as const,
       properties: {
-        query: { type: 'string', description: 'Search query' },
+        query: { type: 'string', description: 'Query' },
+        timeout: { type: 'number', description: 'Timeout in seconds (default 15)' },
       },
       required: ['query'],
     },
   },
   {
     name: 'web_fetch',
-    description: 'Fetch content from URL. Use for: API docs, GitHub repos, tutorials.',
+    description: 'Fetch URL content.',
     parameters: {
       type: 'object' as const,
       properties: {
-        url: { type: 'string', description: 'URL to fetch' },
+        url: { type: 'string', description: 'URL' },
+        timeout: { type: 'number', description: 'Timeout in seconds (default 15)' },
       },
       required: ['url'],
     },
   },
   {
     name: 'question',
-    description: 'Ask user a question when you need clarification or decision.',
+    description: 'Ask user for clarification.',
     parameters: {
       type: 'object' as const,
       properties: {
-        text: { type: 'string', description: 'Question to ask' },
+        text: { type: 'string', description: 'Question' },
       },
       required: ['text'],
     },
   },
   {
     name: 'gh_pr_view',
-    description: 'View GitHub PR details. Use to see PR info, files changed, reviews.',
+    description: 'View PR details.',
     parameters: {
       type: 'object' as const,
       properties: {
         number: { type: 'number', description: 'PR number' },
-        json: { type: 'boolean', description: 'Output as JSON (optional)' },
+        json: { type: 'boolean', description: 'JSON output (optional)' },
       },
       required: ['number'],
     },
   },
   {
     name: 'gh_issue_list',
-    description: 'List GitHub issues in the repository.',
+    description: 'List issues.',
     parameters: {
       type: 'object' as const,
       properties: {
-        state: { type: 'string', description: 'Issue state: open/closed/all (optional)' },
-        limit: { type: 'number', description: 'Max issues to show (optional)' },
-        label: { type: 'string', description: 'Filter by label (optional)' },
+        state: { type: 'string', description: 'State (optional)' },
+        limit: { type: 'number', description: 'Limit (optional)' },
+        label: { type: 'string', description: 'Label (optional)' },
       },
       required: [],
     },
   },
   {
     name: 'gh_issue_view',
-    description: 'View GitHub issue details.',
+    description: 'View issue details.',
     parameters: {
       type: 'object' as const,
       properties: {
@@ -347,7 +349,7 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'gh_repo_view',
-    description: 'View current repository info (name, description, stats).',
+    description: 'View repo info.',
     parameters: {
       type: 'object' as const,
       properties: {},
@@ -356,24 +358,24 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'gh_run_list',
-    description: 'List recent GitHub Actions workflow runs.',
+    description: 'List workflow runs.',
     parameters: {
       type: 'object' as const,
       properties: {
-        limit: { type: 'number', description: 'Max runs to show (optional)' },
+        limit: { type: 'number', description: 'Limit (optional)' },
       },
       required: [],
     },
   },
   {
     name: 'todo_write',
-    description: 'Write todos to track progress on complex tasks.',
+    description: 'Write task todos.',
     parameters: {
       type: 'object' as const,
       properties: {
-        todos: { 
-          type: 'array', 
-          description: 'List of todos',
+        todos: {
+          type: 'array',
+          description: 'Todo list',
           items: {
             type: 'object',
             properties: {
@@ -387,20 +389,20 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
-name: 'task',
-    description: 'Launch parallel subagents (max 3). Use when facing 2-3 independent tasks.',
+    name: 'task',
+    description: 'Run parallel subagents (max 3).',
     parameters: {
       type: 'object' as const,
       properties: {
         tasks: {
           type: 'array',
-          description: 'List of 2-3 independent tasks to execute in parallel',
+          description: 'Tasks',
           maxItems: 3,
           items: {
             type: 'object',
             properties: {
-              description: { type: 'string', description: 'Short task description' },
-              prompt: { type: 'string', description: 'Full task prompt' },
+              description: { type: 'string', description: 'Short desc' },
+              prompt: { type: 'string', description: 'Full prompt' },
             },
             required: ['description', 'prompt'],
           },
@@ -411,24 +413,24 @@ name: 'task',
   },
   {
     name: 'lint',
-    description: 'Run linting and type checking. Auto-detects eslint/tsc/golangci/pylint/clippy based on project type.',
+    description: 'Run linter. Auto-detects.',
     parameters: {
       type: 'object' as const,
       properties: {
-        fix: { type: 'boolean', description: 'Auto-fix issues where possible (optional)' },
-        files: { type: 'string', description: 'Specific files or directories to lint (optional)' },
+        fix: { type: 'boolean', description: 'Auto-fix (optional)' },
+        files: { type: 'string', description: 'Files (optional)' },
       },
       required: [],
     },
   },
   {
     name: 'test',
-    description: 'Run tests. Auto-detects vitest/jest/go test/pytest/cargo test based on project type.',
+    description: 'Run tests. Auto-detects.',
     parameters: {
       type: 'object' as const,
       properties: {
-        filter: { type: 'string', description: 'Test name pattern to filter (optional)' },
-        coverage: { type: 'boolean', description: 'Run with coverage report (optional)' },
+        filter: { type: 'string', description: 'Pattern (optional)' },
+        coverage: { type: 'boolean', description: 'Coverage (optional)' },
       },
       required: [],
     },
@@ -691,14 +693,14 @@ export async function executeTool(
 
       case 'web_search': {
         const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(safeArgs.query)}`;
-        const searchResult = await execa(`curl -s "${searchUrl}"`, { shell: true, timeout: 30000 });
+        const searchResult = await execa(`curl -s "${searchUrl}"`, { shell: true, timeout: (safeArgs.timeout || 15) * 1000 });
         return { success: true, output: searchResult.stdout.substring(0, 5000) };
       }
 
       case 'web_fetch': {
         const fetchResult = await execa(`curl -sL "${safeArgs.url}"`, { 
           shell: true, 
-          timeout: 30000,
+          timeout: (safeArgs.timeout || 15) * 1000,
         });
         return { success: true, output: fetchResult.stdout.substring(0, 10000) };
       }
@@ -715,7 +717,7 @@ export async function executeTool(
         const ghResult = await execa(`gh pr view ${safeArgs.number} ${jsonFlag}`, {
           shell: true,
           cwd: WORKSPACE,
-          timeout: 30000,
+          timeout: (safeArgs.timeout || 15) * 1000,
           reject: false,
         });
         return {
@@ -731,7 +733,7 @@ export async function executeTool(
         const ghResult = await execa(`gh issue list --state ${state} --limit ${limit} ${label}`, {
           shell: true,
           cwd: WORKSPACE,
-          timeout: 30000,
+          timeout: (safeArgs.timeout || 15) * 1000,
           reject: false,
         });
         return {
@@ -744,7 +746,7 @@ export async function executeTool(
         const ghResult = await execa(`gh issue view ${safeArgs.number}`, {
           shell: true,
           cwd: WORKSPACE,
-          timeout: 30000,
+          timeout: (safeArgs.timeout || 15) * 1000,
           reject: false,
         });
         return {
@@ -757,7 +759,7 @@ export async function executeTool(
         const ghResult = await execa(`gh repo view`, {
           shell: true,
           cwd: WORKSPACE,
-          timeout: 30000,
+          timeout: (safeArgs.timeout || 15) * 1000,
           reject: false,
         });
         return {
@@ -771,7 +773,7 @@ export async function executeTool(
         const ghResult = await execa(`gh run list --limit ${limit}`, {
           shell: true,
           cwd: WORKSPACE,
-          timeout: 30000,
+          timeout: (safeArgs.timeout || 15) * 1000,
           reject: false,
         });
         return {

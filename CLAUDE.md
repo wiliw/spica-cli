@@ -9,111 +9,156 @@ npm run dev        # Run CLI in development mode (tsx)
 npm run build      # Generate executable bin/spica script
 npm test           # Run tests with Vitest
 npm run test:run   # Run tests once (no watch)
-spica              # Run TUI (after npm link)
-spica run "request" # CLI mode
+npx tsc --noEmit   # Type check
 ```
 
 ## Architecture Overview
 
 ### Core Components
 
-**Entry Points** (`src/index.ts`):
-- Commander CLI with two modes: TUI (default) and `run` command
-- TUI requires TTY terminal; falls back to CLI suggestions if unavailable
+**Entry Point** (`src/index.ts`):
+- Commander CLI with interactive mode (default) and `run` command
+- Options: `--fresh` (clear history), `-p/--provider`, `--version`
+- Non-blocking REPL with input queue
+- Tab completion for `/` commands
 
 **SpicaAgent** (`src/agent.ts`):
 - Orchestrates LLM client, tools, and project state
-- EventEmitter-based: emits `stream`, `reasoning`, `tool_call`, `tool_result`, `message`, `error_suggestion`, `diff_preview`
-- Auto-detects project type, creates `.spica.md`
-- **New features**:
-  - `generateErrorSuggestion()`: 工具失败时生成修复建议
-  - `compressHistory()`: 超过20条消息自动压缩
-  - Context persistence with simplified messages
+- EventEmitter-based architecture
+- Key methods:
+  - `init()`: Initialize LLM, MCP, project config
+  - `runLoop()`: Main execution loop
+  - `compact()`: Manual context compression
+  - `checkNeedsPermission()`: Dangerous operation detection
+- Events: `stream`, `reasoning`, `tool_call`, `tool_result`, `message`, `error_suggestion`, `diff_preview`, `permission_request`
 
-**LLMClient** (`src/llm/LLMClient.ts`):
-- OpenAI-compatible provider with rate limiting
-- Streaming + tool calling aggregation
+**LLMClient** (`src/llm/`):
+- OpenAI-compatible provider with streaming
+- Rate limiting, token counting
 - AbortController for interrupt
+- Temperature: 0.3 (faster responses)
 
 **Tools** (`src/tools/index.ts`):
-- 26 tools: file ops, bash, git, web, glob, grep, workspace, question, todo_write, task
-- `task` tool spawns parallel SpicaAgent instances
+- 33 tools: file ops, bash, git, web, glob, grep, workspace, question, todo_write, task, lint, test, gh_*
+- `getAllToolDefinitions()`: Includes MCP tools
+- `executeTool()`: Main execution function
 
-**Project Persistence** (`src/utils/projectState.ts`):
-- `.spica/state.json`: todos, phase, decisions
-- `.spica/context.json`: recent messages (max 20, compressed)
+**Settings System** (`src/utils/settings.ts`):
+- Unified configuration in `~/.spica/settings.json`
+- Contains: providers, mcp, skills, hooks
+- `loadGlobalSettings()`, `saveGlobalSettings()`
+- Project skills/hooks merge with global
 
-### TUI Architecture
+**MCP Client** (`src/mcp/client.ts`):
+- Stdio and SSE transport support
+- `MCPManager`: Singleton manager for all servers
+- Reads config from `settings.mcp`
+- Tools exposed as `server_name/tool_name`
 
-Built with Ink (React for terminal). Key principles:
+**Skills** (`src/skills/index.ts`):
+- Load from `settings.skills` and `.spica/skills.json`
+- `parseSkillInput()`: Parse `/skill_name args`
+- `buildSkillPrompt()`: Replace `{var}` placeholders
+- Install/uninstall writes to settings.json
 
-**Layout** (`src/tui/App.tsx`):
-- Full-screen: `stdout.rows` for height, `width="100%"`
-- Split: 60% left (AIOutput) | 40% right (Thinking 60% + Tools 40%)
-- Status Bar: running时显示进度
-- Input: fixed height at bottom
+**Hooks** (`src/hooks/index.ts`):
+- `runPreHooks()`: Pre-tool interception (block/confirm)
+- `runPostHooks()`: Post-tool logging
+- Reads from `settings.hooks` + project hooks
 
-**Critical Height Enforcement**:
-Ink border在**内部**占用空间（上下各1行）：
-```typescript
-const contentHeight = totalHeight - 2 - 1; // border + title
-```
-
-**Components** (`src/tui/components/`):
-- `AIOutputPanel.tsx`: Rounds显示，换行wrap
-- `ThinkingPanel.tsx`: ing只显示最新，ed滚动历史
-- `ToolsPanel.tsx`: 每工具2行，带依赖符号（→串行/‖并行）
-- `InputPanel.tsx`: 工作状态条 + 任务队列 + Tab补全
-- `StatusBanners.tsx`: ErrorBanner + DiffPreview
-
-**Hooks** (`src/tui/hooks/`):
-- `useAgent.ts`: 状态管理，事件处理，任务队列
-- `useScroll.ts`: Round导航，autoFollow逻辑
-- `useMarquee.ts`: 内容滚动动画
-
-**Data Flow**:
-- Agent emits → useAgent buffers → associateEvents creates turns → panels display
-- `associateEvents.ts`: 同工具名只保留最新状态
-
-**New TUI Features**:
-1. 工作状态指示条（Step X: tool_name）
-2. 错误恢复建议横幅
-3. Diff预览横幅（3秒消失）
-4. 多任务队列显示
-5. Ctrl+H快捷键帮助
-6. Ctrl+E会话导出
-7. Tab命令补全
-8. 上下文压缩（超过20条）
-
-### Provider System
-
-Environment Variables:
-- `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`
-- Provider-specific: `SPICA_TOGETHER_API_KEY`, etc.
-
-Config File (`~/.spica/config.json`):
-- Built-in providers: openai, anthropic, together, groq, local, custom
+**Input Queue** (`src/utils/inputQueue.ts`):
+- Non-blocking input during AI processing
+- `add()`, `mergePending()`, `undoLast()`
+- Auto-process queue after AI completes
 
 ### Key Patterns
 
 **Tool Execution Loop**:
-1. Generate with tools
-2. Execute tools in parallel, emit events
-3. Continue with results
-4. Repeat until finished
-5. Save context (compressed if needed)
+1. Load history from session.json
+2. Pre-request compression (if > 15 messages)
+3. Create git checkpoint
+4. Generate with tools (temperature 0.3)
+5. PreHooks check → Permission check → Execute tool → PostHooks log
+6. Emit events
+7. Continue with results
+8. Auto-save session after each turn
+9. Process input queue if pending
 
 **Interrupt Flow**:
-ESC → confirmation → `agent.interrupt()` → `llm.interrupt()` → `abortController.abort()`
+`Ctrl+C` → `agent.interrupt()` → `llm.interrupt()` → `abortController.abort()`
+
+**Context Compression**:
+- Max 15 messages
+- Tool results compressed to 15 chars
+- Important keywords preserved: 决定/成功/失败
+- Auto-compress when exceeded
+
+### Configuration Merge
+
+| Config Type | Global | Project | Merge Rule |
+|-------------|--------|---------|------------|
+| providers | settings.json | - | Global only |
+| mcp | settings.json | - | Global only |
+| skills | settings.json | .spica/skills.json | Project **overrides** |
+| hooks | settings.json | .spica/hooks.json | Project **appends** |
+
+### Storage Locations
+
+```
+~/.spica/
+├── settings.json       # Unified config (providers, mcp, skills, hooks)
+├── context.json        # Global context cache
+└── installed-skills/   # Installed skill packages
+
+<project>/.spica/
+├── session.json        # Session history (auto-loaded/saved)
+├── skills.json         # Project skills (optional)
+└── hooks.json          # Project hooks (optional)
+
+<project>/AGENTS.md     # Project description (industry standard)
+```
 
 ## Important Files
 
-- `src/agent.ts` - Agent loop, error suggestions, context compression
-- `src/tools/index.ts` - All tool definitions
-- `src/llm/providers/OpenAICompatible.ts` - Streaming + tool calling
-- `src/tui/App.tsx` - Main TUI layout
-- `src/tui/hooks/useAgent.ts` - State management
-- `src/tui/components/*.tsx` - All UI components
-- `src/tui/utils/associateEvents.ts` - Event→Turn transformation
-- `docs/TUI-REQUIREMENTS.md` - 需求文档（已实现）
-- `docs/tui-architecture.md` - 技术架构
+| File | Purpose |
+|------|---------|
+| `src/index.ts` | CLI entry, REPL loop, input queue |
+| `src/agent.ts` | Agent loop, compression, permissions |
+| `src/utils/settings.ts` | Unified configuration system |
+| `src/utils/inputQueue.ts` | Non-blocking input management |
+| `src/tools/index.ts` | All tool definitions |
+| `src/mcp/client.ts` | MCP client manager |
+| `src/skills/index.ts` | Skills loader and executor |
+| `src/hooks/index.ts` | Hooks system |
+| `src/llm/providers/OpenAICompatible.ts` | OpenAI streaming |
+| `src/utils/session.ts` | Session persistence |
+| `src/utils/projectConfig.ts` | AGENTS.md parser |
+| `src/prompts/system.ts` | System prompt |
+
+## Interactive Commands
+
+**Non-`/` commands**: `quit`, `exit`, `help`
+
+**`/` commands** (Tab autocomplete):
+- Session: `/clear`, `/history`, `/compact`
+- Queue: `/queue`, `/undo`
+- Mode: `/bypass`, `/strict`, `/status`
+- Skills: `/skills`, `/skill_name [args]`
+
+## When Adding New Features
+
+1. **Tools**: Add to `TOOLS_DEFINITIONS` in `src/tools/index.ts`, add switch case
+2. **CLI commands**: Add to Commander in `src/index.ts`
+3. **Settings**: Update `src/utils/settings.ts` interface if new config type
+4. **Hooks**: Add default hooks in `src/hooks/index.ts`
+5. **Skills**: Skills auto-load from settings.json
+6. **MCP**: Update `src/mcp/client.ts` for new transport types
+7. **Docs**: Update `docs/MANUAL.md` and `docs/STORAGE.md`
+
+## Testing
+
+```bash
+npm run test:run  # Run all 64 tests
+npx tsc --noEmit  # Type check
+npm run build     # Build executable
+```

@@ -4,17 +4,14 @@ import fs from 'fs-extra';
 import { join } from 'path';
 import os from 'os';
 import { execa } from 'execa';
+import {
+  loadGlobalSettings,
+  GLOBAL_DIR,
+  SkillDefinition,
+  loadProjectSkills,
+} from '../utils/settings';
 
-export interface SkillDefinition {
-  name?: string;         // skill名称（从JSON key自动填充）
-  description: string;
-  promptTemplate: string;
-  allowedTools?: string[];
-  timeout?: number;
-  source?: string;      // 来源URL或本地路径
-  version?: string;     // 版本号
-}
-
+// SkillPackage 定义（仅在本模块）
 export interface SkillPackage {
   name: string;
   version: string;
@@ -23,46 +20,48 @@ export interface SkillPackage {
   skills: Record<string, SkillDefinition>;
 }
 
-// 加载用户定义的skills
-export function loadSkills(): Map<string, SkillDefinition> {
+// 加载所有 skills（全局 + 项目覆盖）
+export function loadSkills(workspacePath?: string): Map<string, SkillDefinition> {
   const skills = new Map<string, SkillDefinition>();
+  const ws = workspacePath || process.cwd();
 
-  // 加载全局skills (~/.spica/skills.json)
-  const globalPath = join(os.homedir(), '.spica', 'skills.json');
-  if (fs.existsSync(globalPath)) {
-    try {
-      const globalSkills = fs.readJsonSync(globalPath);
-      Object.entries(globalSkills.skills || globalSkills).forEach(([name, def]) => {
-        const skillDef = def as SkillDefinition;
-        skillDef.name = name;  // 设置name属性
-        skills.set(name, skillDef);
-      });
-    } catch (error) {
-      // 忽略解析错误
-    }
+  // 加载全局 skills
+  const globalSettings = loadGlobalSettingsSync();
+  if (globalSettings.skills) {
+    Object.entries(globalSettings.skills).forEach(([name, def]) => {
+      def.name = name;
+      skills.set(name, def);
+    });
   }
 
-  // 加载项目skills (.spica/skills.json)
-  const projectPath = join(process.cwd(), '.spica', 'skills.json');
-  if (fs.existsSync(projectPath)) {
-    try {
-      const projectSkills = fs.readJsonSync(projectPath);
-      Object.entries(projectSkills.skills || projectSkills).forEach(([name, def]) => {
-        const skillDef = def as SkillDefinition;
-        skillDef.name = name;  // 设置name属性
-        skills.set(name, skillDef);
-      });
-    } catch (error) {
-      // 忽略解析错误
-    }
+  // 加载项目 skills（覆盖全局）
+  const projectSkills = loadProjectSkills(ws);
+  if (projectSkills) {
+    Object.entries(projectSkills).forEach(([name, def]) => {
+      def.name = name;
+      skills.set(name, def);
+    });
   }
 
   return skills;
 }
 
+// 同步加载全局 settings（用于 loadSkills）
+function loadGlobalSettingsSync(): { skills?: Record<string, SkillDefinition> } {
+  const globalPath = join(GLOBAL_DIR, 'settings.json');
+  if (fs.existsSync(globalPath)) {
+    try {
+      return fs.readJsonSync(globalPath);
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
 // 获取skill定义
-export function getSkill(name: string): SkillDefinition | null {
-  return loadSkills().get(name);
+export function getSkill(name: string, workspacePath?: string): SkillDefinition | null {
+  return loadSkills(workspacePath).get(name);
 }
 
 // 检查输入是否是skill调用（如 /search api）
@@ -125,59 +124,75 @@ export function listSkills(): SkillDefinition[] {
 }
 
 // Skills安装目录
-const SKILLS_DIR = join(os.homedir(), '.spica', 'installed-skills');
+const SKILLS_DIR = join(GLOBAL_DIR, 'installed-skills');
 
 // 安装skill包（从URL或本地路径）
 export async function installSkill(source: string): Promise<{ success: boolean; message: string; skills?: string[] }> {
   try {
-    // 确保安装目录存在
     await fs.ensureDir(SKILLS_DIR);
 
     let skillPackage: SkillPackage;
 
-    // 检查是否是URL
-    if (source.startsWith('http://') || source.startsWith('https://')) {
-      // 从URL下载
-      const result = await execa('curl', ['-s', source]);
+    // GitHub URL 处理
+    if (source.includes('github.com')) {
+      // 转换 GitHub URL 到 raw URL
+      let rawUrl = source;
+
+      // https://github.com/user/repo -> https://raw.githubusercontent.com/user/repo/main/skills.json
+      if (source.match(/github\.com\/[^/]+\/[^/]+$/)) {
+        // 没有指定文件，尝试 skills.json
+        const match = source.match(/github\.com\/([^/]+)\/([^/]+)/);
+        if (match) {
+          rawUrl = `https://raw.githubusercontent.com/${match[1]}/${match[2]}/main/skills.json`;
+        }
+      }
+      // https://github.com/user/repo/blob/main/file.json -> raw.githubusercontent.com
+      else if (source.includes('/blob/')) {
+        rawUrl = source
+          .replace('github.com', 'raw.githubusercontent.com')
+          .replace('/blob/', '/');
+      }
+
+      const result = await execa('curl', ['-sL', rawUrl]);
       skillPackage = JSON.parse(result.stdout);
-    } else if (source.endsWith('.json')) {
-      // 本地JSON文件
+    }
+    // 直接 URL（指向 JSON）
+    else if (source.startsWith('http://') || source.startsWith('https://')) {
+      const result = await execa('curl', ['-sL', source]);
+      skillPackage = JSON.parse(result.stdout);
+    }
+    // 本地文件
+    else if (source.endsWith('.json') || fs.existsSync(source)) {
       skillPackage = await fs.readJson(source);
-    } else {
-      // 可能是npm包名（未来支持）
-      return { success: false, message: 'Only URLs and local JSON files are supported currently' };
+    }
+    else {
+      return { success: false, message: 'Unsupported source format. Use GitHub URL, JSON URL, or local file.' };
     }
 
-    // 验证skill包格式
     if (!skillPackage.name || !skillPackage.skills) {
-      return { success: false, message: 'Invalid skill package format: missing name or skills' };
+      return { success: false, message: 'Invalid skill package: missing name or skills field' };
     }
 
     // 保存到安装目录
     const packageFile = join(SKILLS_DIR, `${skillPackage.name}.json`);
     await fs.writeJson(packageFile, skillPackage, { spaces: 2 });
 
-    // 加载skills到全局配置
-    const globalConfigPath = join(os.homedir(), '.spica', 'skills.json');
-    let globalConfig: { skills: Record<string, SkillDefinition> } = { skills: {} };
+    // 加载skills到全局 settings
+    const { loadGlobalSettings, saveGlobalSettings } = await import('../utils/settings');
+    const settings = await loadGlobalSettings();
 
-    if (await fs.pathExists(globalConfigPath)) {
-      globalConfig = await fs.readJson(globalConfigPath);
-    }
+    if (!settings.skills) settings.skills = {};
 
-    // 添加每个skill到全局配置
     const skillNames: string[] = [];
     Object.entries(skillPackage.skills).forEach(([name, def]) => {
       const fullKey = `${skillPackage.name}/${name}`;
       const skillDef = def as SkillDefinition;
       skillDef.name = fullKey;
-      skillDef.source = source;
-      skillDef.version = skillPackage.version;
-      globalConfig.skills[fullKey] = skillDef;
+      settings.skills![fullKey] = skillDef;
       skillNames.push(fullKey);
     });
 
-    await fs.writeJson(globalConfigPath, globalConfig, { spaces: 2 });
+    await saveGlobalSettings(settings);
 
     return {
       success: true,
@@ -221,19 +236,19 @@ export async function uninstallSkill(packageName: string): Promise<{ success: bo
       return { success: false, message: `Package "${packageName}" not found` };
     }
 
-    // 删除包文件
     await fs.remove(packageFile);
 
-    // 从全局配置中删除
-    const globalConfigPath = join(os.homedir(), '.spica', 'skills.json');
-    if (await fs.pathExists(globalConfigPath)) {
-      const globalConfig = await fs.readJson(globalConfigPath);
-      Object.keys(globalConfig.skills || {}).forEach(key => {
+    // 从全局 settings 中删除
+    const { loadGlobalSettings, saveGlobalSettings } = await import('../utils/settings');
+    const settings = await loadGlobalSettings();
+
+    if (settings.skills) {
+      Object.keys(settings.skills).forEach(key => {
         if (key.startsWith(`${packageName}/`)) {
-          delete globalConfig.skills[key];
+          delete settings.skills![key];
         }
       });
-      await fs.writeJson(globalConfigPath, globalConfig, { spaces: 2 });
+      await saveGlobalSettings(settings);
     }
 
     return { success: true, message: `Uninstalled ${packageName}` };

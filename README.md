@@ -1,8 +1,8 @@
 # spica-cli
 
-AI coding agent with full-screen TUI. 简洁高效的编程助手。
+AI coding agent CLI. 智能代码助手。
 
-**OpenAI-compatible：调用任何第三方模型**
+**OpenAI-compatible：支持任何第三方模型**
 
 ---
 
@@ -11,134 +11,264 @@ AI coding agent with full-screen TUI. 简洁高效的编程助手。
 ```bash
 # 安装
 npm install
-npm link
+npm run build
 
-# 配置环境变量（推荐）
+# 配置API（方式1：CLI）
+spica providers set openai sk-your-key
+
+# 配置API（方式2：环境变量）
 export OPENAI_API_KEY=your-key
-export OPENAI_BASE_URL=https://api.openai.com/v1
-export OPENAI_MODEL=gpt-4
 
-# 启动TUI
+# 启动交互模式
 spica
 
-# CLI模式
-spica run "列出当前目录的文件"
+# 单次执行
+spica run "创建一个Hello World程序"
+
+# 恢复上次会话
+spica --continue
 ```
-
----
-
-## TUI 界面
-
-```
-┌──────────────────────┬──────────────────────────────────────┐
-│ Rounds 1/3 [AUTO]    │ Thinking                             │
-│ == FOCUS: Round 1 == │ 现在让我分析项目结构...               │
-│ Q: 列出文件          │                                      │
-│ A: 文件列表如下      │                                      │
-│                      ├──────────────────────────────────────┤
-│                      │ Toolcalled (5)                       │
-│                      │ [OK] bash: ls -la                    │
-│                      │ → [OK] file_read: README.md          │
-│                      │ ‖ [OK] file_read: package.json       │
-├──────────────────────┴──────────────────────────────────────┤
-│ ⠏ Step 3: file_read                                          │  ← 工作状态
-├─────────────────────────────────────────────────────────────┤
-│ Input (quit to exit)                                         │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 新特性
-
-### 1. 工作状态指示条
-运行时显示当前步骤和工具：
-```
-│ ⠏ Step 3: file_read [Queue: 2]                               │
-```
-
-### 2. 错误恢复建议
-工具失败时自动显示修复建议：
-```
-┌─────────────────────────────────┐
-│ ⚠ file_read failed              │
-│ 文件不存在: /path               │
-│ 💡 使用glob搜索正确路径          │
-└─────────────────────────────────┘
-```
-
-### 3. Diff预览
-文件编辑后显示摘要（3秒消失）：
-```
-┌─────────────────────────────────┐
-│ 📝 src/agent.ts (+5/-2)         │
-│ + import { compressHistory }    │
-│ - const oldCode = ...           │
-└─────────────────────────────────┘
-```
-
-### 4. 工具依赖分析
-显示工具执行关系：
-- `→` 串行执行（不同工具类型）
-- `‖` 并行执行（同类型连续）
-
-### 5. 多任务队列
-输入框显示排队任务数，支持连续提交。
-
-### 6. 快捷键
-
-| 快捷键 | 功能 |
-|--------|------|
-| `Ctrl+H` | 显示快捷键帮助 |
-| `Ctrl+E` | 导出会话为markdown |
-| `Ctrl+P` | Provider设置 |
-| `Tab` | 命令补全 |
-| `↑/↓` | 滚动内容/切换回合 |
-| `G` | 跳到最新回合 |
-| `ESC` | 中断任务 |
-
-### 7. 上下文压缩
-超过20条消息自动压缩，生成历史摘要。
-
-### 8. Tab命令补全
-补全常用命令：read, write, edit, bash, glob, grep等。
-
----
-
-## 支持的服务
-
-所有 OpenAI-compatible API：
-
-| 服务 | Base URL | 模型 |
-|------|----------|------|
-| Together AI | https://api.together.xyz/v1 | Llama, Mistral |
-| Groq | https://api.groq.com/openai/v1 | Llama, Mixtral |
-| 本地模型 | http://localhost:8000/v1 | llama.cpp, vLLM |
-| OpenAI | https://api.openai.com/v1 | GPT-4 |
 
 ---
 
 ## 核心特性
 
-- ✅ **全屏TUI** - 60/40黄金分割布局
-- ✅ **工作进度显示** - Step + tool_name + spinner
-- ✅ **错误恢复** - 自动建议修复方案
-- ✅ **结果预览** - 文件编辑diff摘要
-- ✅ **多任务队列** - 连续提交自动排队
-- ✅ **上下文压缩** - 长对话自动优化
-- ✅ **命令补全** - Tab补全常用命令
-- ✅ **会话导出** - 导出为markdown
-- ✅ **26种工具** - file/bash/git/web/glob/grep/todo/task
-- ✅ **隐私优先** - 支持本地模型
+- ✅ **持续对话** - 多轮交互，自动保存历史
+- ✅ **33种工具** - 文件/Shell/Git/GitHub/Web/搜索
+- ✅ **Skills系统** - 自定义命令模板
+- ✅ **MCP协议** - 连接外部工具服务器
+- ✅ **Hooks系统** - 安全拦截和日志记录
+- ✅ **Git Checkpoint** - 自动保存，错误恢复
+- ✅ **会话持久化** - 断点续传，压缩优化
+- ✅ **权限控制** - 危险操作检测
+- ✅ **多提供商** - OpenAI/Anthropic/Together/Groq/本地模型
+
+---
+
+## 命令
+
+### 主命令
+
+| 命令 | 说明 |
+|------|------|
+| `spica` | 启动交互模式 |
+| `spica run <request>` | 单次执行 |
+| `spica -c/--continue` | 恢复上次会话 |
+| `spica -p/--provider <name>` | 使用指定提供商 |
+| `spica --version` | 显示版本 |
+
+### 管理命令
+
+| 命令 | 说明 |
+|------|------|
+| `spica providers [action]` | 管理API提供商 |
+| `spica skills [action]` | 管理Skills |
+| `spica mcp [action]` | 管理MCP服务器 |
+
+---
+
+## 内置工具
+
+### 文件操作
+`file_read` `file_write` `file_edit` `file_delete` `file_copy` `file_move` `file_exists`
+
+### 目录操作
+`directory_create` `directory_list`
+
+### 搜索
+`glob` `grep`
+
+### Shell & Git
+`bash` `git_status` `git_diff` `git_log` `git_add` `git_commit` `git_branch` `git_checkout`
+
+### GitHub
+`gh_pr_view` `gh_issue_list` `gh_issue_view` `gh_repo_view` `gh_run_list`
+
+### 网络
+`web_search` `web_fetch`
+
+### 其他
+`question` `todo_write` `task` `workspace` `checkpoint_restore` `lint` `test`
+
+---
+
+## 支持的提供商
+
+| 提供商 | baseUrl | 默认model |
+|--------|---------|-----------|
+| OpenAI | `api.openai.com/v1` | `gpt-4` |
+| Anthropic | `api.anthropic.com/v1` | `claude-3-opus` |
+| Together AI | `api.together.xyz/v1` | `llama-3-70b` |
+| Groq | `api.groq.com/openai/v1` | `llama-3-70b` |
+| Replicate | `api.replicate.com/v1` | `llama-3` |
+| Local | `localhost:8000/v1` | `llama-3` |
+
+---
+
+## 配置
+
+### 配置文件位置
+
+```
+~/.spica/
+├── config.json    # API配置
+├── skills.json    # Skills定义
+├── mcp.json       # MCP服务器
+├── hooks.json     # Hooks规则
+
+<project>/.spica/
+├── session.json   # 会话历史
+├── state.json     # 项目状态
+```
+
+### CLI配置
+
+```bash
+# 设置API密钥
+spica providers set openai sk-xxx...
+
+# 设置模型
+spica providers set openai model gpt-4-turbo
+
+# 设置API地址
+spica providers set openai baseUrl https://api.openai.com/v1
+
+# 设置默认提供商
+spica providers default openai
+```
+
+### 环境变量
+
+```bash
+export OPENAI_API_KEY=sk-xxx...
+export OPENAI_MODEL=gpt-4
+export OPENAI_BASE_URL=https://api.openai.com/v1
+```
+
+---
+
+## 内置指令
+
+交互模式中：
+
+| 指令 | 说明 |
+|------|------|
+| `quit` / `exit` | 退出 |
+| `clear` | 清空历史 |
+| `save` | 保存会话 |
+| `help` | 显示帮助 |
+| `/bypass` | 自动批准操作 |
+| `/strict` | 请求权限确认 |
+| `/status` | 显示状态 |
+| `/skill_name` | 调用skill |
+
+---
+
+## Skills系统
+
+自定义命令模板：
+
+```json
+// ~/.spica/skills.json
+{
+  "skills": {
+    "review": {
+      "description": "代码审查",
+      "promptTemplate": "审查代码: {files}",
+      "allowedTools": ["file_read", "grep", "lint"]
+    }
+  }
+}
+```
+
+使用：`/review src/auth.ts`
+
+---
+
+## MCP协议
+
+连接外部工具服务器：
+
+```json
+// ~/.spica/mcp.json
+{
+  "servers": [
+    {
+      "name": "filesystem",
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/mcp-server-filesystem", "/path"]
+    },
+    {
+      "name": "postgres",
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/mcp-server-postgres"],
+      "env": { "POSTGRES_URL": "postgres://localhost/db" }
+    }
+  ]
+}
+```
+
+---
+
+## Hooks系统
+
+安全拦截：
+
+```json
+// ~/.spica/hooks.json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": { "tool": "bash", "args": { "command": "*--force*" } },
+        "action": "block",
+        "message": "禁止使用 --force"
+      }
+    ]
+  }
+}
+```
+
+---
+
+## 本地模型
+
+```bash
+# llama.cpp
+llama-server -m llama-3.gguf --port 8000
+spica providers set local dummy -b http://localhost:8000/v1 -m llama-3
+
+# Ollama
+ollama serve
+spica providers set local dummy -b http://localhost:11434/v1 -m llama3
+
+# vLLM
+python -m vllm.entrypoints.openai.api_server --model llama-3
+spica providers set local dummy -b http://localhost:8000/v1 -m llama-3
+```
 
 ---
 
 ## 文档
 
-- [TUI需求文档](docs/TUI-REQUIREMENTS.md) - 需求和实现状态
-- [TUI架构](docs/tui-architecture.md) - 技术架构详解
-- [环境变量](docs/ENV_VARS.md) - 环境变量配置
-- [安全说明](docs/SECURITY.md) - API key安全
+| 文档 | 说明 |
+|------|------|
+| [MANUAL.md](docs/MANUAL.md) | 完整用户手册 |
+| [CONFIGURATION.md](docs/CONFIGURATION.md) | 配置指南 |
+| [STORAGE.md](docs/STORAGE.md) | 存储位置详解 |
+| [providers.md](docs/providers.md) | 提供商说明 |
+| [ENV_VARS.md](docs/ENV_VARS.md) | 环境变量 |
+
+---
+
+## 开发
+
+```bash
+npm run dev      # 开发模式运行
+npm run build    # 构建CLI
+npm test         # 运行测试
+npm run test:run # 单次测试
+```
 
 ---
 

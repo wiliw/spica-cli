@@ -4,21 +4,16 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import fs from 'fs-extra';
 import { join } from 'path';
-import os from 'os';
+import {
+  GLOBAL_DIR,
+  MCPServerConfig,
+  loadGlobalSettings,
+} from '../utils/settings';
 
-export interface MCPServerConfig {
-  name: string;           // 服务器名称
-  command?: string;       // stdio模式：启动命令
-  args?: string[];        // stdio模式：命令参数
-  url?: string;           // SSE模式：服务器URL
-  env?: Record<string, string>;  // 环境变量
-  disabled?: boolean;     // 是否禁用
-}
-
+// MCPTool 定义（仅在本模块使用）
 export interface MCPTool {
   name: string;
   description: string;
@@ -33,24 +28,19 @@ export interface MCPConfig {
   servers: MCPServerConfig[];
 }
 
-// MCP配置路径
-const MCP_CONFIG_PATH = join(os.homedir(), '.spica', 'mcp.json');
-
+// MCPManager class
 export class MCPManager extends EventEmitter {
   private clients: Map<string, Client> = new Map();
   private tools: Map<string, { serverName: string; tool: MCPTool }> = new Map();
-  private processes: Map<string, ChildProcess> = new Map();
 
   constructor() {
     super();
   }
 
-  // 加载配置
+  // 加载配置（从 settings.json）
   async loadConfig(): Promise<MCPConfig> {
-    if (await fs.pathExists(MCP_CONFIG_PATH)) {
-      return await fs.readJson(MCP_CONFIG_PATH);
-    }
-    return { servers: [] };
+    const settings = await loadGlobalSettings();
+    return settings.mcp || { servers: [] };
   }
 
   // 连接所有配置的MCP服务器
@@ -74,22 +64,12 @@ export class MCPManager extends EventEmitter {
     let transport: any;
 
     if (config.command) {
-      // Stdio模式 - 启动本地进程
-      const process = spawn(config.command, config.args || [], {
-        env: { ...process.env, ...config.env },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-
-      this.processes.set(config.name, process);
-
+      // Stdio模式 - StdioClientTransport 会自动启动进程
       transport = new StdioClientTransport({
-        reader: process.stdout,
-        writer: process.stdin,
-      });
-
-      // 监听stderr日志
-      process.stderr?.on('data', (data) => {
-        this.emit('server_log', { name: config.name, log: data.toString() });
+        command: config.command,
+        args: config.args || [],
+        env: { ...process.env, ...config.env },
+        stderr: 'pipe',  // 捕获stderr
       });
 
     } else if (config.url) {
@@ -107,6 +87,13 @@ export class MCPManager extends EventEmitter {
 
     await client.connect(transport);
     this.clients.set(config.name, client);
+
+    // 监听stderr日志（通过transport.stderr获取）
+    if (config.command && transport.stderr) {
+      transport.stderr.on('data', (data: Buffer) => {
+        this.emit('server_log', { name: config.name, log: data.toString() });
+      });
+    }
 
     // 获取工具列表
     const toolsResult = await client.listTools();
@@ -136,12 +123,12 @@ export class MCPManager extends EventEmitter {
     // 解析服务器名和工具名
     const [serverName, toolName] = fullName.split('/');
     if (!serverName || !toolName) {
-      return { success: false, error: `Invalid tool name format: ${fullName}` };
+      return { success: false, output: '', error: `Invalid tool name format: ${fullName}` };
     }
 
     const client = this.clients.get(serverName);
     if (!client) {
-      return { success: false, error: `MCP server ${serverName} not connected` };
+      return { success: false, output: '', error: `MCP server ${serverName} not connected` };
     }
 
     try {
@@ -152,7 +139,8 @@ export class MCPManager extends EventEmitter {
 
       // 处理结果
       if (result.content) {
-        const textContent = result.content
+        const contentArray = result.content as unknown[];
+        const textContent = contentArray
           .filter((c: any) => c.type === 'text')
           .map((c: any) => c.text)
           .join('\n');
@@ -161,7 +149,7 @@ export class MCPManager extends EventEmitter {
 
       return { success: true, output: 'Tool executed successfully' };
     } catch (error: any) {
-      return { success: false, error: error.message };
+      return { success: false, output: '', error: error.message };
     }
   }
 
@@ -177,11 +165,10 @@ export class MCPManager extends EventEmitter {
     this.clients.clear();
     this.tools.clear();
 
-    // 关闭进程
-    for (const [name, process] of this.processes) {
-      process.kill();
-    }
-    this.processes.clear();
+    // 关闭进程（StdioClientTransport会自动处理）
+    // 清空客户端列表
+    this.clients.clear();
+    this.tools.clear();
   }
 
   // 列出已连接的服务器
@@ -252,10 +239,11 @@ export function generateExampleConfig(): MCPConfig {
   };
 }
 
-// 保存示例配置到文件
+// 保存示例配置到 settings.json
 export async function saveExampleConfig(): Promise<void> {
-  const config = generateExampleConfig();
-  await fs.ensureDir(join(os.homedir(), '.spica'));
-  await fs.writeJson(MCP_CONFIG_PATH, config, { spaces: 2 });
-  console.log(`MCP config saved to ${MCP_CONFIG_PATH}`);
+  const settings = await loadGlobalSettings();
+  settings.mcp = generateExampleConfig();
+  const { saveGlobalSettings, GLOBAL_SETTINGS_FILE } = await import('../utils/settings');
+  await saveGlobalSettings(settings);
+  console.log(`MCP config saved to ${GLOBAL_SETTINGS_FILE}`);
 }

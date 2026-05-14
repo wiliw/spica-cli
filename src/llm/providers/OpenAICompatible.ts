@@ -84,7 +84,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseUrl,
-      timeout: 30000,  // 30秒超时
+      timeout: 60000,  // 60秒超时 (优化)
       maxRetries: 1,
     });
   }
@@ -135,6 +135,7 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
           },
         })),
         stream: true,
+        temperature: 0.3,  // 低温度加速响应
       }, { signal });
 
       let fullContent = '';
@@ -222,6 +223,7 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
           parameters: t.parameters,
         },
       })),
+      temperature: 0.3,
     });
 
     const choice = response.choices[0];
@@ -271,6 +273,7 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
           },
         })),
         stream: true,
+        temperature: 0.3,  // 低温度加速响应
       }, { signal });
 
       let fullContent = '';
@@ -390,6 +393,7 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
           },
         })),
         stream: true,
+        temperature: 0.3,  // 低温度加速响应
       }, { signal });
 
       let fullContent = '';

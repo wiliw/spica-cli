@@ -10,10 +10,13 @@ import {
   setDefaultProvider,
   BUILTIN_PROVIDERS,
 } from './utils/config';
+import { MCPServerConfig } from './utils/settings';
 import { loadSession, saveSession } from './utils/session';
 import { parseSkillInput, getSkill, buildSkillPrompt, listSkills, installSkill, uninstallSkill, listInstalledPackages } from './skills';
-import { getMCPManager, generateExampleConfig, MCPServerConfig } from './mcp/client';
+import { getMCPManager, generateExampleConfig, shutdownMCP } from './mcp/client';
 import { LAIN_COLORS, format, BG } from './utils/colors';
+import { getInputQueue, clearInputQueue } from './utils/inputQueue';
+import * as readline from 'readline';
 import prompts from 'prompts';
 import fs from 'fs-extra';
 import { join } from 'path';
@@ -161,6 +164,11 @@ function setupAgentEvents(agent: SpicaAgent, interactive: boolean = false) {
   agent.on('hook_log', (data: any) => {
     console.log(LAIN_COLORS.muted(`[LOG] ${data.message}`));
   });
+
+  // Context compression event
+  agent.on('context_compressed', (data: any) => {
+    console.log(LAIN_COLORS.secondary(`[COMPRESS] ${data.before} -> ${data.after} messages`));
+  });
 }
 
 program
@@ -168,11 +176,11 @@ program
   .description('AI coding agent')
   .version('1.0.0');
 
-// 默认：持续对话模式
+// 默认：持续对话模式（自动加载历史）
 program
-  .option('-c, --continue', 'Continue previous session')
+  .option('-f, --fresh', 'Start fresh session (no history)')
   .option('-p, --provider <name>', 'Use specific provider')
-  .action(async (options: { continue?: boolean; provider?: string }) => {
+  .action(async (options: { fresh?: boolean; provider?: string }) => {
     const config = await loadConfig();
     const providerName = options.provider || config.defaultProvider || 'openai';
 
@@ -180,8 +188,20 @@ program
     try {
       providerConfig = await getProviderConfig(providerName);
     } catch (error: any) {
+      // 显示友好的配置指引
+      console.log('');
       console.log(LAIN_COLORS.error(`Provider "${providerName}" not configured.`));
-      console.log(LAIN_COLORS.warning('Set up with: spica providers set <name> <api-key>'));
+      console.log('');
+      console.log(LAIN_COLORS.primary.bold('Quick Setup:'));
+      console.log(LAIN_COLORS.muted('  1. Set API key:'));
+      console.log(LAIN_COLORS.muted(`     spica providers set ${providerName} YOUR_API_KEY`));
+      console.log('');
+      console.log(LAIN_COLORS.muted('  2. Or use environment variable:'));
+      console.log(LAIN_COLORS.muted(`     export OPENAI_API_KEY=sk-xxx`));
+      console.log('');
+      console.log(LAIN_COLORS.muted('Available providers: openai, anthropic, together, groq, local'));
+      console.log(LAIN_COLORS.muted('Run `spica providers` for more info'));
+      console.log('');
       return;
     }
 
@@ -200,171 +220,377 @@ program
       BG.stopBanner();
       await bannerPromise;
 
-      // 恢复上次会话
-      if (options.continue) {
+      // 自动加载历史（除非 --fresh）
+      if (!options.fresh) {
         const session = loadSession(process.cwd());
-        if (session) {
+        if (session && session.messages && session.messages.length > 0) {
           agent.setMessages(session.messages);
-          console.log(LAIN_COLORS.success('restored'));
+          console.log(LAIN_COLORS.muted(`Loaded ${session.messages.length} messages from history`));
         }
       }
 
-      console.log(LAIN_COLORS.muted(`${providerConfig.model} | /h for help`));
+      console.log(LAIN_COLORS.muted(`${providerConfig.model} | /h help | TAB complete | git worktree for parallel`));
 
-      // REPL循环
-      while (true) {
-        const input = await prompts({
-          type: 'text',
-          name: 'prompt',
-          message: LAIN_COLORS.success('>'),
-        });
+      // 可用指令列表（用于 Tab 补全）
+      const COMMANDS = [
+        '/help', '/h', '/status', '/bypass', '/strict',
+        '/queue', '/q', '/undo', '/clear', '/reset',
+        '/skills', '/history', '/compact',
+      ];
 
-        if (!input.prompt) {
-          // Ctrl+C或空输入
-          break;
+      // Tab 补全 - Shell风格
+      const completer = (line: string): [string[], string] => {
+        // 返回空，让keypress事件处理显示
+        return [[], line];
+      };
+
+      // 非阻塞 REPL 循环
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        completer,
+      });
+
+      // 监听 Tab 键 - Shell风格补全
+      readline.emitKeypressEvents(process.stdin, rl);
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(true);
+      }
+
+      let lastLine = '';
+      let shownList = false;
+
+      process.stdin.on('keypress', (char: string, key: readline.Key) => {
+        if (key.name === 'tab') {
+          const currentLine = rl.line;
+          if (currentLine.startsWith('/')) {
+            const hits = COMMANDS.filter(c => c.startsWith(currentLine));
+
+            if (hits.length === 1) {
+              // 只有一个匹配，直接补全
+              rl.write(hits[0].slice(currentLine.length));
+              shownList = false;
+              lastLine = hits[0];
+            } else if (hits.length > 1) {
+              // 多个匹配
+              if (!shownList || currentLine !== lastLine) {
+                // 第一次Tab：显示列表
+                process.stdout.write('\n');
+                hits.forEach(h => process.stdout.write(`${h}  `));
+                process.stdout.write('\n> ' + currentLine);
+                shownList = true;
+                lastLine = currentLine;
+              } else {
+                // 第二次Tab：补全第一个
+                rl.write(hits[0].slice(currentLine.length));
+                shownList = false;
+                lastLine = hits[0];
+              }
+            }
+          }
+        } else if (key.name !== 'return' && key.name !== 'enter') {
+          // 其他按键重置状态
+          shownList = false;
+          lastLine = '';
+        }
+      });
+
+      let isProcessing = false;
+      let shouldExit = false;
+
+      // 输入处理函数
+      const handleInput = async (line: string) => {
+        const trimmed = line.trim();
+
+        // 如果正在处理，加入队列
+        if (isProcessing && !trimmed.startsWith('/')) {
+          const queue = getInputQueue();
+          queue.add(trimmed);
+          const status = queue.getStatus();
+          console.log(LAIN_COLORS.muted(`[QUEUE] Added (${status.pending} pending)`));
+          rl.prompt();
+          return;
         }
 
-        const trimmed = input.prompt.trim();
+        if (!trimmed) {
+          rl.prompt();
+          return;
+        }
+
+        // === 非 / 命令 ===
         if (trimmed === 'quit' || trimmed === 'exit') {
-          break;
-        }
-
-        if (trimmed === 'clear' || trimmed === 'reset') {
-          agent.setMessages([]);
-          console.log(LAIN_COLORS.muted('Session cleared'));
-          continue;
-        }
-
-        // 指令处理（控制agent行为）
-        if (trimmed.startsWith('/')) {
-          const cmd = trimmed.slice(1).toLowerCase();
-
-          if (cmd === 'bypass') {
-            agent.setBypassPermissions(true);
-            console.log(LAIN_COLORS.warning('[WARN] Bypass mode ON - All permissions will be auto-approved'));
-            console.log(LAIN_COLORS.muted('Use /strict to restore permission checks'));
-            continue;
-          }
-
-          if (cmd === 'strict') {
-            agent.setBypassPermissions(false);
-            console.log(LAIN_COLORS.success('[OK] Strict mode ON - Permissions will be requested'));
-            continue;
-          }
-
-          if (cmd === 'status') {
-            const bypass = agent.isBypassPermissions;
-            const msgs = agent.getMessages().length;
-            console.log(LAIN_COLORS.primary.bold('\nCurrent Status:'));
-            console.log(`  Permission mode: ${bypass ? LAIN_COLORS.warning('BYPASS (auto-approve)') : LAIN_COLORS.success('STRICT (ask user)')}`);
-            console.log(`  Messages in context: ${msgs}`);
-            console.log(`  Workspace: ${agent.getWorkspacePath()}`);
-            continue;
-          }
-
-          // /help 指令 (包括 /h 简写)
-          if (cmd === 'help' || cmd === 'h') {
-            console.log(LAIN_COLORS.muted(`
-Commands:
-  quit/exit  - Exit spica
-  clear      - Clear session history
-  save       - Save current session
-  help       - Show this help
-  skills     - List installed skills
-  Ctrl+C     - Interrupt current operation
-
-Mode Control:
-  /bypass    - Skip all permission requests (auto-approve)
-  /strict    - Restore permission requests
-  /status    - Show current status
-
-Skills:
-  Add skills in ~/.spica/skills.json or .spica/skills.json
-  Use /skill_name to invoke installed skills
-`));
-            continue;
-          }
+          shouldExit = true;
+          rl.close();
+          return;
         }
 
         if (trimmed === 'help') {
-          console.log(LAIN_COLORS.muted(`
-Commands:
-  quit/exit  - Exit spica
-  clear      - Clear session history
-  save       - Save current session
-  help       - Show this help
-  skills     - List installed skills
-  Ctrl+C     - Interrupt current operation
-
-Mode Control:
-  /bypass    - Skip all permission requests (auto-approve)
-  /strict    - Restore permission requests
-  /status    - Show current status
-
-Skills:
-  Add skills in ~/.spica/skills.json or .spica/skills.json
-  Use /skill_name to invoke installed skills
-`));
-          continue;
+          showHelp();
+          rl.prompt();
+          return;
         }
 
-        if (trimmed === 'save') {
-          saveSession(process.cwd(), agent.getMessages());
-          console.log(LAIN_COLORS.success('[OK] Session saved'));
-          continue;
-        }
+        // === / 命令 ===
+        if (trimmed.startsWith('/')) {
+          const cmd = trimmed.slice(1).toLowerCase();
 
-        if (trimmed === 'skills') {
-          const skills = listSkills();
-          console.log(LAIN_COLORS.primary.bold('\nInstalled skills:'));
-          if (skills.length === 0) {
-            console.log(LAIN_COLORS.muted('  (none)'));
-            console.log(LAIN_COLORS.muted('\nAdd skills in:'));
-            console.log(LAIN_COLORS.muted('  ~/.spica/skills.json (global)'));
-            console.log(LAIN_COLORS.muted('  .spica/skills.json (project)'));
-          } else {
-            skills.forEach(s => {
-              console.log(LAIN_COLORS.muted(`  /${s.name} - ${s.description}`));
-            });
-          }
-          console.log('');
-          continue;
-        }
-
-        // 检查是否是skill调用
-        const skillInput = parseSkillInput(trimmed);
-        if (skillInput) {
-          const skill = getSkill(skillInput.skillName);
-          if (skill) {
-            const prompt = buildSkillPrompt(skill, skillInput.args);
-            console.log(LAIN_COLORS.muted(`\n[${skill.name}] ${skill.description}`));
-            try {
-              await agent.runLoop(prompt);
-              console.log(LAIN_COLORS.success('\n[OK] Done\n'));
-            } catch (error: any) {
-              console.log(LAIN_COLORS.error(`\n[ERR] Error: ${error.message}\n`));
+          // 队列管理
+          if (cmd === 'queue' || cmd === 'q') {
+            const queue = getInputQueue();
+            const status = queue.getStatus();
+            console.log(LAIN_COLORS.primary.bold('\nInput Queue:'));
+            console.log(`  Pending: ${status.pending}`);
+            if (status.pendingPreview.length > 0) {
+              console.log(LAIN_COLORS.muted('  Recent:'));
+              status.pendingPreview.forEach((p, i) => {
+                console.log(LAIN_COLORS.muted(`    ${i + 1}. ${p}`));
+              });
             }
-            saveSession(process.cwd(), agent.getMessages());
-            continue;
+            console.log('');
+            rl.prompt();
+            return;
           }
+
+          if (cmd === 'undo') {
+            const queue = getInputQueue();
+            const removed = queue.undoLast();
+            if (removed) {
+              console.log(LAIN_COLORS.muted(`[QUEUE] Removed: ${removed.content.slice(0, 30)}...`));
+            } else {
+              console.log(LAIN_COLORS.muted('[QUEUE] No pending inputs'));
+            }
+            rl.prompt();
+            return;
+          }
+
+          if (cmd === 'clear' || cmd === 'reset') {
+            agent.setMessages([]);
+            clearInputQueue();
+            console.log(LAIN_COLORS.muted('[OK] Session cleared'));
+            rl.prompt();
+            return;
+          }
+
+          // 权限模式
+          if (cmd === 'bypass') {
+            agent.setBypassPermissions(true);
+            console.log(LAIN_COLORS.warning('[WARN] Bypass mode ON'));
+            rl.prompt();
+            return;
+          }
+          if (cmd === 'strict') {
+            agent.setBypassPermissions(false);
+            console.log(LAIN_COLORS.success('[OK] Strict mode ON'));
+            rl.prompt();
+            return;
+          }
+
+          // 状态
+          if (cmd === 'status') {
+            const bypass = agent.isBypassPermissions;
+            const msgs = agent.getMessages().length;
+            const queue = getInputQueue();
+            const queueStatus = queue.getStatus();
+            console.log(LAIN_COLORS.primary.bold('\nStatus:'));
+            console.log(`  Mode: ${bypass ? 'BYPASS' : 'STRICT'}`);
+            console.log(`  Messages: ${msgs}`);
+            console.log(`  Queue: ${queueStatus.pending} pending`);
+            console.log(`  Workspace: ${agent.getWorkspacePath()}`);
+            console.log('');
+            rl.prompt();
+            return;
+          }
+
+          // Skills
+          if (cmd === 'skills') {
+            const skills = listSkills();
+            console.log(LAIN_COLORS.primary.bold('\nSkills:'));
+            if (skills.length === 0) {
+              console.log(LAIN_COLORS.muted('  (none)'));
+            } else {
+              skills.forEach(s => {
+                const hint = s.argumentHint ? ` ${s.argumentHint}` : '';
+                console.log(LAIN_COLORS.muted(`  /${s.name}${hint} - ${s.description}`));
+              });
+            }
+            console.log('');
+            rl.prompt();
+            return;
+          }
+
+          // 帮助
+          if (cmd === 'help' || cmd === 'h') {
+            showHelp();
+            rl.prompt();
+            return;
+          }
+
+          // 历史（显示最近消息）
+          if (cmd === 'history') {
+            const msgs = agent.getMessages();
+            console.log(LAIN_COLORS.primary.bold('\nHistory:'));
+            if (msgs.length === 0) {
+              console.log(LAIN_COLORS.muted('  (empty)'));
+            } else {
+              // 显示全部消息，完整内容
+              msgs.forEach((m, i) => {
+                const role = m.role === 'user' ? 'YOU' : m.role === 'assistant' ? 'AI' : 'SYS';
+                const content = m.content || '';
+                console.log(LAIN_COLORS.muted(`  ${i + 1}. [${role}]`));
+                // 分行显示完整内容
+                content.split('\n').forEach(line => {
+                  console.log(LAIN_COLORS.muted(`     ${line}`));
+                });
+              });
+              console.log(LAIN_COLORS.muted(`\n  Total: ${msgs.length} messages`));
+            }
+            console.log('');
+            rl.prompt();
+            return;
+          }
+
+          // 压缩上下文
+          if (cmd === 'compact') {
+            const before = agent.getMessages().length;
+            // Show spinner briefly
+            const spinnerPromise = BG.compressSpinner();
+            // Run compression (synchronous but we animate briefly)
+            agent.compact();
+            const after = agent.getMessages().length;
+            // Stop spinner after 200ms to show animation effect
+            setTimeout(() => BG.stopCompress(), 200);
+            await spinnerPromise;
+            console.log(LAIN_COLORS.secondary(`[COMPRESS] ${before} → ${after} messages`));
+            rl.prompt();
+            return;
+          }
+
+          // Skill 调用（/skill_name args）
+          const skillInput = parseSkillInput(trimmed);
+          if (skillInput) {
+            const skill = getSkill(skillInput.skillName);
+            if (skill) {
+              const prompt = buildSkillPrompt(skill, skillInput.args);
+              console.log(LAIN_COLORS.muted(`\n[${skill.name}] ${skill.description}`));
+              isProcessing = true;
+              try {
+                await agent.runLoop(prompt);
+                console.log(LAIN_COLORS.success('\n[OK] Done\n'));
+              } catch (error: any) {
+                console.log(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
+              }
+              isProcessing = false;
+              saveSession(process.cwd(), agent.getMessages());
+              await processQueue(agent);
+              rl.prompt();
+              return;
+            }
+          }
+
+          // 未知的 / 命令
+          console.log(LAIN_COLORS.warning(`Unknown command: ${trimmed}`));
+          console.log(LAIN_COLORS.muted('Type /h for help'));
+          rl.prompt();
+          return;
         }
 
-        // 执行请求
+        // === 执行请求 ===
         console.log('');
+        isProcessing = true;
+        console.log(LAIN_COLORS.muted('[PROCESSING] You can continue typing...'));
         try {
           await agent.runLoop(trimmed);
           console.log(LAIN_COLORS.success('\n[OK] Done\n'));
         } catch (error: any) {
-          console.log(LAIN_COLORS.error(`\n[ERR] Error: ${error.message}\n`));
+          console.log(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
+        }
+        isProcessing = false;
+        saveSession(process.cwd(), agent.getMessages());
+        await processQueue(agent);
+        rl.prompt();
+      };
+
+      // 帮助信息
+      const showHelp = () => {
+        console.log(LAIN_COLORS.primary.bold('\nCommands:'));
+        console.log(LAIN_COLORS.muted('  quit/exit   Exit'));
+        console.log(LAIN_COLORS.muted('  help        Show help'));
+        console.log('');
+        console.log(LAIN_COLORS.primary.bold('Session:'));
+        console.log(LAIN_COLORS.muted('  /clear      Clear session'));
+        console.log(LAIN_COLORS.muted('  /history    Show recent messages'));
+        console.log(LAIN_COLORS.muted('  /compact    Compress context'));
+        console.log('');
+        console.log(LAIN_COLORS.primary.bold('Queue:'));
+        console.log(LAIN_COLORS.muted('  /queue      Show queue'));
+        console.log(LAIN_COLORS.muted('  /undo       Remove last input'));
+        console.log('');
+        console.log(LAIN_COLORS.primary.bold('Mode:'));
+        console.log(LAIN_COLORS.muted('  /bypass     Auto-approve'));
+        console.log(LAIN_COLORS.muted('  /strict     Ask permission'));
+        console.log(LAIN_COLORS.muted('  /status     Show status'));
+        console.log(LAIN_COLORS.muted('  /skills     List skills'));
+        console.log('');
+        console.log(LAIN_COLORS.muted('TAB for autocomplete'));
+        console.log('');
+      };
+
+      // 处理队列中的输入
+      const processQueue = async (agent: SpicaAgent) => {
+        const queue = getInputQueue();
+        if (!queue.hasPending()) return;
+
+        console.log(LAIN_COLORS.muted(`\n[QUEUE] Processing ${queue.getStatus().pending} inputs...`));
+        const mergedInput = queue.mergePending();
+
+        if (mergedInput) {
+          console.log(LAIN_COLORS.muted(`Combined input:\n${mergedInput.slice(0, 100)}${mergedInput.length > 100 ? '...' : ''}\n`));
+          isProcessing = true;
+          try {
+            await agent.runLoop(mergedInput);
+            console.log(LAIN_COLORS.success('\n[OK] Done\n'));
+          } catch (error: any) {
+            console.log(LAIN_COLORS.error(`\n[ERR] Error: ${error.message}\n`));
+          }
+          isProcessing = false;
+          saveSession(process.cwd(), agent.getMessages());
+        }
+      };
+
+      // 设置 readline 事件
+      rl.on('line', handleInput);
+      rl.on('close', async () => {
+        if (!shouldExit) {
+          // 用户按 Ctrl+C 但不是退出
+          if (isProcessing && currentAgent) {
+            currentAgent.interrupt();
+            console.log(LAIN_COLORS.warning('\n[INTERRUPTED]'));
+          }
+          return;
         }
 
-        // 自动保存会话
-        saveSession(process.cwd(), agent.getMessages());
-      }
+        // 正常退出
+        const messages = agent.getMessages();
+        saveSession(process.cwd(), messages);
+        await shutdownMCP();
+        currentAgent = null;
+        console.log(LAIN_COLORS.muted(`\nSession saved (${messages.length} messages)`));
+        console.log(LAIN_COLORS.muted('Goodbye!\n'));
+        process.exit(0);
+      });
 
-      // 退出时保存
-      saveSession(process.cwd(), agent.getMessages());
-      console.log(LAIN_COLORS.muted('\nGoodbye!\n'));
+      // 提示符
+      const showPrompt = () => {
+        if (!isProcessing && !shouldExit) {
+          process.stdout.write(LAIN_COLORS.success('> '));
+        }
+      };
+      showPrompt();
+
+      // 保持进程运行
+      await new Promise<void>((resolve) => {
+        rl.on('close', resolve);
+      });
 
     } catch (error: any) {
       if (!connectionErrorShown) {
@@ -440,7 +666,7 @@ program
       console.log(LAIN_COLORS.primary.bold('\nBuilt-in providers:'));
       Object.entries(BUILTIN_PROVIDERS).forEach(([key, config]) => {
         const isConfigured = configured && configured.includes(key);
-        console.log(`  ${isConfigured ? [OK] : ' '} ${key} - ${config.name}`);
+        console.log(`  ${isConfigured ? '●' : ' '} ${key} - ${config.name}`);
         if (config.description) {
           console.log(LAIN_COLORS.muted(`      ${config.description}`));
         }
@@ -641,9 +867,10 @@ program
   .argument('[action]', 'list|init|connect|disconnect|tools')
   .argument('[server]', 'Server name (optional)')
   .action(async (action?: string, server?: string) => {
+    const manager = getMCPManager();  // 定义在开头，所有case都能用
+
     if (!action) {
       // 默认显示状态
-      const manager = getMCPManager();
       const connected = manager.listConnectedServers();
       const tools = manager.listAvailableTools();
 
@@ -682,15 +909,18 @@ program
         break;
 
       case 'init':
-        const configPath = join(os.homedir(), '.spica', 'mcp.json');
-        if (await fs.pathExists(configPath)) {
-          console.log(LAIN_COLORS.warning(`Config already exists at ${configPath}`));
-          console.log(LAIN_COLORS.muted('Edit it manually to add servers'));
+        // 写入 settings.json
+        const { loadGlobalSettings, saveGlobalSettings, GLOBAL_SETTINGS_FILE } = await import('./utils/settings');
+        const currentSettings = await loadGlobalSettings();
+
+        if (currentSettings.mcp?.servers?.length > 0) {
+          console.log(LAIN_COLORS.warning(`MCP servers already configured in settings.json`));
+          console.log(LAIN_COLORS.muted('Edit ~/.spica/settings.json to modify'));
         } else {
-          await fs.ensureDir(join(os.homedir(), '.spica'));
-          await fs.writeJson(configPath, generateExampleConfig(), { spaces: 2 });
-          console.log(LAIN_COLORS.success(`[OK] Created example config at ${configPath}`));
-          console.log(LAIN_COLORS.muted('Edit the file to configure your MCP servers'));
+          currentSettings.mcp = generateExampleConfig();
+          await saveGlobalSettings(currentSettings);
+          console.log(LAIN_COLORS.success(`[OK] MCP config added to ${GLOBAL_SETTINGS_FILE}`));
+          console.log(LAIN_COLORS.muted('Edit ~/.spica/settings.json to customize servers'));
         }
         break;
 

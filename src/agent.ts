@@ -3,7 +3,7 @@ import { executeTool, getAllToolDefinitions, setWorkspace, getWorkspace } from '
 import { initMCP, shutdownMCP } from './mcp/client';
 import { getProviderConfig } from './utils/config';
 import { getSystemPrompt } from './prompts/system';
-import { loadHistory, saveHistory } from './utils/history';
+import { loadProjectConfig as loadAgentsConfig, autoDetectProject, createAgentsMd } from './utils/projectConfig';
 import { loadProjectState, saveProjectState, updateProjectTodos, loadProjectContext, saveProjectContext, ensureProjectDir } from './utils/projectState';
 import { runPreHooks, runPostHooks } from './hooks';
 import { createCheckpoint, analyzeError, getRecoveryStrategy, restoreCheckpoint, getLastCheckpoint } from './utils/errorRecovery';
@@ -258,115 +258,19 @@ async init() {
   }
 
   private async loadProjectConfig(): Promise<void> {
-    const configPath = path.join(this.workspacePath, '.spica.md');
-    
-    if (await fs.pathExists(configPath)) {
-      const content = await fs.readFile(configPath, 'utf-8');
-      this.projectConfig = this.parseSpicaMd(content);
+    // 使用新的 projectConfig.ts（兼容多种格式）
+    const loadedConfig = loadAgentsConfig(this.workspacePath);
+
+    if (loadedConfig) {
+      this.projectConfig = loadedConfig;
       this.emit('projectLoaded', this.projectConfig);
     } else {
-      const autoConfig = await this.autoDetectProject();
+      // 无配置文件，自动检测并创建 AGENTS.md
+      const autoConfig = autoDetectProject(this.workspacePath);
       this.projectConfig = autoConfig;
-      await this.createDefaultSpicaMd(autoConfig);
+      await createAgentsMd(this.workspacePath);
       this.emit('projectCreated', autoConfig);
     }
-  }
-
-  private async autoDetectProject(): Promise<ProjectConfig> {
-    const config: ProjectConfig = {};
-    
-    const pkgPath = path.join(this.workspacePath, 'package.json');
-    if (await fs.pathExists(pkgPath)) {
-      const pkg = await fs.readJson(pkgPath);
-      config.type = 'Node.js';
-      config.language = 'TypeScript/JavaScript';
-      config.commands = {
-        build: pkg.scripts?.build || 'npm run build',
-        test: pkg.scripts?.test || 'npm test',
-        dev: pkg.scripts?.dev || 'npm run dev',
-      };
-      
-      if (pkg.devDependencies?.typescript) config.language = 'TypeScript';
-      if (pkg.dependencies?.react || pkg.dependencies?.ink) config.type = 'React CLI';
-      if (pkg.dependencies?.express || pkg.dependencies?.fastify) config.type = 'Webapp';
-      return config;
-    }
-    
-    const goModPath = path.join(this.workspacePath, 'go.mod');
-    if (await fs.pathExists(goModPath)) {
-      return {
-        type: 'Go',
-        language: 'Go',
-        commands: { build: 'go build', test: 'go test ./...', dev: 'go run .' },
-      };
-    }
-    
-    const pyPath = path.join(this.workspacePath, 'requirements.txt');
-    if (await fs.pathExists(pyPath)) {
-      return {
-        type: 'Python',
-        language: 'Python',
-        commands: { test: 'pytest', dev: 'python main.py' },
-      };
-    }
-    
-    const cargoPath = path.join(this.workspacePath, 'Cargo.toml');
-    if (await fs.pathExists(cargoPath)) {
-      return {
-        type: 'Rust',
-        language: 'Rust',
-        commands: { build: 'cargo build', test: 'cargo test', dev: 'cargo run' },
-      };
-    }
-    
-    return { type: 'Unknown', language: 'Unknown' };
-  }
-
-  private async createDefaultSpicaMd(config: ProjectConfig): Promise<void> {
-    const content = `# Spica Project Config
-
-## Project Info
-- Type: ${config.type || 'Unknown'}
-- Framework: ${config.type || 'Unknown'}
-- Language: ${config.language || 'Unknown'}
-
-## Commands
-- Build: \`${config.commands?.build || 'N/A'}\`
-- Test: \`${config.commands?.test || 'N/A'}\`
-- Dev: \`${config.commands?.dev || 'N/A'}\`
-
-## Constraints
-- Code style: No comments unless asked
-- Testing: Use appropriate test framework
-`;
-    
-    await fs.writeFile(path.join(this.workspacePath, '.spica.md'), content);
-  }
-
-  private parseSpicaMd(content: string): ProjectConfig {
-    const config: ProjectConfig = {};
-    
-    const typeMatch = content.match(/Type:\s*(.+)/);
-    if (typeMatch) config.type = typeMatch[1].trim();
-    
-    const frameworkMatch = content.match(/Framework:\s*(.+)/);
-    if (frameworkMatch) config.framework = frameworkMatch[1].trim();
-    
-    const langMatch = content.match(/Language:\s*(.+)/);
-    if (langMatch) config.language = langMatch[1].trim();
-    
-    const buildMatch = content.match(/Build:\s*`(.+)`/);
-    const testMatch = content.match(/Test:\s*`(.+)`/);
-    const devMatch = content.match(/Dev:\s*`(.+)`/);
-    
-    if (buildMatch || testMatch || devMatch) {
-      config.commands = {};
-      if (buildMatch) config.commands.build = buildMatch[1];
-      if (testMatch) config.commands.test = testMatch[1];
-      if (devMatch) config.commands.dev = devMatch[1];
-    }
-    
-    return config;
   }
 
   setTodos(todos: string[]) {
@@ -408,20 +312,26 @@ async init() {
       throw new Error('LLM client not initialized');
     }
 
+    // Pre-request compression: 压缩现有消息历史
+    const existingMessages = this.llm.getMessages();
+    if (existingMessages.length > 15) {
+      const compressed = this.compressHistory(existingMessages);
+      this.llm.setMessages(compressed);
+      this.emit('context_compressed', { before: existingMessages.length, after: compressed.length });
+    }
+
     // 创建checkpoint（在开始任务前）
     await createCheckpoint(`Task: ${prompt.slice(0, 50)}`);
 
-    const projectContext = this.projectConfig.type ? `
-Project Context (from .spica.md):
-- Type: ${this.projectConfig.type}
-- Framework: ${this.projectConfig.framework}
-- Commands: Build=${this.projectConfig.commands?.build}, Test=${this.projectConfig.commands?.test}
-` : '';
+    // Simplified project context (减少token)
+    const projectContext = this.projectConfig.type
+      ? `Project: ${this.projectConfig.type}, Build: ${this.projectConfig.commands?.build || 'N/A'}, Test: ${this.projectConfig.commands?.test || 'N/A'}`
+      : '';
 
     this.emit('message', { role: 'user', content: prompt });
 
     const toolDefinitions = getAllToolDefinitions();
-    let response = await this.llm.generate(prompt + projectContext, toolDefinitions);
+    let response = await this.llm.generate(prompt + (projectContext ? `\n${projectContext}` : ''), toolDefinitions);
 
     let iterations = 0;
 
@@ -675,8 +585,16 @@ Project Context (from .spica.md):
     return baseSuggestion;
   }
 
+  // 公开方法：手动压缩历史
+  public compact(): void {
+    if (!this.llm) return;
+    const allMessages = this.llm.getMessages();
+    const compressed = this.compressHistory(allMessages);
+    this.llm.setMessages(compressed);
+  }
+
   private compressHistory(messages: ChatMessage[]): ChatMessage[] {
-    const MAX_MESSAGES = 20;
+    const MAX_MESSAGES = 15;  // 减少到15条以加速处理
 
     if (messages.length <= MAX_MESSAGES) {
       return messages;
@@ -695,27 +613,27 @@ Project Context (from .spica.md):
       }
     });
 
-    // 2. 压缩工具调用结果（只保留摘要）
+    // 2. 压缩工具调用结果（更激进压缩）
     const compressedMessages: ChatMessage[] = [];
     let lastWasTool = false;
     let toolSummary = '';
 
     messages.forEach(m => {
       if (m.role === 'tool') {
-        // 工具结果压缩为简短摘要
+        // 工具结果压缩为简短摘要（更激进）
         const content = m.content || '';
-        if (content.length > 50) {
-          toolSummary += content.slice(0, 30) + '... ';
+        if (content.length > 30) {
+          toolSummary += content.slice(0, 15) + '... ';
         } else {
           toolSummary += content + ' ';
         }
         lastWasTool = true;
       } else {
         if (lastWasTool && toolSummary) {
-          // 插入工具摘要
+          // 插入工具摘要（限制长度）
           compressedMessages.push({
             role: 'assistant',
-            content: `[工具执行] ${toolSummary.slice(0, 200)}`,
+            content: `[工具] ${toolSummary.slice(0, 100)}`,
           });
           toolSummary = '';
         }
