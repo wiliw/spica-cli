@@ -41,7 +41,7 @@ process.on('SIGINT', () => {
 // 设置agent事件监听
 let connectionErrorShown = false;  // 全局标记
 
-function setupAgentEvents(agent: SpicaAgent, interactive: boolean = false) {
+function setupAgentEvents(agent: SpicaAgent, rl: readline.Interface | null, interactive: boolean = false) {
   let lastWasReasoning = false;
 
   // 连接错误事件（只显示一次简洁信息）
@@ -51,16 +51,30 @@ function setupAgentEvents(agent: SpicaAgent, interactive: boolean = false) {
     console.log('');
   });
 
+  // 恢复输入行的辅助函数
+  const restoreInputLine = () => {
+    if (rl) {
+      process.stdout.write('\n> ' + (rl.line || ''));
+    }
+  };
+
   agent.on('stream', (data: any) => {
     if (lastWasReasoning) {
       process.stdout.write('\n');
       lastWasReasoning = false;
     }
+    // 清除当前输入行，输出后恢复
+    const esc = '\x1b';
+    process.stdout.write(esc + '[2K' + esc + '[1G'); // 清除行，回到行首
     process.stdout.write(LAIN_COLORS.primary(data.chunk));
+    restoreInputLine();
   });
 
   agent.on('reasoning', (data: any) => {
+    const esc = '\x1b';
+    process.stdout.write(esc + '[2K' + esc + '[1G');
     process.stderr.write(LAIN_COLORS.reasoning(data.content));
+    restoreInputLine();
     lastWasReasoning = true;
   });
 
@@ -70,7 +84,12 @@ function setupAgentEvents(agent: SpicaAgent, interactive: boolean = false) {
       process.stdout.write('\n');
       lastWasReasoning = false;
     }
+    const esc = '\x1b';
+    process.stdout.write(esc + '[2K' + esc + '[1G');
     console.log(LAIN_COLORS.tool(`-> ${data.name}`));
+    if (rl) {
+      process.stdout.write('> ' + (rl.line || ''));
+    }
   });
 
   agent.on('tool_result', (data: any) => {
@@ -208,8 +227,6 @@ program
     const agent = new SpicaAgent(providerName, process.cwd());
     currentAgent = agent;
 
-    setupAgentEvents(agent, true);
-
     // 开始banner动画（并行）
     const bannerPromise = BG.banner();
 
@@ -294,6 +311,9 @@ program
           lastLine = '';
         }
       });
+
+      // 设置agent事件监听（需要rl来恢复输入行）
+      setupAgentEvents(agent, rl, true);
 
       let isProcessing = false;
       let shouldExit = false;
@@ -623,7 +643,7 @@ program
     const agent = new SpicaAgent(providerName, process.cwd());
     currentAgent = agent;
 
-    setupAgentEvents(agent, false);
+    setupAgentEvents(agent, null as any, false);
 
     try {
       await agent.init();
