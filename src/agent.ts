@@ -314,7 +314,7 @@ async init() {
 
     // Pre-request compression: 压缩现有消息历史
     const existingMessages = this.llm.getMessages();
-    if (existingMessages.length > 15) {
+    if (existingMessages.length > 40) {
       const compressed = this.compressHistory(existingMessages);
       this.llm.setMessages(compressed);
       this.emit('context_compressed', { before: existingMessages.length, after: compressed.length });
@@ -478,10 +478,8 @@ async init() {
     if (this.llm) {
       const allMessages = this.llm.getMessages();
 
-      // 上下文压缩：保留最近20条消息，压缩旧消息
-      const compressedMessages = this.compressHistory(allMessages);
-
-      const simplifiedMessages = compressedMessages.map(m => {
+      // 结束时不再压缩，直接保存（压缩只在开始前触发）
+      const simplifiedMessages = allMessages.map(m => {
         if (m.role === 'tool') {
           return { role: 'tool', content: m.content, toolCallId: m.toolCallId };
         }
@@ -594,7 +592,7 @@ async init() {
   }
 
   private compressHistory(messages: ChatMessage[]): ChatMessage[] {
-    const MAX_MESSAGES = 15;  // 减少到15条以加速处理
+    const MAX_MESSAGES = 40;  // 提高到40条，约8-10轮对话
 
     if (messages.length <= MAX_MESSAGES) {
       return messages;
@@ -643,7 +641,7 @@ async init() {
     });
 
     // 3. 合并：保留重要消息 + 最近消息
-    const recentCount = Math.min(MAX_MESSAGES - importantMessages.length, 10);
+    const recentCount = Math.min(MAX_MESSAGES - importantMessages.length, 30);
     const recentMessages = compressedMessages.slice(-recentCount);
 
     // 组合结果
