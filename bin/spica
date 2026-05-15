@@ -1,2 +1,2 @@
 #!/usr/bin/env -S npx tsx
-import('/home/zison/development/spica/spica-cli/src/index.ts');
+import("/home/zison/development/spica/spica-cli/src/index.ts");

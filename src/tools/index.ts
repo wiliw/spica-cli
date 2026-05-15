@@ -863,12 +863,12 @@ export async function executeTool(
               eventCallback('sub_agent_done', { id: subTaskId, summary });
             }
 
-            return `✓ ${task.description || task.prompt.slice(0, 30)}: ${summary}`;
+            return `[OK] ${task.description || task.prompt.slice(0, 30)}: ${summary}`;
           } catch (err: any) {
             if (eventCallback) {
               eventCallback('sub_agent_error', { id: subTaskId, error: err.message });
             }
-            return `✗ ${task.description || task.prompt.slice(0, 30)}: ${err.message}`;
+            return `[ERR] ${task.description || task.prompt.slice(0, 30)}: ${err.message}`;
           }
         }));
 

@@ -27,6 +27,42 @@ const program = new Command();
 // 当前agent引用（用于中断）
 let currentAgent: SpicaAgent | null = null;
 
+// 全局状态（用于status显示）
+let globalProviderConfig: any = null;
+let globalIsProcessing = false;
+let globalBypassMode = false;
+
+// 显示状态行（简化版本：每次prompt前显示）
+function displayStatusLine(): void {
+  const queue = getInputQueue();
+  const queueStatus = queue.getStatus();
+  const width = process.stdout.columns || 80;
+
+  const parts: string[] = [];
+
+  if (globalProviderConfig?.model) {
+    parts.push(LAIN_COLORS.muted(globalProviderConfig.model));
+  }
+
+  if (globalIsProcessing) {
+    parts.push(LAIN_COLORS.warning('processing'));
+  }
+
+  if (queueStatus.pending > 0) {
+    parts.push(LAIN_COLORS.primary(`queue: ${queueStatus.pending}`));
+  }
+
+  parts.push(globalBypassMode
+    ? LAIN_COLORS.bypass('bypass')
+    : LAIN_COLORS.success('strict'));
+
+  const statusLine = parts.join(' │ ');
+  // 清除当前行并显示状态
+  process.stdout.write('\x1b[2K\x1b[1G');
+  process.stdout.write(statusLine.slice(0, width - 2));
+  process.stdout.write('\n');
+}
+
 // Ctrl+C中断处理（防止重复触发）
 let interruptPending = false;
 process.on('SIGINT', () => {
@@ -135,6 +171,17 @@ function setupAgentEvents(agent: SpicaAgent, rl: readline.Interface | null, inte
   });
 
   agent.on('permission_request', async (data: any) => {
+    // 暂停 readline 并禁用 raw mode，让 prompts 正常工作
+    if (rl) {
+      rl.pause();
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(false);
+      }
+      // 清除当前输入行显示
+      const esc = '\x1b';
+      process.stdout.write(esc + '[2K' + esc + '[1G');
+    }
+
     // Lain红色警示框
     console.log(format.permissionBox(data.reason));
     const answer = await prompts({
@@ -144,6 +191,18 @@ function setupAgentEvents(agent: SpicaAgent, rl: readline.Interface | null, inte
       initial: false,
     });
     console.log(LAIN_COLORS.permissionBorder('═'.repeat(50)) + '\n');
+
+    // 恢复 readline 和 raw mode（不调用 prompt，让 handleInput 流程处理）
+    if (rl) {
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(true);
+      }
+      rl.resume();
+      // 清除 prompts 留下的残留输出
+      const esc = '\x1b';
+      process.stdout.write(esc + '[2K' + esc + '[1G');
+    }
+
     if (answer.approve) {
       agent.approvePermission();
     } else {
@@ -249,6 +308,7 @@ program
 
     const agent = new SpicaAgent(providerName, process.cwd());
     currentAgent = agent;
+    globalProviderConfig = providerConfig;
 
     // 开始banner动画（并行）
     const bannerPromise = BG.banner();
@@ -269,7 +329,8 @@ program
         }
       }
 
-      console.log(LAIN_COLORS.muted(`${providerConfig.model} | /h help | TAB complete | git worktree for parallel`));
+      // 显示初始状态（简化版本）
+      console.log(LAIN_COLORS.muted(`${providerConfig.model} | /h help | TAB complete`));
 
       // 启用 Bracketed Paste Mode（粘贴内容作为整体到达）
       const ESC = '\x1b';
@@ -420,7 +481,17 @@ program
       const handleInput = async (line: string) => {
         const trimmed = line.trim();
 
-        // 如果正在处理，加入队列
+        // quit/exit 命令始终有效（即使正在处理）
+        if (trimmed === 'quit' || trimmed === 'exit') {
+          shouldExit = true;
+          if (isProcessing && currentAgent) {
+            currentAgent.interrupt();
+          }
+          rl.close();
+          return;
+        }
+
+        // 如果正在处理，非 / 命令加入队列
         if (isProcessing && !trimmed.startsWith('/')) {
           const queue = getInputQueue();
           queue.add(trimmed);
@@ -432,13 +503,6 @@ program
 
         if (!trimmed) {
           rl.prompt();
-          return;
-        }
-
-        // === 非 / 命令 ===
-        if (trimmed === 'quit' || trimmed === 'exit') {
-          shouldExit = true;
-          rl.close();
           return;
         }
 
@@ -492,12 +556,14 @@ program
           // 权限模式
           if (cmd === 'bypass') {
             agent.setBypassPermissions(true);
+            globalBypassMode = true;
             console.log(LAIN_COLORS.warning('[WARN] Bypass mode ON'));
             rl.prompt();
             return;
           }
           if (cmd === 'strict') {
             agent.setBypassPermissions(false);
+            globalBypassMode = false;
             console.log(LAIN_COLORS.success('[OK] Strict mode ON'));
             rl.prompt();
             return;
@@ -591,6 +657,8 @@ program
               const prompt = buildSkillPrompt(skill, skillInput.args);
               console.log(LAIN_COLORS.muted(`\n[${skill.name}] ${skill.description}`));
               isProcessing = true;
+              globalIsProcessing = true;
+              displayStatusLine();
               try {
                 await agent.runLoop(prompt);
                 console.log(LAIN_COLORS.success('\n[OK] Done\n'));
@@ -598,8 +666,10 @@ program
                 console.log(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
               }
               isProcessing = false;
+              globalIsProcessing = false;
               saveSession(process.cwd(), agent.getMessages());
               await processQueue(agent);
+              displayStatusLine();
               rl.prompt();
               return;
             }
@@ -615,7 +685,9 @@ program
         // === 执行请求 ===
         console.log('');
         isProcessing = true;
-        // 保持提示符可见，不显示 [PROCESSING]
+        globalIsProcessing = true;
+        // 显示状态行 + 提示符
+        displayStatusLine();
         rl.prompt();
         try {
           await agent.runLoop(trimmed);
@@ -633,8 +705,11 @@ program
           console.log(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
         }
         isProcessing = false;
+        globalIsProcessing = false;
         saveSession(process.cwd(), agent.getMessages());
         await processQueue(agent);
+        // 显示状态行 + 提示符
+        displayStatusLine();
         rl.prompt();
       };
 
@@ -674,6 +749,8 @@ program
         if (mergedInput) {
           console.log(LAIN_COLORS.muted(`Combined input:\n${mergedInput.slice(0, 100)}${mergedInput.length > 100 ? '...' : ''}\n`));
           isProcessing = true;
+          globalIsProcessing = true;
+          displayStatusLine();
           try {
             await agent.runLoop(mergedInput);
             console.log(LAIN_COLORS.success('\n[OK] Done\n'));
@@ -681,7 +758,9 @@ program
             console.log(LAIN_COLORS.error(`\n[ERR] Error: ${error.message}\n`));
           }
           isProcessing = false;
+          globalIsProcessing = false;
           saveSession(process.cwd(), agent.getMessages());
+          displayStatusLine();
         }
       };
 
@@ -788,14 +867,14 @@ program
       } else {
         configured.forEach(p => {
           const isDefault = p === defaultProvider;
-          console.log(`  ${isDefault ? LAIN_COLORS.success('●') : '○'} ${p}${isDefault ? LAIN_COLORS.success(' (default)') : ''}`);
+          console.log(`  ${isDefault ? LAIN_COLORS.success('*') : ' '} ${p}${isDefault ? LAIN_COLORS.success(' (default)') : ''}`);
         });
       }
 
       console.log(LAIN_COLORS.primary.bold('\nBuilt-in providers:'));
       Object.entries(BUILTIN_PROVIDERS).forEach(([key, config]) => {
         const isConfigured = configured && configured.includes(key);
-        console.log(`  ${isConfigured ? '●' : ' '} ${key} - ${config.name}`);
+        console.log(`  ${isConfigured ? '*' : ' '} ${key} - ${config.name}`);
         if (config.description) {
           console.log(LAIN_COLORS.muted(`      ${config.description}`));
         }
@@ -910,7 +989,7 @@ program
         console.log(LAIN_COLORS.muted('  (none)'));
       } else {
         packages.forEach(p => {
-          console.log(`  ${LAIN_COLORS.success('●')} ${p.name} v${p.version || '1.0.0'} - ${p.description}`);
+          console.log(`  ${LAIN_COLORS.success('*')} ${p.name} v${p.version || '1.0.0'} - ${p.description}`);
         });
       }
 
@@ -975,7 +1054,7 @@ program
           console.log(LAIN_COLORS.muted('  (none)'));
         } else {
           packages.forEach(p => {
-            console.log(`  ${LAIN_COLORS.success('●')} ${p.name} v${p.version || '1.0.0'}`);
+            console.log(`  ${LAIN_COLORS.success('*')} ${p.name} v${p.version || '1.0.0'}`);
             console.log(LAIN_COLORS.muted(`    ${p.description}`));
             if (p.author) {
               console.log(LAIN_COLORS.muted(`    Author: ${p.author}`));
@@ -1032,7 +1111,7 @@ program
         } else {
           servers.forEach(s => {
             const toolsCount = manager.listAvailableTools().filter(t => t.startsWith(`${s}/`)).length;
-            console.log(`  ${LAIN_COLORS.success('●')} ${s} (${toolsCount} tools)`);
+            console.log(`  ${LAIN_COLORS.success('*')} ${s} (${toolsCount} tools)`);
           });
         }
         break;

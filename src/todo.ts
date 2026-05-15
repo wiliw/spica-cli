@@ -58,9 +58,9 @@ program
       };
       todos.push(newTodo);
       await saveTodos(todos);
-      console.log(chalk.green('✓'), `任务已添加: "${task}" (ID: ${newTodo.id})`);
+      console.log(chalk.green('[OK]'), `任务已添加: "${task}" (ID: ${newTodo.id})`);
     } catch (error) {
-      console.error(chalk.red('✗ 添加任务失败'), error);
+      console.error(chalk.red('[ERR] 添加任务失败'), error);
     }
   });
 
@@ -81,29 +81,29 @@ program
 
       console.log(chalk.bold('\n待办事项:'));
       console.log(chalk.gray('─'.repeat(50)));
-      
+
       const filteredTodos = options.all ? todos : todos.filter(t => !t.completed);
-      
+
       if (filteredTodos.length === 0 && !options.all) {
-        console.log(chalk.green('🎉 所有任务都已完成！'));
+        console.log(chalk.green('所有任务都已完成！'));
         console.log(chalk.gray('使用 --all 查看已完成任务'));
         return;
       }
 
       filteredTodos.forEach(todo => {
-        const status = todo.completed 
-          ? chalk.green('✓') 
-          : chalk.yellow('○');
-        const taskText = todo.completed 
-          ? chalk.dim(todo.task) 
+        const status = todo.completed
+          ? chalk.green('[DONE]')
+          : chalk.yellow('[TODO]');
+        const taskText = todo.completed
+          ? chalk.dim(todo.task)
           : todo.task;
         console.log(`  ${status} ${chalk.gray(`[${todo.id}]`)} ${taskText}`);
       });
-      
+
       console.log(chalk.gray('─'.repeat(50)));
       console.log(chalk.dim(`共 ${filteredTodos.length} 个任务`));
     } catch (error) {
-      console.error(chalk.red('✗ 列出任务失败'), error);
+      console.error(chalk.red('[ERR] 列出任务失败'), error);
     }
   });
 
@@ -119,22 +119,22 @@ program
       const numId = parseInt(id);
       
       if (isNaN(numId)) {
-        console.error(chalk.red('✗ 请提供有效的任务ID'));
+        console.error(chalk.red('[ERR] 请提供有效的任务ID'));
         return;
       }
 
       const index = todos.findIndex(t => t.id === numId);
       
       if (index === -1) {
-        console.error(chalk.red('✗ 未找到该任务ID'));
+        console.error(chalk.red('[ERR] 未找到该任务ID'));
         return;
       }
 
       const deleted = todos.splice(index, 1)[0];
       await saveTodos(todos);
-      console.log(chalk.green('✓'), `已删除任务: "${deleted.task}"`);
+      console.log(chalk.green('[OK]'), `已删除任务: "${deleted.task}"`);
     } catch (error) {
-      console.error(chalk.red('✗ 删除任务失败'), error);
+      console.error(chalk.red('[ERR] 删除任务失败'), error);
     }
   });
 
@@ -149,27 +149,27 @@ program
       const numId = parseInt(id);
       
       if (isNaN(numId)) {
-        console.error(chalk.red('✗ 请提供有效的任务ID'));
+        console.error(chalk.red('[ERR] 请提供有效的任务ID'));
         return;
       }
 
       const todo = todos.find(t => t.id === numId);
       
       if (!todo) {
-        console.error(chalk.red('✗ 未找到该任务ID'));
+        console.error(chalk.red('[ERR] 未找到该任务ID'));
         return;
       }
 
       if (todo.completed) {
-        console.log(chalk.yellow('⚠ 该任务已经完成'));
+        console.log(chalk.yellow('[WARN] 该任务已经完成'));
         return;
       }
 
       todo.completed = true;
       await saveTodos(todos);
-      console.log(chalk.green('✓'), `已完成任务: "${todo.task}"`);
+      console.log(chalk.green('[OK]'), `已完成任务: "${todo.task}"`);
     } catch (error) {
-      console.error(chalk.red('✗ 标记任务失败'), error);
+      console.error(chalk.red('[ERR] 标记任务失败'), error);
     }
   });
 
@@ -189,9 +189,9 @@ program
 
       const remaining = todos.filter(t => !t.completed);
       await saveTodos(remaining);
-      console.log(chalk.green('✓'), `已清除 ${completed.length} 个完成任务`);
+      console.log(chalk.green('[OK]'), `已清除 ${completed.length} 个完成任务`);
     } catch (error) {
-      console.error(chalk.red('✗ 清除任务失败'), error);
+      console.error(chalk.red('[ERR] 清除任务失败'), error);
     }
   });
 
