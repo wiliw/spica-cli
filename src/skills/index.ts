@@ -1,15 +1,20 @@
 // Skills系统 - 用户自定义命令
 
 import fs from 'fs-extra';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import os from 'os';
 import { execa } from 'execa';
+import { fileURLToPath } from 'url';
 import {
   loadGlobalSettings,
   GLOBAL_DIR,
   SkillDefinition,
   loadProjectSkills,
 } from '../utils/settings';
+
+// ES module 中获取 __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // SkillPackage 定义（仅在本模块）
 export interface SkillPackage {
@@ -20,36 +25,23 @@ export interface SkillPackage {
   skills: Record<string, SkillDefinition>;
 }
 
-// 预装 skills 目录
+// 内置 skills 目录（随 spica-cli 一起分发）
+const BUILTIN_DIR = join(__dirname, '..', 'builtin-skills', 'superpowers');
+// 预装 skills 目录（用户全局安装）
 const PREINSTALLED_DIR = join(GLOBAL_DIR, 'installed-skills', 'superpowers');
 
-// 加载所有 skills（预装 + 全局 + 项目覆盖）
+// 加载所有 skills（内置 -> 预装 -> 全局 -> 项目覆盖）
 export function loadSkills(workspacePath?: string): Map<string, SkillDefinition> {
   const skills = new Map<string, SkillDefinition>();
   const ws = workspacePath || process.cwd();
 
-  // 1. 加载预装 skills (superpowers)
-  if (fs.existsSync(PREINSTALLED_DIR)) {
-    const dirs = fs.readdirSync(PREINSTALLED_DIR).filter(d => {
-      const fullPath = join(PREINSTALLED_DIR, d);
-      return fs.statSync(fullPath).isDirectory() && !d.startsWith('_') && !d.startsWith('.');
-    });
+  // 1. 加载内置 skills (superpowers - 随 spica-cli 分发)
+  loadSkillsFromDir(BUILTIN_DIR, skills);
 
-    for (const dir of dirs) {
-      const skillFile = join(PREINSTALLED_DIR, dir, 'SKILL.md');
-      if (fs.existsSync(skillFile)) {
-        try {
-          const content = fs.readFileSync(skillFile, 'utf-8');
-          const skillDef = parseSkillMarkdown(dir, content);
-          if (skillDef) {
-            skills.set(dir, skillDef);
-          }
-        } catch {}
-      }
-    }
-  }
+  // 2. 加载预装 skills (用户全局安装的 superpowers)
+  loadSkillsFromDir(PREINSTALLED_DIR, skills);
 
-  // 2. 加载全局 skills (覆盖预装)
+  // 3. 加载全局 skills (覆盖预装)
   const globalSettings = loadGlobalSettingsSync();
   if (globalSettings.skills) {
     Object.entries(globalSettings.skills).forEach(([name, def]) => {
@@ -58,7 +50,7 @@ export function loadSkills(workspacePath?: string): Map<string, SkillDefinition>
     });
   }
 
-  // 3. 加载项目 skills（覆盖全局）
+  // 4. 加载项目 skills（覆盖全局）
   const projectSkills = loadProjectSkills(ws);
   if (projectSkills) {
     Object.entries(projectSkills).forEach(([name, def]) => {
@@ -68,6 +60,29 @@ export function loadSkills(workspacePath?: string): Map<string, SkillDefinition>
   }
 
   return skills;
+}
+
+// 从目录加载 skills
+function loadSkillsFromDir(dir: string, skills: Map<string, SkillDefinition>): void {
+  if (!fs.existsSync(dir)) return;
+
+  const dirs = fs.readdirSync(dir).filter(d => {
+    const fullPath = join(dir, d);
+    return fs.statSync(fullPath).isDirectory() && !d.startsWith('_') && !d.startsWith('.');
+  });
+
+  for (const dirName of dirs) {
+    const skillFile = join(dir, dirName, 'SKILL.md');
+    if (fs.existsSync(skillFile)) {
+      try {
+        const content = fs.readFileSync(skillFile, 'utf-8');
+        const skillDef = parseSkillMarkdown(dirName, content);
+        if (skillDef) {
+          skills.set(dirName, skillDef);
+        }
+      } catch {}
+    }
+  }
 }
 
 // 解析 SKILL.md 文件
