@@ -335,9 +335,6 @@ async init() {
       this.emit('context_compressed', { before: usedTokens, after: newTokens });
     }
 
-    // 创建checkpoint（在开始任务前）
-    await createCheckpoint(`Task: ${prompt.slice(0, 50)}`);
-
     // Simplified project context (减少token)
     const projectContext = this.projectConfig.type
       ? `Project: ${this.projectConfig.type}, Build: ${this.projectConfig.commands?.build || 'N/A'}, Test: ${this.projectConfig.commands?.test || 'N/A'}`
