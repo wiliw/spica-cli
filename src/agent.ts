@@ -346,9 +346,7 @@ async init() {
     this.emit('message', { role: 'user', content: prompt });
 
     const toolDefinitions = getAllToolDefinitions();
-    console.log(LAIN_COLORS.muted(`[DEBUG] Tools: ${toolDefinitions.length} available`));
     let response = await this.llm.generate(prompt + (projectContext ? `\n${projectContext}` : ''), toolDefinitions);
-    console.log(LAIN_COLORS.muted(`[DEBUG] Response: finished=${response.finished}, toolCalls=${response.toolCalls?.length || 0}`));
 
     let iterations = 0;
 
