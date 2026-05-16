@@ -1,6 +1,10 @@
 export class TokenCounter {
   private static readonly AVERAGE_CHARS_PER_TOKEN = 4;
-  private static readonly MAX_CONTEXT_WINDOW = 128000;
+  private contextWindow: number = 128000;  // 默认值，可动态设置
+
+  setContextWindow(size: number): void {
+    this.contextWindow = size;
+  }
 
   estimateTokens(text: string): number {
     return Math.ceil(text.length / TokenCounter.AVERAGE_CHARS_PER_TOKEN);
@@ -18,12 +22,12 @@ export class TokenCounter {
 
   canFitInContext(messages: { role: string; content: string }[], responseTokens: number = 4096): boolean {
     const used = this.estimateMessages(messages);
-    return used + responseTokens <= TokenCounter.MAX_CONTEXT_WINDOW;
+    return used + responseTokens <= this.contextWindow;
   }
 
   getRemainingTokens(messages: { role: string; content: string }[], responseTokens: number = 4096): number {
     const used = this.estimateMessages(messages);
-    return Math.max(0, TokenCounter.MAX_CONTEXT_WINDOW - used - responseTokens);
+    return Math.max(0, this.contextWindow - used - responseTokens);
   }
 
   truncateToFit(text: string, maxTokens: number): string {

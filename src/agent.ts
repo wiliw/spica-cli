@@ -1,12 +1,14 @@
 import { LLMClient } from './llm/LLMClient';
+import { TokenCounter } from './llm/TokenCounter';
 import { executeTool, getAllToolDefinitions, setWorkspace, getWorkspace } from './tools/index';
 import { initMCP, shutdownMCP } from './mcp/client';
 import { getProviderConfig } from './utils/config';
 import { getSystemPrompt } from './prompts/system';
 import { loadProjectConfig as loadAgentsConfig, autoDetectProject, createAgentsMd } from './utils/projectConfig';
-import { loadProjectState, saveProjectState, updateProjectTodos, loadProjectContext, saveProjectContext, ensureProjectDir } from './utils/projectState';
+import { loadProjectState, saveProjectState, updateProjectTodos, loadProjectContext, saveProjectContext, ensureProjectDir } from './storage/projectState';
 import { runPreHooks, runPostHooks } from './hooks';
-import { createCheckpoint, analyzeError, getRecoveryStrategy, restoreCheckpoint, getLastCheckpoint } from './utils/errorRecovery';
+import { createCheckpoint, analyzeError, getRecoveryStrategy, restoreCheckpoint, getLastCheckpoint } from './core/errorRecovery';
+import { LAIN_COLORS } from './cli/ui/colors';
 import { EventEmitter } from 'events';
 import fs from 'fs-extra';
 import * as path from 'path';
@@ -312,12 +314,25 @@ async init() {
       throw new Error('LLM client not initialized');
     }
 
-    // Pre-request compression: 压缩现有消息历史
+    // Pre-request: 基于token数判断是否需要压缩
     const existingMessages = this.llm.getMessages();
-    if (existingMessages.length > 40) {
+    const tokenCounter = new TokenCounter();
+
+    // 从provider获取上下文窗口大小
+    const provider = this.llm.getProvider();
+    tokenCounter.setContextWindow(provider.getContextWindow());
+
+    const usedTokens = tokenCounter.estimateMessages(existingMessages);
+    const remainingTokens = tokenCounter.getRemainingTokens(existingMessages);
+    const threshold = Math.floor(provider.getContextWindow() * 0.15);  // 15%阈值
+
+    // 当剩余token少于阈值时才压缩
+    if (remainingTokens < threshold) {
+      console.log(LAIN_COLORS.muted(`[COMPRESS] ${usedTokens} tokens used, ${remainingTokens} remaining, compressing...`));
       const compressed = this.compressHistory(existingMessages);
       this.llm.setMessages(compressed);
-      this.emit('context_compressed', { before: existingMessages.length, after: compressed.length });
+      const newTokens = tokenCounter.estimateMessages(compressed);
+      this.emit('context_compressed', { before: usedTokens, after: newTokens });
     }
 
     // 创建checkpoint（在开始任务前）
@@ -331,7 +346,9 @@ async init() {
     this.emit('message', { role: 'user', content: prompt });
 
     const toolDefinitions = getAllToolDefinitions();
+    console.log(LAIN_COLORS.muted(`[DEBUG] Tools: ${toolDefinitions.length} available`));
     let response = await this.llm.generate(prompt + (projectContext ? `\n${projectContext}` : ''), toolDefinitions);
+    console.log(LAIN_COLORS.muted(`[DEBUG] Response: finished=${response.finished}, toolCalls=${response.toolCalls?.length || 0}`));
 
     let iterations = 0;
 
@@ -592,91 +609,34 @@ async init() {
   }
 
   private compressHistory(messages: ChatMessage[]): ChatMessage[] {
-    const MAX_MESSAGES = 40;  // 提高到40条，约8-10轮对话
+    const MAX_MESSAGES = 80;  // 保留80条
 
     if (messages.length <= MAX_MESSAGES) {
       return messages;
     }
 
-    // 1. 识别重要消息（决策、成功、失败、错误）
-    const importantKeywords = ['决定', '决策', '成功', '完成', '失败', '错误', '结论', '重要'];
-    const importantMessages: ChatMessage[] = [];
+    // 简单策略：保留最近的80条，之前的压缩为一条摘要
+    const oldMessages = messages.slice(0, -MAX_MESSAGES);
+    const recentMessages = messages.slice(-MAX_MESSAGES);
 
-    messages.forEach(m => {
-      const content = m.content || '';
-      if (importantKeywords.some(k => content.includes(k)) ||
-          (m.role === 'assistant' && content.length > 100)) {
-        // 保留完整的重要assistant消息
-        importantMessages.push(m);
-      }
-    });
+    // 创建旧消息摘要
+    const userTopics = oldMessages
+      .filter(m => m.role === 'user')
+      .map(m => (m.content || '').slice(0, 30))
+      .join(' | ');
 
-    // 2. 压缩工具调用结果（更激进压缩）
-    const compressedMessages: ChatMessage[] = [];
-    let lastWasTool = false;
-    let toolSummary = '';
+    const summary: ChatMessage = {
+      role: 'assistant',
+      content: `[历史摘要] 用户需求: ${userTopics.slice(0, 150)}...`,
+    };
 
-    messages.forEach(m => {
-      if (m.role === 'tool') {
-        // 工具结果压缩为简短摘要（更激进）
-        const content = m.content || '';
-        if (content.length > 30) {
-          toolSummary += content.slice(0, 15) + '... ';
-        } else {
-          toolSummary += content + ' ';
-        }
-        lastWasTool = true;
-      } else {
-        if (lastWasTool && toolSummary) {
-          // 插入工具摘要（限制长度）
-          compressedMessages.push({
-            role: 'assistant',
-            content: `[工具] ${toolSummary.slice(0, 100)}`,
-          });
-          toolSummary = '';
-        }
-        compressedMessages.push(m);
-        lastWasTool = false;
-      }
-    });
-
-    // 3. 合并：保留重要消息 + 最近消息
-    const recentCount = Math.min(MAX_MESSAGES - importantMessages.length, 30);
-    const recentMessages = compressedMessages.slice(-recentCount);
-
-    // 组合结果
-    const result: ChatMessage[] = [];
-
-    // 插入重要消息（排除已在recent中的）
-    importantMessages.forEach(m => {
-      if (!recentMessages.includes(m)) {
-        result.push(m);
-      }
-    });
-
-    // 插入摘要
-    if (messages.length > MAX_MESSAGES + 5) {
-      const summary = this.createSummary(messages.slice(0, -MAX_MESSAGES));
-      result.push({
-        role: 'assistant',
-        content: `[历史摘要] ${summary}`,
-      });
-    }
-
-    // 添加最近消息
-    result.push(...recentMessages);
-
-    // 确保不超过限制
-    return result.slice(-MAX_MESSAGES);
+    return [summary, ...recentMessages];
   }
 
   private createSummary(messages: ChatMessage[]): string {
-    const userMessages = messages.filter(m => m.role === 'user').map(m => m.content);
-    const assistantMessages = messages.filter(m => m.role === 'assistant').map(m => m.content);
-
-    const userTopics = userMessages.map(c => c.slice(0, 50)).join('; ');
-    const assistantTopics = assistantMessages.map(c => c.slice(0, 50)).join('; ');
-
-    return `之前讨论: ${userTopics.slice(0, 200)}. 已完成: ${assistantTopics.slice(0, 200)}`;
+    return messages
+      .filter(m => m.role === 'user')
+      .map(m => (m.content || '').slice(0, 30))
+      .join('; ');
   }
 }

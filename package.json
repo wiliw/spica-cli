@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "npm run build:cli",
-    "build:cli": "PWD=$(pwd) && printf '#!/usr/bin/env -S npx tsx\\nimport(\"%s/src/index.ts\");\\n' \"$PWD\" > bin/spica && chmod +x bin/spica",
+    "build:cli": "PWD=$(pwd) && cat > bin/spica << EOF\n#!/usr/bin/env -S npx tsx\nimport('${PWD}/src/index.ts');\nEOF\nchmod +x bin/spica",
     "test": "vitest",
     "test:run": "vitest run"
   },

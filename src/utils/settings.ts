@@ -168,17 +168,74 @@ export async function saveGlobalSettings(settings: Settings): Promise<void> {
 
 // 加载项目 skills (覆盖全局)
 export function loadProjectSkills(workspacePath: string): Record<string, SkillDefinition> | null {
+  const skillsDir = join(workspacePath, '.spica', 'skills');
   const projectSkillsPath = join(workspacePath, '.spica', 'skills.json');
 
+  const skills: Record<string, SkillDefinition> = {};
+
+  // 方式1: 从 skills.json 文件加载
   if (fs.existsSync(projectSkillsPath)) {
     try {
       const projectSkills = fs.readJsonSync(projectSkillsPath);
-      return projectSkills.skills || projectSkills;
-    } catch {
-      return null;
+      Object.assign(skills, projectSkills.skills || projectSkills);
+    } catch {}
+  }
+
+  // 方式2: 从 skills/ 目录扫描（支持 superpowers 安装方式）
+  if (fs.existsSync(skillsDir)) {
+    try {
+      const dirs = fs.readdirSync(skillsDir).filter(d => {
+        const fullPath = join(skillsDir, d);
+        return fs.statSync(fullPath).isDirectory() && !d.startsWith('_') && !d.startsWith('.');
+      });
+
+      for (const dir of dirs) {
+        const skillFile = join(skillsDir, dir, 'SKILL.md');
+        if (fs.existsSync(skillFile)) {
+          try {
+            const content = fs.readFileSync(skillFile, 'utf-8');
+            // 从 SKILL.md 解析 skill 定义
+            const skillDef = parseSkillMarkdown(dir, content);
+            if (skillDef) {
+              skills[dir] = skillDef;
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  return Object.keys(skills).length > 0 ? skills : null;
+}
+
+// 解析 SKILL.md 文件提取 skill 定义
+function parseSkillMarkdown(name: string, content: string): SkillDefinition | null {
+  // 提取 description（第一个段落）
+  const lines = content.split('\n');
+  let description = '';
+  let promptTemplate = '';
+
+  // 找到标题后的第一个非空段落作为 description
+  let foundTitle = false;
+  for (const line of lines) {
+    if (line.startsWith('#')) {
+      foundTitle = true;
+      continue;
+    }
+    if (foundTitle && line.trim()) {
+      description = line.trim();
+      break;
     }
   }
-  return null;
+
+  // 整个内容作为 promptTemplate（LLM 会处理）
+  promptTemplate = content;
+
+  return {
+    name,
+    description: description || `Skill: ${name}`,
+    promptTemplate,
+  };
 }
 
 // 加载项目 hooks (追加全局)

@@ -23,6 +23,24 @@ const ERROR_MESSAGES: Record<string, { type: string; hint: string }> = {
   '503': { type: '服务暂时不可用', hint: 'API服务维护或过载，请稍后重试' },
 };
 
+// 模型上下文窗口大小（默认值，可从API获取）
+const DEFAULT_CONTEXT_WINDOW = 128000;
+
+// 常见模型的上下文窗口
+const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  'gpt-4': 8192,
+  'gpt-4-turbo': 128000,
+  'gpt-4o': 128000,
+  'gpt-4o-mini': 128000,
+  'gpt-3.5-turbo': 4096,
+  'claude-3-opus': 200000,
+  'claude-3-sonnet': 200000,
+  'claude-3-haiku': 200000,
+  'claude-3-5-sonnet': 200000,
+  'glm-4': 128000,
+  'glm-5': 128000,
+};
+
 // 解析错误并返回友好提示
 function parseError(error: any): { type: string; message: string; hint: string } {
   const code = String(error.code || error.status || '');
@@ -76,10 +94,14 @@ export class OpenAICompatibleProvider extends BaseProvider {
   private client: OpenAI;
   private providerName: string;
   private onChunk?: (chunk: string) => void;
+  private contextWindow: number = DEFAULT_CONTEXT_WINDOW;
 
   constructor(config: LLMProviderConfig) {
     super(config);
     this.providerName = config.name || 'OpenAI-compatible';
+
+    // 从预设表获取上下文窗口，或使用默认值
+    this.contextWindow = MODEL_CONTEXT_WINDOWS[config.model] || DEFAULT_CONTEXT_WINDOW;
 
     this.client = new OpenAI({
       apiKey: config.apiKey,
@@ -87,6 +109,28 @@ export class OpenAICompatibleProvider extends BaseProvider {
       timeout: 60000,  // 60秒超时 (优化)
       maxRetries: 1,
     });
+  }
+
+  // 获取模型上下文窗口大小
+  getContextWindow(): number {
+    return this.contextWindow;
+  }
+
+  // 尝试从API获取模型信息（异步）
+  async fetchModelInfo(): Promise<void> {
+    try {
+      const modelInfo = await this.client.models.retrieve(this.config.model);
+      // OpenAI API 返回的模型信息中可能包含 context_window 或类似字段
+      if (modelInfo && typeof modelInfo === 'object') {
+        // 检查是否有上下文窗口信息
+        const info = modelInfo as any;
+        if (info.context_window) {
+          this.contextWindow = info.context_window;
+        }
+      }
+    } catch {
+      // 获取失败，使用预设值
+    }
   }
 
   // 快速连接检测（支持中断）

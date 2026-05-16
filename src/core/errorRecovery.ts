@@ -7,9 +7,9 @@ import {
   getCheckpoint,
   listCheckpoints,
   type CheckpointMeta,
-} from './checkpoint';
+} from '../storage/checkpoint';
 
-export type { CheckpointMeta } from './checkpoint';
+export type { CheckpointMeta } from '../storage/checkpoint';
 
 // 重新导出 checkpoint 函数
 export {
@@ -25,7 +25,7 @@ export {
   exportCheckpoints,
   importCheckpoints,
   setMaxCheckpoints,
-} from './checkpoint';
+} from '../storage/checkpoint';
 
 export interface ErrorAnalysis {
   type: 'file_not_found' | 'permission_denied' | 'syntax_error' | 'network_error' | 'git_error' | 'unknown';

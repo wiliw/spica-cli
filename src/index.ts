@@ -12,10 +12,14 @@ import {
 } from './utils/config';
 import { MCPServerConfig } from './utils/settings';
 import { loadSession, saveSession } from './utils/session';
-import { parseSkillInput, getSkill, buildSkillPrompt, listSkills, installSkill, uninstallSkill, listInstalledPackages } from './skills';
+import { parseSkillInput, getSkill, buildSkillPrompt, listSkills, installSkill, uninstallSkill, listInstalledPackages, saveSkill, deleteSkill } from './skills';
+import { runInit } from './cli/init';
 import { getMCPManager, generateExampleConfig, shutdownMCP } from './mcp/client';
-import { LAIN_COLORS, format, BG } from './utils/colors';
-import { getInputQueue, clearInputQueue } from './utils/inputQueue';
+import { LAIN_COLORS, format, BG } from './cli/ui/colors';
+import { getInputQueue, clearInputQueue } from './cli/ui/queue';
+import { setupAgentEvents } from './cli/events';
+import { displayStatusLine } from './cli/status';
+import { getRuntimeState, resetRuntimeState } from './core/RuntimeState';
 import * as readline from 'readline';
 import prompts from 'prompts';
 import fs from 'fs-extra';
@@ -23,254 +27,33 @@ import { join } from 'path';
 import os from 'os';
 
 const program = new Command();
+const state = getRuntimeState();
 
-// 当前agent引用（用于中断）
-let currentAgent: SpicaAgent | null = null;
+// Ctrl+C中断处理
+let interruptCount = 0;
+let interruptTimeout: NodeJS.Timeout | null = null;
 
-// 全局状态（用于status显示）
-let globalProviderConfig: any = null;
-let globalIsProcessing = false;
-let globalBypassMode = false;
-
-// 显示状态行（简化版本：每次prompt前显示）
-function displayStatusLine(): void {
-  const queue = getInputQueue();
-  const queueStatus = queue.getStatus();
-  const width = process.stdout.columns || 80;
-
-  const parts: string[] = [];
-
-  if (globalProviderConfig?.model) {
-    parts.push(LAIN_COLORS.muted(globalProviderConfig.model));
-  }
-
-  if (globalIsProcessing) {
-    parts.push(LAIN_COLORS.warning('processing'));
-  }
-
-  if (queueStatus.pending > 0) {
-    parts.push(LAIN_COLORS.primary(`queue: ${queueStatus.pending}`));
-  }
-
-  parts.push(globalBypassMode
-    ? LAIN_COLORS.bypass('bypass')
-    : LAIN_COLORS.success('strict'));
-
-  const statusLine = parts.join(' │ ');
-  // 清除当前行并显示状态
-  process.stdout.write('\x1b[2K\x1b[1G');
-  process.stdout.write(statusLine.slice(0, width - 2));
-  process.stdout.write('\n');
-}
-
-// Ctrl+C中断处理（防止重复触发）
-let interruptPending = false;
 process.on('SIGINT', () => {
-  if (interruptPending) return;  // 防止重复
+  // 连续Ctrl+C强制退出
+  interruptCount++;
+  if (interruptCount >= 3) {
+    console.log(LAIN_COLORS.error('\n[FORCE EXIT]'));
+    process.exit(0);
+  }
 
-  if (currentAgent) {
-    interruptPending = true;
-    currentAgent.interrupt();
-    console.log(LAIN_COLORS.warning('\n[INTERRUPTED]'));
-    // 200ms 后重置状态
-    setTimeout(() => {
-      interruptPending = false;
-    }, 200);
+  // 重置计数器（1秒内没有第二次Ctrl+C）
+  if (interruptTimeout) clearTimeout(interruptTimeout);
+  interruptTimeout = setTimeout(() => {
+    interruptCount = 0;
+  }, 1000);
+
+  if (state.getAgent()) {
+    state.getAgent().interrupt();
+    console.log(LAIN_COLORS.warning('\n[INTERRUPTED] Ctrl+C again to exit'));
   } else {
     process.exit(0);
   }
 });
-
-// 设置agent事件监听
-// 设置agent事件监听
-let connectionErrorShown = false;  // 全局标记
-let isStreamingOutput = false;     // 全局标记：是否正在输出
-
-function setupAgentEvents(agent: SpicaAgent, rl: readline.Interface | null, interactive: boolean = false) {
-  let lastWasReasoning = false;
-
-  // 连接错误事件（只显示一次简洁信息）
-  agent.on('connection_error', (data: any) => {
-    connectionErrorShown = true;
-    console.log(LAIN_COLORS.error(`\n[ERR] ${data.type}: ${data.hint}`));
-    console.log('');
-  });
-
-  // 恢复输入行的辅助函数
-  const restoreInputLine = () => {
-    if (rl) {
-      process.stdout.write('\n> ' + (rl.line || ''));
-    }
-  };
-
-  agent.on('stream', (data: any) => {
-    // 开始输出时清除输入行（只做一次）
-    if (!isStreamingOutput) {
-      isStreamingOutput = true;
-      const esc = '\x1b';
-      process.stdout.write(esc + '[2K' + esc + '[1G');
-    }
-    if (lastWasReasoning) {
-      process.stdout.write('\n');
-      lastWasReasoning = false;
-    }
-    // 直接输出，不要每次都恢复
-    process.stdout.write(LAIN_COLORS.primary(data.chunk));
-  });
-
-  agent.on('reasoning', (data: any) => {
-    if (!isStreamingOutput) {
-      isStreamingOutput = true;
-      const esc = '\x1b';
-      process.stdout.write(esc + '[2K' + esc + '[1G');
-    }
-    process.stderr.write(LAIN_COLORS.reasoning(data.content));
-    lastWasReasoning = true;
-  });
-
-  agent.on('tool_call', (data: any) => {
-    // 工具调用意味着 stream 结束，恢复输入行
-    if (isStreamingOutput) {
-      isStreamingOutput = false;
-      process.stdout.write('\n');
-    }
-    if (lastWasReasoning) {
-      process.stdout.write('\n');
-      lastWasReasoning = false;
-    }
-    console.log(LAIN_COLORS.tool(`-> ${data.name}`));
-    if (rl) {
-      process.stdout.write('> ' + (rl.line || ''));
-    }
-  });
-
-  agent.on('tool_result', (data: any) => {
-    // 工具结果意味着 stream 结束
-    if (isStreamingOutput) {
-      isStreamingOutput = false;
-      process.stdout.write('\n');
-    }
-    const icon = data.success ? LAIN_COLORS.success('[OK]') : LAIN_COLORS.error('[ERR]');
-    const output = data.output || data.error || '';
-    console.log(`${icon} ${data.name}:`);
-    if (output.length > 0) {
-      output.split('\n').forEach(line => {
-        console.log(LAIN_COLORS.muted(`  ${line}`));
-      });
-    }
-    if (rl) {
-      process.stdout.write('> ' + (rl.line || ''));
-    }
-  });
-
-  agent.on('diff_preview', (data: any) => {
-    console.log(LAIN_COLORS.file(`\n[FILE] ${data.filePath}`));
-    if (data.diff) {
-      console.log(data.diff);
-    }
-  });
-
-  agent.on('permission_request', async (data: any) => {
-    // 暂停 readline 并禁用 raw mode，让 prompts 正常工作
-    if (rl) {
-      rl.pause();
-      if (process.stdin.isTTY) {
-        process.stdin.setRawMode(false);
-      }
-      // 清除当前输入行显示
-      const esc = '\x1b';
-      process.stdout.write(esc + '[2K' + esc + '[1G');
-    }
-
-    // Lain红色警示框
-    console.log(format.permissionBox(data.reason));
-    const answer = await prompts({
-      type: 'confirm',
-      name: 'approve',
-      message: LAIN_COLORS.primary.bold('Do you want to allow this action?'),
-      initial: false,
-    });
-    console.log(LAIN_COLORS.permissionBorder('═'.repeat(50)) + '\n');
-
-    // 恢复 readline 和 raw mode（不调用 prompt，让 handleInput 流程处理）
-    if (rl) {
-      if (process.stdin.isTTY) {
-        process.stdin.setRawMode(true);
-      }
-      rl.resume();
-      // 清除 prompts 留下的残留输出
-      const esc = '\x1b';
-      process.stdout.write(esc + '[2K' + esc + '[1G');
-    }
-
-    if (answer.approve) {
-      agent.approvePermission();
-    } else {
-      agent.denyPermission();
-    }
-  });
-
-  agent.on('error_suggestion', (data: any) => {
-    console.log(LAIN_COLORS.warning(`[HINT] ${data.suggestion}`));
-  });
-
-  agent.on('workspace_changed', (data: any) => {
-    console.log(LAIN_COLORS.file(`[DIR] Workspace: ${data.path}`));
-  });
-
-  // Bypass模式事件
-  agent.on('bypass_changed', (data: any) => {
-    if (data.enabled) {
-      console.log(LAIN_COLORS.bypass('[WARN] Bypass mode activated'));
-    } else {
-      console.log(LAIN_COLORS.success('[OK] Strict mode activated'));
-    }
-  });
-
-  agent.on('permission_bypassed', (data: any) => {
-    console.log(LAIN_COLORS.bypassAuto(`[AUTO] Approved: ${data.reason}`));
-  });
-
-  // 子agent事件
-  agent.on('sub_agent_start', (data: any) => {
-    console.log(LAIN_COLORS.subAgent(`  [${data.type || 'sub'}] ${data.description}`));
-  });
-
-  agent.on('sub_agent_tool_call', (data: any) => {
-    console.log(LAIN_COLORS.subAgent(`    -> [sub] ${data.name}`));
-  });
-
-  agent.on('sub_agent_tool_result', (data: any) => {
-    const icon = data.success ? LAIN_COLORS.success('[OK]') : LAIN_COLORS.error('[ERR]');
-    console.log(LAIN_COLORS.subAgent(`    ${icon} [sub] ${data.name}`));
-  });
-
-  agent.on('sub_agent_done', (data: any) => {
-    console.log(LAIN_COLORS.success(`  [OK] [sub] Done: ${data.summary.slice(0, 50)}`));
-  });
-
-  agent.on('sub_agent_error', (data: any) => {
-    console.log(LAIN_COLORS.error(`  [ERR] [sub] Error: ${data.error}`));
-  });
-
-  // Hooks事件
-  agent.on('hook_blocked', (data: any) => {
-    console.log(LAIN_COLORS.error(`[BLOCKED] ${data.tool} - ${data.reason}`));
-  });
-
-  agent.on('hook_warning', (data: any) => {
-    console.log(LAIN_COLORS.warning(`[WARN] ${data.message}`));
-  });
-
-  agent.on('hook_log', (data: any) => {
-    console.log(LAIN_COLORS.muted(`[LOG] ${data.message}`));
-  });
-
-  // Context compression event
-  agent.on('context_compressed', (data: any) => {
-    console.log(LAIN_COLORS.secondary(`[COMPRESS] ${data.before} -> ${data.after} messages`));
-  });
-}
 
 program
   .name('spica')
@@ -288,8 +71,8 @@ program
     let providerConfig;
     try {
       providerConfig = await getProviderConfig(providerName);
+      state.setProviderConfig(providerConfig);
     } catch (error: any) {
-      // 显示友好的配置指引
       console.log('');
       console.log(LAIN_COLORS.error(`Provider "${providerName}" not configured.`));
       console.log('');
@@ -307,11 +90,10 @@ program
     }
 
     const agent = new SpicaAgent(providerName, process.cwd());
-    currentAgent = agent;
-    globalProviderConfig = providerConfig;
+    state.setAgent(agent);
 
-    // 开始banner动画（并行，但管道模式跳过）
-    const bannerPromise = process.stdin.isTTY ? BG.banner() : Promise.resolve();
+    // 开始banner动画（并行）
+    const bannerPromise = BG.banner();
 
     try {
       await agent.init();
@@ -329,25 +111,140 @@ program
         }
       }
 
-      // 显示初始状态（简化版本）
-      console.log(LAIN_COLORS.muted(`${providerConfig.model} | /h help | TAB complete`));
+      console.log(LAIN_COLORS.muted(`${providerConfig.model} | /h help | TAB complete | ESC ESC interrupt`));
 
-      // 启用 Bracketed Paste Mode（粘贴内容作为整体到达，仅TTY模式）
+      // 启用 Bracketed Paste Mode（粘贴内容作为整体到达）
       const ESC = '\x1b';
+      process.stdout.write(`${ESC}[?2004h`);
+
+      // 先启用 rawMode（在 readline 创建之前）
       if (process.stdin.isTTY) {
-        process.stdout.write(`${ESC}[?2004h`);
+        process.stdin.setRawMode(true);
       }
 
-      // 可用指令列表（用于 Tab 补全）
-      const COMMANDS = [
+      // 粘贴处理变量
+      let pasteBuffer = '';
+      let isInPaste = false;
+      let ignoreLines = 0;
+
+      // stdin data 监听 - 检测粘贴序列和ESC（在 readline 之前注册）
+      process.stdin.on('data', (chunk: Buffer) => {
+        const str = chunk.toString('utf8');
+
+        // 检测ESC键（用于中断）
+        if (str === '\x1b') {
+          const now = Date.now();
+          if (now - lastEscTime < 500) {
+            if (isProcessing && state.getAgent()) {
+              state.getAgent().interrupt();
+              isProcessing = false;
+              state.setProcessing(false);
+              console.log(LAIN_COLORS.warning('\n[INTERRUPTED] ESC'));
+              rl.prompt();
+            }
+            lastEscTime = 0;
+          } else {
+            lastEscTime = now;
+          }
+          return;
+        }
+
+        // 检测粘贴开始 \x1b[200~
+        if (str.includes('\x1b[200~')) {
+          isInPaste = true;
+          pasteBuffer = '';
+          const idx = str.indexOf('\x1b[200~');
+          const after = str.slice(idx + 6);
+          if (after.includes('\x1b[201~')) {
+            const endIdx = after.indexOf('\x1b[201~');
+            pasteBuffer = after.slice(0, endIdx);
+            isInPaste = false;
+            const content = pasteBuffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            const lineCount = content.split('\n').length;
+            if (content.trim()) {
+              ignoreLines = lineCount;
+              // 直接处理，不等待 readline
+              if (!isProcessing) {
+                handleInput(content.trim());
+              } else {
+                const queue = getInputQueue();
+                queue.add(content.trim());
+                console.log(LAIN_COLORS.muted(`[QUEUE] Added (${queue.getStatus().pending} pending)`));
+              }
+            }
+            pasteBuffer = '';
+          } else {
+            pasteBuffer = after;
+          }
+          return;
+        }
+
+        // 检测粘贴结束 \x1b[201~
+        if (str.includes('\x1b[201~') && isInPaste) {
+          const idx = str.indexOf('\x1b[201~');
+          pasteBuffer += str.slice(0, idx);
+          isInPaste = false;
+          const content = pasteBuffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+          const lineCount = content.split('\n').length;
+          if (content.trim()) {
+            ignoreLines = lineCount;
+            if (!isProcessing) {
+              handleInput(content.trim());
+            } else {
+              const queue = getInputQueue();
+              queue.add(content.trim());
+              console.log(LAIN_COLORS.muted(`[QUEUE] Added (${queue.getStatus().pending} pending)`));
+            }
+          }
+          pasteBuffer = '';
+          return;
+        }
+
+        // 累积粘贴内容
+        if (isInPaste) {
+          pasteBuffer += str;
+          return;
+        }
+
+        // 备用粘贴检测：一次性收到多行（Bracketed Paste Mode 未生效时）
+        if (str.includes('\n') && str.trim() && !isInPaste) {
+          const lines = str.split('\n').filter(l => l.trim());
+          if (lines.length > 1) {
+            // 多行一次性到达，视为粘贴
+            ignoreLines = str.split('\n').length;
+            if (!isProcessing) {
+              handleInput(lines.join('\n'));
+            } else {
+              const queue = getInputQueue();
+              queue.add(lines.join('\n'));
+              console.log(LAIN_COLORS.muted(`[QUEUE] Added (${queue.getStatus().pending} pending)`));
+            }
+            return;
+          }
+        }
+      });
+
+      // Tab补全状态
+      let lastLine = '';
+      let shownList = false;
+
+      // 可用指令列表（用于 Tab 补全） - 基础命令
+      const BASE_COMMANDS = [
         '/help', '/h', '/status', '/bypass', '/strict',
         '/queue', '/q', '/undo', '/clear', '/reset',
-        '/skills', '/history', '/compact',
+        '/skills', '/skill-add', '/skill-remove', '/skill-edit',
+        '/history', '/compact', '/init',
       ];
+
+      // 动态获取完整命令列表（包含skills）
+      const getCommands = () => {
+        const skills = listSkills(process.cwd());
+        const skillCommands = skills.map(s => `/${s.name}`);
+        return [...BASE_COMMANDS, ...skillCommands];
+      };
 
       // Tab 补全 - Shell风格
       const completer = (line: string): [string[], string] => {
-        // 返回空，让keypress事件处理显示
         return [[], line];
       };
 
@@ -360,127 +257,55 @@ program
 
       // 监听 Tab 键 - Shell风格补全
       readline.emitKeypressEvents(process.stdin, rl);
-      if (process.stdin.isTTY) {
-        process.stdin.setRawMode(true);
-      }
 
-      let lastLine = '';
-      let shownList = false;
+      // 先定义isProcessing，供keypress事件使用
+      let isProcessing = false;
+      let shouldExit = false;
 
-      // 粘贴检测：Bracketed Paste Mode（仅TTY模式）
-      let pasteBuffer: string[] = [];
-      let isInPaste = false;
+      // ESC双击中断
+      let lastEscTime = 0;
 
-      // 直接监听 stdin data 来检测粘贴序列（仅TTY模式）
-      if (process.stdin.isTTY) {
-        process.stdin.on('data', (chunk: Buffer) => {
-          const str = chunk.toString('utf8');
+      process.stdin.on('keypress', (char: string, key: readline.Key) => {
+        // 粘贴时不处理 keypress
+        if (isInPaste) return;
 
-          // 检测粘贴开始
-          if (str.includes(`${ESC}[200~`)) {
-            isInPaste = true;
-            pasteBuffer = [];
-            // 提取粘贴开始后的内容
-            const parts = str.split(`${ESC}[200~`);
-            if (parts.length > 1) {
-              const afterStart = parts[1] || '';
-              // 检测粘贴结束（可能在同一数据块）
-              if (afterStart.includes(`${ESC}[201~`)) {
-                const pasteParts = afterStart.split(`${ESC}[201~`);
-                const pasteContent = pasteParts[0];
-                pasteBuffer.push(pasteContent);
-                isInPaste = false;
-                // 提交合并的粘贴内容
-                const mergedPaste = pasteBuffer.join('');
-                if (mergedPaste.trim()) {
-                  // 触发 line 事件（模拟 readline）
-                  rl.emit('line', mergedPaste.replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
-                }
-                pasteBuffer = [];
-                // 处理粘贴结束后的剩余内容
-                const afterPaste = pasteParts[1] || '';
-                if (afterPaste) {
-                  // 不处理，让 readline 处理
-                }
+        // Tab补全
+        if (key.name === 'tab') {
+          const currentLine = rl.line;
+          if (currentLine.startsWith('/')) {
+            const hits = getCommands().filter(c => c.startsWith(currentLine));
+
+            if (hits.length === 1) {
+              // 只有一个匹配，直接补全
+              rl.write(hits[0].slice(currentLine.length));
+              shownList = false;
+              lastLine = hits[0];
+            } else if (hits.length > 1) {
+              // 多个匹配
+              if (!shownList || currentLine !== lastLine) {
+                // 第一次Tab：显示列表
+                process.stdout.write('\n');
+                hits.forEach(h => process.stdout.write(`${h}  `));
+                process.stdout.write('\n> ' + currentLine);
+                shownList = true;
+                lastLine = currentLine;
               } else {
-                pasteBuffer.push(afterStart);
-              }
-            }
-            return;  // 不继续传递给 readline
-          }
-
-          // 检测粘贴结束
-          if (str.includes(`${ESC}[201~`) && isInPaste) {
-            const parts = str.split(`${ESC}[201~`);
-            pasteBuffer.push(parts[0] || '');
-            isInPaste = false;
-            // 提交合并的粘贴内容
-            const mergedPaste = pasteBuffer.join('');
-            if (mergedPaste.trim()) {
-              rl.emit('line', mergedPaste.replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
-            }
-            pasteBuffer = [];
-            // 处理粘贴结束后的剩余内容
-            const afterPaste = parts[1] || '';
-            if (afterPaste) {
-              // 不处理，让 readline 处理
-            }
-            return;
-          }
-
-          // 正在粘贴中，累积内容
-          if (isInPaste) {
-            pasteBuffer.push(str);
-            return;
-          }
-        });
-      }
-
-      if (process.stdin.isTTY) {
-        process.stdin.on('keypress', (char: string, key: readline.Key) => {
-          // 粘贴时不处理 keypress
-          if (isInPaste) return;
-
-          if (key.name === 'tab') {
-            const currentLine = rl.line;
-            if (currentLine.startsWith('/')) {
-              const hits = COMMANDS.filter(c => c.startsWith(currentLine));
-
-              if (hits.length === 1) {
-                // 只有一个匹配，直接补全
+                // 第二次Tab：补全第一个
                 rl.write(hits[0].slice(currentLine.length));
                 shownList = false;
                 lastLine = hits[0];
-              } else if (hits.length > 1) {
-                // 多个匹配
-                if (!shownList || currentLine !== lastLine) {
-                  // 第一次Tab：显示列表
-                  process.stdout.write('\n');
-                  hits.forEach(h => process.stdout.write(`${h}  `));
-                  process.stdout.write('\n> ' + currentLine);
-                  shownList = true;
-                  lastLine = currentLine;
-                } else {
-                  // 第二次Tab：补全第一个
-                  rl.write(hits[0].slice(currentLine.length));
-                  shownList = false;
-                  lastLine = hits[0];
-                }
               }
             }
-          } else if (key.name !== 'return' && key.name !== 'enter') {
-            // 其他按键重置状态
-            shownList = false;
-            lastLine = '';
           }
-        });
-      }
+        } else if (key.name !== 'return' && key.name !== 'enter') {
+          // 其他按键重置状态
+          shownList = false;
+          lastLine = '';
+        }
+      });
 
       // 设置agent事件监听（需要rl来恢复输入行）
       setupAgentEvents(agent, rl, true);
-
-      let isProcessing = false;
-      let shouldExit = false;
 
       // 输入处理函数
       const handleInput = async (line: string) => {
@@ -489,8 +314,8 @@ program
         // quit/exit 命令始终有效（即使正在处理）
         if (trimmed === 'quit' || trimmed === 'exit') {
           shouldExit = true;
-          if (isProcessing && currentAgent) {
-            currentAgent.interrupt();
+          if (isProcessing && state.getAgent()) {
+            state.getAgent().interrupt();
           }
           rl.close();
           return;
@@ -561,15 +386,13 @@ program
           // 权限模式
           if (cmd === 'bypass') {
             agent.setBypassPermissions(true);
-            globalBypassMode = true;
-            console.log(LAIN_COLORS.warning('[WARN] Bypass mode ON'));
+            state.setBypassMode(true);
             rl.prompt();
             return;
           }
           if (cmd === 'strict') {
             agent.setBypassPermissions(false);
-            globalBypassMode = false;
-            console.log(LAIN_COLORS.success('[OK] Strict mode ON'));
+            state.setBypassMode(false);
             rl.prompt();
             return;
           }
@@ -592,14 +415,16 @@ program
 
           // Skills
           if (cmd === 'skills') {
-            const skills = listSkills();
+            const skills = listSkills(process.cwd());
             console.log(LAIN_COLORS.primary.bold('\nSkills:'));
             if (skills.length === 0) {
               console.log(LAIN_COLORS.muted('  (none)'));
             } else {
               skills.forEach(s => {
-                const hint = s.argumentHint ? ` ${s.argumentHint}` : '';
-                console.log(LAIN_COLORS.muted(`  /${s.name}${hint} - ${s.description}`));
+                // 截断description到50字符
+                const desc = s.description || '';
+                const shortDesc = desc.length > 50 ? desc.slice(0, 50) + '...' : desc;
+                console.log(LAIN_COLORS.muted(`  /${s.name} - ${shortDesc}`));
               });
             }
             console.log('');
@@ -654,16 +479,95 @@ program
             return;
           }
 
+          // Init - 让AI分析代码库并创建 AGENTS.md
+          if (cmd === 'init' || cmd.startsWith('init ')) {
+            const args = cmd.split(' ').slice(1);
+            const force = args.includes('--force') || args.includes('-f');
+
+            const initPrompt = force
+              ? `分析这个代码库，理解项目结构、主要功能、开发命令、测试方式、代码风格等。然后完全重写 AGENTS.md 文件，包含：
+1. 项目类型和技术栈
+2. 主要入口和核心模块
+3. 开发、构建、测试命令
+4. 代码架构和设计模式
+5. 重要的开发注意事项
+
+请阅读关键文件（如 package.json、README、配置文件、入口文件）来深入理解项目。`
+              : `分析这个代码库，理解项目结构、主要功能、开发命令、测试方式等。然后创建或更新 AGENTS.md 文件。
+
+如果 AGENTS.md 已存在，保持现有内容并补充新发现的信息。如果不存在，创建新文件。
+
+请阅读关键文件来深入理解项目，写出能帮助未来 AI agent 更好工作的文档。`;
+
+            handleInput(initPrompt);
+            return;
+          }
+
+          // 动态 skill 管理
+          if (cmd.startsWith('skill-add ')) {
+            const parts = cmd.slice('skill-add '.length).split(' ');
+            const skillName = parts[0];
+            if (!skillName) {
+              console.log(LAIN_COLORS.warning('Usage: /skill-add <name> [promptTemplate]'));
+              rl.prompt();
+              return;
+            }
+            const promptTemplate = parts.slice(1).join(' ') || '{input}';
+            const description = `Custom skill: ${skillName}`;
+            await saveSkill(skillName, { name: skillName, description, promptTemplate });
+            console.log(LAIN_COLORS.success(`[OK] Skill added: ${skillName}`));
+            rl.prompt();
+            return;
+          }
+
+          if (cmd.startsWith('skill-remove ')) {
+            const skillName = cmd.slice('skill-remove '.length).trim();
+            if (!skillName) {
+              console.log(LAIN_COLORS.warning('Usage: /skill-remove <name>'));
+              rl.prompt();
+              return;
+            }
+            const result = await deleteSkill(skillName);
+            if (result) {
+              console.log(LAIN_COLORS.success(`[OK] Skill removed: ${skillName}`));
+            } else {
+              console.log(LAIN_COLORS.warning(`[WARN] Skill not found: ${skillName}`));
+            }
+            rl.prompt();
+            return;
+          }
+
+          if (cmd.startsWith('skill-edit ')) {
+            const rest = cmd.slice('skill-edit '.length);
+            const firstSpace = rest.indexOf(' ');
+            if (firstSpace === -1) {
+              console.log(LAIN_COLORS.warning('Usage: /skill-edit <name> <promptTemplate>'));
+              rl.prompt();
+              return;
+            }
+            const skillName = rest.slice(0, firstSpace);
+            const promptTemplate = rest.slice(firstSpace + 1) || '{input}';
+            const existing = getSkill(skillName, process.cwd());
+            if (!existing) {
+              console.log(LAIN_COLORS.warning(`[WARN] Skill not found: ${skillName}`));
+              rl.prompt();
+              return;
+            }
+            await saveSkill(skillName, { ...existing, promptTemplate });
+            console.log(LAIN_COLORS.success(`[OK] Skill updated: ${skillName}`));
+            rl.prompt();
+            return;
+          }
+
           // Skill 调用（/skill_name args）
-          const skillInput = parseSkillInput(trimmed);
+          const skillInput = parseSkillInput(trimmed, process.cwd());
           if (skillInput) {
-            const skill = getSkill(skillInput.skillName);
+            const skill = getSkill(skillInput.skillName, process.cwd());
             if (skill) {
               const prompt = buildSkillPrompt(skill, skillInput.args);
               console.log(LAIN_COLORS.muted(`\n[${skill.name}] ${skill.description}`));
               isProcessing = true;
-              globalIsProcessing = true;
-              displayStatusLine();
+              state.setProcessing(true);
               try {
                 await agent.runLoop(prompt);
                 console.log(LAIN_COLORS.success('\n[OK] Done\n'));
@@ -671,10 +575,10 @@ program
                 console.log(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
               }
               isProcessing = false;
-              globalIsProcessing = false;
+              state.setProcessing(false);
               saveSession(process.cwd(), agent.getMessages());
               await processQueue(agent);
-              displayStatusLine();
+              displayStatusLine();  // 只在完成时显示一次
               rl.prompt();
               return;
             }
@@ -690,31 +594,31 @@ program
         // === 执行请求 ===
         console.log('');
         isProcessing = true;
-        globalIsProcessing = true;
-        // 显示状态行 + 提示符
-        displayStatusLine();
-        rl.prompt();
+        state.setProcessing(true);
+
+        // 显示处理状态
+        process.stdout.write(LAIN_COLORS.primary('Processing... (ESC ESC to interrupt)\n'));
+
         try {
           await agent.runLoop(trimmed);
           // 如果还在 stream 状态，结束它
-          if (isStreamingOutput) {
-            isStreamingOutput = false;
+          if (state.isStreamingOutput()) {
+            state.setStreamingOutput(false);
             process.stdout.write('\n');
           }
           console.log(LAIN_COLORS.success('\n[OK] Done\n'));
         } catch (error: any) {
-          if (isStreamingOutput) {
-            isStreamingOutput = false;
+          if (state.isStreamingOutput()) {
+            state.setStreamingOutput(false);
             process.stdout.write('\n');
           }
           console.log(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
         }
         isProcessing = false;
-        globalIsProcessing = false;
+        state.setProcessing(false);
         saveSession(process.cwd(), agent.getMessages());
         await processQueue(agent);
-        // 显示状态行 + 提示符
-        displayStatusLine();
+        displayStatusLine();  // 只在完成时显示一次
         rl.prompt();
       };
 
@@ -728,6 +632,7 @@ program
         console.log(LAIN_COLORS.muted('  /clear      Clear session'));
         console.log(LAIN_COLORS.muted('  /history    Show recent messages'));
         console.log(LAIN_COLORS.muted('  /compact    Compress context'));
+        console.log(LAIN_COLORS.muted('  /init       Create AGENTS.md (--force to overwrite)'));
         console.log('');
         console.log(LAIN_COLORS.primary.bold('Queue:'));
         console.log(LAIN_COLORS.muted('  /queue      Show queue'));
@@ -737,7 +642,12 @@ program
         console.log(LAIN_COLORS.muted('  /bypass     Auto-approve'));
         console.log(LAIN_COLORS.muted('  /strict     Ask permission'));
         console.log(LAIN_COLORS.muted('  /status     Show status'));
-        console.log(LAIN_COLORS.muted('  /skills     List skills'));
+        console.log('');
+        console.log(LAIN_COLORS.primary.bold('Skills:'));
+        console.log(LAIN_COLORS.muted('  /skills           List skills'));
+        console.log(LAIN_COLORS.muted('  /skill-add <name> <template>  Add skill'));
+        console.log(LAIN_COLORS.muted('  /skill-remove <name>          Remove skill'));
+        console.log(LAIN_COLORS.muted('  /skill-edit <name> <template> Edit skill'));
         console.log('');
         console.log(LAIN_COLORS.muted('TAB for autocomplete'));
         console.log('');
@@ -754,8 +664,7 @@ program
         if (mergedInput) {
           console.log(LAIN_COLORS.muted(`Combined input:\n${mergedInput.slice(0, 100)}${mergedInput.length > 100 ? '...' : ''}\n`));
           isProcessing = true;
-          globalIsProcessing = true;
-          displayStatusLine();
+          state.setProcessing(true);
           try {
             await agent.runLoop(mergedInput);
             console.log(LAIN_COLORS.success('\n[OK] Done\n'));
@@ -763,32 +672,37 @@ program
             console.log(LAIN_COLORS.error(`\n[ERR] Error: ${error.message}\n`));
           }
           isProcessing = false;
-          globalIsProcessing = false;
+          state.setProcessing(false);
           saveSession(process.cwd(), agent.getMessages());
-          displayStatusLine();
         }
       };
 
+      // 设置粘贴处理器 - 直接调用 handleInput，不通过 readline emit
       // 设置 readline 事件
-      rl.on('line', handleInput);
+      rl.on('line', (line: string) => {
+        // 粘贴后忽略所有相关的line事件
+        if (ignoreLines > 0) {
+          ignoreLines--;
+          return;
+        }
+        handleInput(line);
+      });
       rl.on('close', async () => {
         if (!shouldExit) {
           // 用户按 Ctrl+C 但不是退出
-          if (isProcessing && currentAgent) {
-            currentAgent.interrupt();
+          if (isProcessing && state.getAgent()) {
+            state.getAgent().interrupt();
             console.log(LAIN_COLORS.warning('\n[INTERRUPTED]'));
           }
           return;
         }
 
-        // 正常退出 - 禁用 Bracketed Paste Mode（仅TTY模式）
-        if (process.stdin.isTTY) {
-          process.stdout.write(`${ESC}[?2004l`);
-        }
+        // 正常退出 - 禁用 Bracketed Paste Mode
+        process.stdout.write(`${ESC}[?2004l`);
         const messages = agent.getMessages();
         saveSession(process.cwd(), messages);
         await shutdownMCP();
-        currentAgent = null;
+        state.setAgent(null);
         console.log(LAIN_COLORS.muted(`\nSession saved (${messages.length} messages)`));
         console.log(LAIN_COLORS.muted('Goodbye!\n'));
         process.exit(0);
@@ -808,13 +722,13 @@ program
       });
 
     } catch (error: any) {
-      if (!connectionErrorShown) {
+      if (!state.isConnectionErrorShown()) {
         console.log(LAIN_COLORS.error(`Error: ${error.message}`));
       }
     }
 
-    currentAgent = null;
-    connectionErrorShown = false;  // 重置
+    state.setAgent(null);
+    state.setConnectionErrorShown(false);  // 重置
   });
 
 // Run command - 单次执行
@@ -836,7 +750,7 @@ program
     }
 
     const agent = new SpicaAgent(providerName, process.cwd());
-    currentAgent = agent;
+    state.setAgent(agent);
 
     setupAgentEvents(agent, null as any, false);
 
@@ -845,13 +759,13 @@ program
       const result = await agent.runLoop(request);
       console.log(LAIN_COLORS.success('\n[OK] Completed'));
     } catch (error: any) {
-      if (!connectionErrorShown) {
+      if (!state.isConnectionErrorShown()) {
         console.log(LAIN_COLORS.error(`Error: ${error.message}`));
       }
     }
 
-    currentAgent = null;
-    connectionErrorShown = false;  // 重置
+    state.setAgent(null);
+    state.setConnectionErrorShown(false);  // 重置
   });
 
 // Providers管理
@@ -874,14 +788,14 @@ program
       } else {
         configured.forEach(p => {
           const isDefault = p === defaultProvider;
-          console.log(`  ${isDefault ? LAIN_COLORS.success('*') : ' '} ${p}${isDefault ? LAIN_COLORS.success(' (default)') : ''}`);
+          console.log(`  ${isDefault ? LAIN_COLORS.success('●') : '○'} ${p}${isDefault ? LAIN_COLORS.success(' (default)') : ''}`);
         });
       }
 
       console.log(LAIN_COLORS.primary.bold('\nBuilt-in providers:'));
       Object.entries(BUILTIN_PROVIDERS).forEach(([key, config]) => {
         const isConfigured = configured && configured.includes(key);
-        console.log(`  ${isConfigured ? '*' : ' '} ${key} - ${config.name}`);
+        console.log(`  ${isConfigured ? '●' : ' '} ${key} - ${config.name}`);
         if (config.description) {
           console.log(LAIN_COLORS.muted(`      ${config.description}`));
         }
@@ -988,7 +902,7 @@ program
   .action(async (action?: string, source?: string) => {
     if (!action) {
       // 默认列出所有skills
-      const skills = listSkills();
+      const skills = listSkills(process.cwd());
       const packages = await listInstalledPackages();
 
       console.log(LAIN_COLORS.primary.bold('\nInstalled skill packages:'));
@@ -996,7 +910,7 @@ program
         console.log(LAIN_COLORS.muted('  (none)'));
       } else {
         packages.forEach(p => {
-          console.log(`  ${LAIN_COLORS.success('*')} ${p.name} v${p.version || '1.0.0'} - ${p.description}`);
+          console.log(`  ${LAIN_COLORS.success('●')} ${p.name} v${p.version || '1.0.0'} - ${p.description}`);
         });
       }
 
@@ -1016,7 +930,7 @@ program
 
     switch (action) {
       case 'list':
-        const skills = listSkills();
+        const skills = listSkills(process.cwd());
         console.log(LAIN_COLORS.primary.bold('\nAvailable skills:'));
         skills.forEach(s => {
           console.log(`  ${LAIN_COLORS.muted(`/${s.name}`)} - ${s.description}`);
@@ -1061,7 +975,7 @@ program
           console.log(LAIN_COLORS.muted('  (none)'));
         } else {
           packages.forEach(p => {
-            console.log(`  ${LAIN_COLORS.success('*')} ${p.name} v${p.version || '1.0.0'}`);
+            console.log(`  ${LAIN_COLORS.success('●')} ${p.name} v${p.version || '1.0.0'}`);
             console.log(LAIN_COLORS.muted(`    ${p.description}`));
             if (p.author) {
               console.log(LAIN_COLORS.muted(`    Author: ${p.author}`));
@@ -1118,7 +1032,7 @@ program
         } else {
           servers.forEach(s => {
             const toolsCount = manager.listAvailableTools().filter(t => t.startsWith(`${s}/`)).length;
-            console.log(`  ${LAIN_COLORS.success('*')} ${s} (${toolsCount} tools)`);
+            console.log(`  ${LAIN_COLORS.success('●')} ${s} (${toolsCount} tools)`);
           });
         }
         break;

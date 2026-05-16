@@ -65,8 +65,8 @@ export function summarizeResult(result: string, maxLength: number = 300): string
   // 提取关键信息
   const lines = result.split('\n');
   const keyLines = lines.filter(l =>
-    l.includes('[OK]') ||
-    l.includes('[ERR]') ||
+    l.includes('✓') ||
+    l.includes('✗') ||
     l.includes('完成') ||
     l.includes('成功') ||
     l.includes('失败') ||

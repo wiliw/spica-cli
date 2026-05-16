@@ -65,7 +65,7 @@ export function getSkill(name: string, workspacePath?: string): SkillDefinition 
 }
 
 // 检查输入是否是skill调用（如 /search api）
-export function parseSkillInput(input: string): { skillName: string; args: Record<string, any> } | null {
+export function parseSkillInput(input: string, workspacePath?: string): { skillName: string; args: Record<string, any> } | null {
   const trimmed = input.trim();
 
   // 检查 /skill 格式
@@ -74,7 +74,7 @@ export function parseSkillInput(input: string): { skillName: string; args: Recor
     const skillName = parts[0];
     const args = parts.slice(1).join(' ');
 
-    const skill = getSkill(skillName);
+    const skill = getSkill(skillName, workspacePath);
     if (skill) {
       // 解析模板变量
       const templateArgs = parseTemplateArgs(skill.promptTemplate, args);
@@ -86,7 +86,12 @@ export function parseSkillInput(input: string): { skillName: string; args: Recor
 }
 
 // 解析模板变量
-function parseTemplateArgs(template: string, input: string): Record<string, any> {
+function parseTemplateArgs(template: string | undefined, input: string): Record<string, any> {
+  // 处理 undefined 或空模板
+  if (!template) {
+    return { input };
+  }
+
   // 找出模板中的变量名 {var}
   const vars = template.match(/\{(\w+)\}/g) || [];
   const varNames = vars.map(v => v.slice(1, -1));
@@ -102,6 +107,9 @@ function parseTemplateArgs(template: string, input: string): Record<string, any>
     varNames.forEach((name, i) => {
       args[name] = parts[i] || '';
     });
+  } else {
+    // 没有变量时，使用默认 input
+    args.input = input;
   }
 
   return args;
@@ -109,18 +117,29 @@ function parseTemplateArgs(template: string, input: string): Record<string, any>
 
 // 构建skill prompt
 export function buildSkillPrompt(skill: SkillDefinition, args: Record<string, any>): string {
-  let prompt = skill.promptTemplate;
+  let prompt = skill.promptTemplate || '';
 
+  // 替换模板中的变量
   Object.entries(args).forEach(([key, value]) => {
     prompt = prompt.replace(`{${key}}`, value);
   });
+
+  // 如果模板没有变量占位符，把用户输入追加到末尾
+  if (!skill.promptTemplate?.match(/\{(\w+)\}/) && args.input) {
+    prompt += `\n\nUser request: ${args.input}`;
+  }
+
+  // 如果模板为空，直接返回 args 内容
+  if (!skill.promptTemplate) {
+    return Object.entries(args).map(([k, v]) => `${k}: ${v}`).join('\n');
+  }
 
   return prompt;
 }
 
 // 列出所有skills
-export function listSkills(): SkillDefinition[] {
-  return Array.from(loadSkills().values());
+export function listSkills(workspacePath?: string): SkillDefinition[] {
+  return Array.from(loadSkills(workspacePath).values());
 }
 
 // Skills安装目录
@@ -254,6 +273,41 @@ export async function uninstallSkill(packageName: string): Promise<{ success: bo
     return { success: true, message: `Uninstalled ${packageName}` };
   } catch (error: any) {
     return { success: false, message: `Uninstall failed: ${error.message}` };
+  }
+}
+
+// 保存单个 skill 到全局 settings
+export async function saveSkill(name: string, skill: SkillDefinition): Promise<boolean> {
+  try {
+    const { loadGlobalSettings, saveGlobalSettings } = await import('../utils/settings');
+    const settings = await loadGlobalSettings();
+
+    if (!settings.skills) settings.skills = {};
+    settings.skills[name] = skill;
+
+    await saveGlobalSettings(settings);
+    return true;
+  } catch (error: any) {
+    console.error(`Failed to save skill: ${error.message}`);
+    return false;
+  }
+}
+
+// 删除单个 skill 从全局 settings
+export async function deleteSkill(name: string): Promise<boolean> {
+  try {
+    const { loadGlobalSettings, saveGlobalSettings } = await import('../utils/settings');
+    const settings = await loadGlobalSettings();
+
+    if (settings.skills && settings.skills[name]) {
+      delete settings.skills[name];
+      await saveGlobalSettings(settings);
+      return true;
+    }
+    return false;
+  } catch (error: any) {
+    console.error(`Failed to delete skill: ${error.message}`);
+    return false;
   }
 }
 

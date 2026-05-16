@@ -5,8 +5,8 @@ import { resolve, isAbsolute, dirname, join } from 'path';
 import fastGlob from 'fast-glob';
 import { SpicaAgent } from '../agent';
 import { SubAgentTask, getSubAgentConfig, isToolAllowed, summarizeResult } from './subAgent';
-import { computeDiff, formatDiff, generateEditDiff } from '../utils/diffDisplay';
-import { restoreCheckpoint, getLastCheckpoint, setCheckpointWorkspace } from '../utils/errorRecovery';
+import { computeDiff, formatDiff, generateEditDiff } from '../cli/ui/diff';
+import { restoreCheckpoint, getLastCheckpoint, setCheckpointWorkspace } from '../core/errorRecovery';
 import { getMCPManager } from '../mcp/client';
 
 // WORKSPACE 可以通过 setWorkspace 函数更新
@@ -77,6 +77,29 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
         newString: { type: 'string', description: 'New text' },
       },
       required: ['path', 'oldString', 'newString'],
+    },
+  },
+  {
+    name: 'file_multi_edit',
+    description: 'Edit file with multiple replacements at once. More efficient than multiple file_edit calls. Read file first.',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        path: { type: 'string', description: 'File path' },
+        edits: {
+          type: 'array',
+          description: 'List of edits to apply',
+          items: {
+            type: 'object',
+            properties: {
+              oldString: { type: 'string', description: 'Text to replace (exact)' },
+              newString: { type: 'string', description: 'New text' },
+            },
+            required: ['oldString', 'newString'],
+          },
+        },
+      },
+      required: ['path', 'edits'],
     },
   },
   {
@@ -184,76 +207,29 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
-    name: 'git_status',
-    description: 'Git working tree status.',
-    parameters: {
-      type: 'object' as const,
-      properties: {},
-      required: [],
-    },
-  },
-  {
-    name: 'git_diff',
-    description: 'Show git diff.',
-    parameters: {
-      type: 'object' as const,
-      properties: {},
-      required: [],
-    },
-  },
-  {
-    name: 'git_log',
-    description: 'Show recent commits.',
+    name: 'git',
+    description: 'Git operations. Actions: status, diff, log, add, commit, branch, checkout, push, pull, reset, stash. Use for version control.',
     parameters: {
       type: 'object' as const,
       properties: {
-        limit: { type: 'number', description: 'Count (optional)' },
+        action: {
+          type: 'string',
+          enum: ['status', 'diff', 'log', 'add', 'commit', 'branch', 'checkout', 'push', 'pull', 'reset', 'stash'],
+          description: 'Git action to perform'
+        },
+        args: {
+          type: 'object',
+          properties: {
+            files: { type: 'string', description: 'Files for add/reset (default: all)' },
+            message: { type: 'string', description: 'Commit message' },
+            branch: { type: 'string', description: 'Branch name for checkout/branch' },
+            limit: { type: 'number', description: 'Log count limit' },
+            mode: { type: 'string', description: 'Reset mode: soft/mixed/hard' },
+          },
+          description: 'Action-specific arguments'
+        },
       },
-      required: [],
-    },
-  },
-  {
-    name: 'git_add',
-    description: 'Stage files.',
-    parameters: {
-      type: 'object' as const,
-      properties: {
-        files: { type: 'string', description: 'Files (default: all)' },
-      },
-      required: [],
-    },
-  },
-  {
-    name: 'git_commit',
-    description: 'Commit staged changes.',
-    parameters: {
-      type: 'object' as const,
-      properties: {
-        message: { type: 'string', description: 'Message' },
-      },
-      required: ['message'],
-    },
-  },
-  {
-    name: 'git_branch',
-    description: 'List/create branches.',
-    parameters: {
-      type: 'object' as const,
-      properties: {
-        name: { type: 'string', description: 'New branch (optional)' },
-      },
-      required: [],
-    },
-  },
-  {
-    name: 'git_checkout',
-    description: 'Switch branch.',
-    parameters: {
-      type: 'object' as const,
-      properties: {
-        branch: { type: 'string', description: 'Branch' },
-      },
-      required: ['branch'],
+      required: ['action'],
     },
   },
   {
@@ -312,59 +288,32 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
-    name: 'gh_pr_view',
-    description: 'View PR details.',
+    name: 'gh',
+    description: 'GitHub CLI operations. Actions: pr_view, pr_list, pr_create, issue_list, issue_view, issue_create, repo_view, run_list, run_view. Use for GitHub interactions.',
     parameters: {
       type: 'object' as const,
       properties: {
-        number: { type: 'number', description: 'PR number' },
-        json: { type: 'boolean', description: 'JSON output (optional)' },
+        action: {
+          type: 'string',
+          enum: ['pr_view', 'pr_list', 'pr_create', 'issue_list', 'issue_view', 'issue_create', 'repo_view', 'run_list', 'run_view'],
+          description: 'GitHub action'
+        },
+        args: {
+          type: 'object',
+          properties: {
+            number: { type: 'number', description: 'PR/Issue number' },
+            state: { type: 'string', description: 'State filter: open/closed/all' },
+            limit: { type: 'number', description: 'Result limit' },
+            label: { type: 'string', description: 'Label filter' },
+            title: { type: 'string', description: 'PR/Issue title (for create)' },
+            body: { type: 'string', description: 'PR/Issue body (for create)' },
+            base: { type: 'string', description: 'Base branch (for PR create)' },
+            head: { type: 'string', description: 'Head branch (for PR create)' },
+          },
+          description: 'Action-specific arguments'
+        },
       },
-      required: ['number'],
-    },
-  },
-  {
-    name: 'gh_issue_list',
-    description: 'List issues.',
-    parameters: {
-      type: 'object' as const,
-      properties: {
-        state: { type: 'string', description: 'State (optional)' },
-        limit: { type: 'number', description: 'Limit (optional)' },
-        label: { type: 'string', description: 'Label (optional)' },
-      },
-      required: [],
-    },
-  },
-  {
-    name: 'gh_issue_view',
-    description: 'View issue details.',
-    parameters: {
-      type: 'object' as const,
-      properties: {
-        number: { type: 'number', description: 'Issue number' },
-      },
-      required: ['number'],
-    },
-  },
-  {
-    name: 'gh_repo_view',
-    description: 'View repo info.',
-    parameters: {
-      type: 'object' as const,
-      properties: {},
-      required: [],
-    },
-  },
-  {
-    name: 'gh_run_list',
-    description: 'List workflow runs.',
-    parameters: {
-      type: 'object' as const,
-      properties: {
-        limit: { type: 'number', description: 'Limit (optional)' },
-      },
-      required: [],
+      required: ['action'],
     },
   },
   {
@@ -491,15 +440,23 @@ export async function executeTool(
         const readPath = resolvePath(safeArgs.path);
         const content = await fs.readFile(readPath, 'utf-8');
         const lines = content.split('\n');
-        
+        const lineCount = lines.length;
+
+        // 简化输出：只显示文件路径和基本信息
         if (safeArgs.offset || safeArgs.limit) {
           const start = safeArgs.offset ? safeArgs.offset - 1 : 0;
           const end = safeArgs.limit ? start + safeArgs.limit : lines.length;
           const selectedLines = lines.slice(start, end);
-          return { success: true, output: selectedLines.join('\n') };
+          return {
+            success: true,
+            output: `[${readPath}:${start + 1}-${end}] (${selectedLines.length} lines)\n${selectedLines.join('\n')}`
+          };
         }
-        
-        return { success: true, output: content };
+
+        return {
+          success: true,
+          output: `[${readPath}] (${lineCount} lines)\n${content}`
+        };
       }
 
       case 'file_write': {
@@ -538,6 +495,36 @@ export async function executeTool(
 
         await fs.writeFile(editPath, newContent, 'utf-8');
         return { success: true, output: `Edited ${editPath}`, diff };
+      }
+
+      case 'file_multi_edit': {
+        const editPath = resolvePath(safeArgs.path);
+        const fileContent = await fs.readFile(editPath, 'utf-8');
+        const edits = safeArgs.edits || [];
+
+        let newContent = fileContent;
+        const diffs: string[] = [];
+        let editCount = 0;
+
+        for (const edit of edits) {
+          const oldStr = String(edit.oldString || '');
+          const newStr = String(edit.newString || '');
+
+          if (!newContent.includes(oldStr)) {
+            return { success: false, error: `Text not found: "${oldStr.slice(0, 30)}..."` };
+          }
+
+          newContent = newContent.replace(oldStr, newStr);
+          diffs.push(generateEditDiff(oldStr, newStr));
+          editCount++;
+        }
+
+        await fs.writeFile(editPath, newContent, 'utf-8');
+        return {
+          success: true,
+          output: `Edited ${editPath} (${editCount} changes)`,
+          diff: diffs.join('\n---\n'),
+        };
       }
 
       case 'file_exists': {
@@ -621,10 +608,11 @@ export async function executeTool(
             timeout: timeout,
             reject: false,
           });
-          const output = bashResult.stdout || bashResult.stderr || '';
+          // 合并stdout和stderr显示完整输出
+          const output = (bashResult.stdout + '\n' + bashResult.stderr).trim();
           return {
             success: bashResult.exitCode === 0,
-            output: output,
+            output: bashResult.exitCode === 0 ? output : undefined,
             error: bashResult.exitCode !== 0 ? output : undefined,
           };
         } catch (bashError: any) {
@@ -632,62 +620,71 @@ export async function executeTool(
         }
       }
 
-      case 'git_status': {
+      case 'git': {
         const git = simpleGit(WORKSPACE);
-        const status = await git.status();
-        return { success: true, output: status.files.map(f => `${f.index} ${f.path}`).join('\n') || 'clean' };
-      }
+        const action = safeArgs.action as string;
+        const args = safeArgs.args || {};
 
-      case 'git_diff': {
-        const git = simpleGit(WORKSPACE);
-        const diff = await git.diff();
-        return { success: true, output: diff || 'No changes' };
-      }
-
-      case 'git_log': {
-        const git = simpleGit(WORKSPACE);
-        const log = await git.log({ maxCount: safeArgs.limit || 10 });
-        return { 
-          success: true, 
-          output: log.all.map(c => `${c.hash.substring(0,7)} ${c.message}`).join('\n')
-        };
-      }
-
-      case 'git_add': {
-        const git = simpleGit(WORKSPACE);
-        await git.add(safeArgs.files || '.');
-        return { success: true, output: 'Files added' };
-      }
-
-      case 'git_commit': {
-        const git = simpleGit(WORKSPACE);
-        await git.commit(safeArgs.message);
-        return { success: true, output: `Committed: ${safeArgs.message}` };
-      }
-
-      case 'git_branch': {
-        const git = simpleGit(WORKSPACE);
-        if (safeArgs.name) {
-          await git.branch(safeArgs.name);
-          return { success: true, output: `Created branch: ${safeArgs.name}` };
-        }
-        const branches = await git.branchLocal();
-        return { success: true, output: branches.all.join('\n') };
-      }
-
-      case 'git_checkout': {
-        const branchName = String(safeArgs.branch || '');
-        if (!branchName) {
-          return { success: false, error: 'Branch name is required' };
-        }
-        const git = simpleGit(WORKSPACE);
-        const branches = await git.branchLocal();
-        if (branches.all.includes(branchName)) {
-          await git.checkout(branchName);
-          return { success: true, output: `Switched to ${branchName}` };
-        } else {
-          await git.checkoutLocalBranch(branchName);
-          return { success: true, output: `Created and switched to ${branchName}` };
+        switch (action) {
+          case 'status': {
+            const status = await git.status();
+            return { success: true, output: status.files.map(f => `${f.index} ${f.path}`).join('\n') || 'clean' };
+          }
+          case 'diff': {
+            const diff = await git.diff();
+            return { success: true, output: diff || 'No changes' };
+          }
+          case 'log': {
+            const log = await git.log({ maxCount: args.limit || 10 });
+            return { success: true, output: log.all.map(c => `${c.hash.substring(0,7)} ${c.message}`).join('\n') };
+          }
+          case 'add': {
+            await git.add(args.files || '.');
+            return { success: true, output: 'Files added' };
+          }
+          case 'commit': {
+            if (!args.message) return { success: false, error: 'Message required' };
+            await git.commit(args.message);
+            return { success: true, output: `Committed: ${args.message}` };
+          }
+          case 'branch': {
+            if (args.branch) {
+              await git.branch(args.branch);
+              return { success: true, output: `Created branch: ${args.branch}` };
+            }
+            const branches = await git.branchLocal();
+            return { success: true, output: branches.all.join('\n') };
+          }
+          case 'checkout': {
+            const branchName = String(args.branch || '');
+            if (!branchName) return { success: false, error: 'Branch required' };
+            const branches = await git.branchLocal();
+            if (branches.all.includes(branchName)) {
+              await git.checkout(branchName);
+              return { success: true, output: `Switched to ${branchName}` };
+            }
+            await git.checkoutLocalBranch(branchName);
+            return { success: true, output: `Created and switched to ${branchName}` };
+          }
+          case 'push': {
+            await git.push();
+            return { success: true, output: 'Pushed' };
+          }
+          case 'pull': {
+            await git.pull();
+            return { success: true, output: 'Pulled' };
+          }
+          case 'reset': {
+            const mode = args.mode || 'mixed';
+            await git.reset(mode);
+            return { success: true, output: `Reset (${mode})` };
+          }
+          case 'stash': {
+            await git.stash();
+            return { success: true, output: 'Stashed' };
+          }
+          default:
+            return { success: false, error: `Unknown git action: ${action}` };
         }
       }
 
@@ -712,74 +709,65 @@ export async function executeTool(
         };
       }
 
-      case 'gh_pr_view': {
-        const jsonFlag = safeArgs.json ? '--json title,body,state,author,additions,deletions,changed_files' : '';
-        const ghResult = await execa(`gh pr view ${safeArgs.number} ${jsonFlag}`, {
-          shell: true,
-          cwd: WORKSPACE,
-          timeout: (safeArgs.timeout || 15) * 1000,
-          reject: false,
-        });
-        return {
-          success: ghResult.exitCode === 0,
-          output: ghResult.stdout || ghResult.stderr,
-        };
-      }
+      case 'gh': {
+        const action = safeArgs.action as string;
+        const args = safeArgs.args || {};
+        const timeout = (args.timeout || 15) * 1000;
 
-      case 'gh_issue_list': {
-        const state = safeArgs.state || 'open';
-        const limit = safeArgs.limit || 20;
-        const label = safeArgs.label ? `--label "${safeArgs.label}"` : '';
-        const ghResult = await execa(`gh issue list --state ${state} --limit ${limit} ${label}`, {
-          shell: true,
-          cwd: WORKSPACE,
-          timeout: (safeArgs.timeout || 15) * 1000,
-          reject: false,
-        });
-        return {
-          success: ghResult.exitCode === 0,
-          output: ghResult.stdout || 'No issues found',
-        };
-      }
-
-      case 'gh_issue_view': {
-        const ghResult = await execa(`gh issue view ${safeArgs.number}`, {
-          shell: true,
-          cwd: WORKSPACE,
-          timeout: (safeArgs.timeout || 15) * 1000,
-          reject: false,
-        });
-        return {
-          success: ghResult.exitCode === 0,
-          output: ghResult.stdout || ghResult.stderr,
-        };
-      }
-
-      case 'gh_repo_view': {
-        const ghResult = await execa(`gh repo view`, {
-          shell: true,
-          cwd: WORKSPACE,
-          timeout: (safeArgs.timeout || 15) * 1000,
-          reject: false,
-        });
-        return {
-          success: ghResult.exitCode === 0,
-          output: ghResult.stdout || 'Not in a GitHub repository',
-        };
-      }
-
-      case 'gh_run_list': {
-        const limit = safeArgs.limit || 10;
-        const ghResult = await execa(`gh run list --limit ${limit}`, {
-          shell: true,
-          cwd: WORKSPACE,
-          timeout: (safeArgs.timeout || 15) * 1000,
-          reject: false,
-        });
-        return {
-          success: ghResult.exitCode === 0,
-          output: ghResult.stdout || 'No workflow runs found',
-        };
+        switch (action) {
+          case 'pr_view': {
+            const ghResult = await execa(`gh pr view ${args.number || ''}`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            return { success: ghResult.exitCode === 0, output: ghResult.stdout || ghResult.stderr };
+          }
+          case 'pr_list': {
+            const state = args.state || 'open';
+            const limit = args.limit || 20;
+            const ghResult = await execa(`gh pr list --state ${state} --limit ${limit}`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            return { success: ghResult.exitCode === 0, output: ghResult.stdout || 'No PRs found' };
+          }
+          case 'pr_create': {
+            const title = args.title || '';
+            const body = args.body || '';
+            const base = args.base || 'main';
+            const head = args.head || '';
+            if (!title) return { success: false, error: 'Title required' };
+            const ghResult = await execa(`gh pr create --title "${title}" --body "${body}" --base ${base} ${head ? `--head ${head}` : ''}`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            return { success: ghResult.exitCode === 0, output: ghResult.stdout || ghResult.stderr };
+          }
+          case 'issue_list': {
+            const state = args.state || 'open';
+            const limit = args.limit || 20;
+            const label = args.label ? `--label "${args.label}"` : '';
+            const ghResult = await execa(`gh issue list --state ${state} --limit ${limit} ${label}`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            return { success: ghResult.exitCode === 0, output: ghResult.stdout || 'No issues found' };
+          }
+          case 'issue_view': {
+            const ghResult = await execa(`gh issue view ${args.number || ''}`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            return { success: ghResult.exitCode === 0, output: ghResult.stdout || ghResult.stderr };
+          }
+          case 'issue_create': {
+            const title = args.title || '';
+            const body = args.body || '';
+            if (!title) return { success: false, error: 'Title required' };
+            const ghResult = await execa(`gh issue create --title "${title}" --body "${body}"`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            return { success: ghResult.exitCode === 0, output: ghResult.stdout || ghResult.stderr };
+          }
+          case 'repo_view': {
+            const ghResult = await execa(`gh repo view`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            return { success: ghResult.exitCode === 0, output: ghResult.stdout || 'Not in a GitHub repository' };
+          }
+          case 'run_list': {
+            const limit = args.limit || 10;
+            const ghResult = await execa(`gh run list --limit ${limit}`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            return { success: ghResult.exitCode === 0, output: ghResult.stdout || 'No workflow runs found' };
+          }
+          case 'run_view': {
+            const ghResult = await execa(`gh run view ${args.number || ''}`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            return { success: ghResult.exitCode === 0, output: ghResult.stdout || ghResult.stderr };
+          }
+          default:
+            return { success: false, error: `Unknown gh action: ${action}` };
+        }
       }
 
       case 'todo_write': {
@@ -863,12 +851,12 @@ export async function executeTool(
               eventCallback('sub_agent_done', { id: subTaskId, summary });
             }
 
-            return `[OK] ${task.description || task.prompt.slice(0, 30)}: ${summary}`;
+            return `✓ ${task.description || task.prompt.slice(0, 30)}: ${summary}`;
           } catch (err: any) {
             if (eventCallback) {
               eventCallback('sub_agent_error', { id: subTaskId, error: err.message });
             }
-            return `[ERR] ${task.description || task.prompt.slice(0, 30)}: ${err.message}`;
+            return `✗ ${task.description || task.prompt.slice(0, 30)}: ${err.message}`;
           }
         }));
 

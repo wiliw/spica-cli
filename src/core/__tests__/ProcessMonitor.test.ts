@@ -1,24 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs-extra';
-import path from 'path';
 import { ProcessMonitor, ProcessInfo, ProcessStatus } from '../ProcessMonitor';
 
-const getTestProcessDir = () => `/tmp/spica-test-processes-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const TEST_PROCESS_DIR = '/tmp/spica-test-processes';
 
 describe('ProcessMonitor', () => {
   let monitor: ProcessMonitor;
-  let testProcessDir: string;
 
   beforeEach(async () => {
-    testProcessDir = getTestProcessDir();
-    await fs.ensureDir(testProcessDir);
-    monitor = new ProcessMonitor(testProcessDir);
+    await fs.ensureDir(TEST_PROCESS_DIR);
+    monitor = new ProcessMonitor(TEST_PROCESS_DIR);
   });
 
   afterEach(async () => {
     await monitor.killAll();
-    await fs.remove(testProcessDir);
+    await fs.remove(TEST_PROCESS_DIR);
   });
 
   describe('start', () => {
@@ -98,25 +95,20 @@ describe('ProcessMonitor', () => {
     });
 
     it('captures stderr', async () => {
-      const info = await monitor.start('node', ['-e', 'console.error("error output")'], 'stderr-test');
-
-      // Wait for process to exit (check status)
-      for (let i = 0; i < 20; i++) {
-        const currentInfo = await monitor.monitor('stderr-test');
-        if (currentInfo?.status === ProcessStatus.EXITED) break;
-        await new Promise(resolve => setTimeout(resolve, 50));
-      }
-
+      await monitor.start('node', ['-e', 'console.error("error output")'], 'stderr-test');
+      
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       const logs = await monitor.getLogs('stderr-test');
       expect(logs.stderr).toContain('error output');
     });
 
     it('persists logs to file', async () => {
       await monitor.start('echo', ['persisted'], 'persist-test');
-
+      
       await new Promise(resolve => setTimeout(resolve, 100));
-
-      const logPath = `${testProcessDir}/persist-test.log`;
+      
+      const logPath = `${TEST_PROCESS_DIR}/persist-test.log`;
       const exists = await fs.pathExists(logPath);
       expect(exists).toBe(true);
     });

@@ -21,6 +21,7 @@ export class LLMClient extends EventEmitter {
   private functionCaller: FunctionCaller;
   private tools: ToolDefinition[] = [];
   private abortController: AbortController | null = null;
+  private pendingInterrupt = false;  // 中断标记（用于rate limiter等待期间）
 
   constructor(config: LLMClientConfig) {
     super();
@@ -66,13 +67,19 @@ export class LLMClient extends EventEmitter {
   }
 
   async generate(prompt: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
-    await this.rateLimiter.waitForAvailability();
-    this.rateLimiter.recordRequest();
-
+    // 提前创建AbortController，支持中断rate limiter等待
     this.abortController = new AbortController();
     const toolsToUse = tools || this.tools;
-    
+
     try {
+      // 等待rate limiter（可被中断）
+      await this.rateLimiter.waitForAvailability(this.abortController.signal);
+
+      if (this.abortController.signal.aborted) {
+        throw new Error('Interrupted during rate limit wait');
+      }
+
+      this.rateLimiter.recordRequest();
       const response = await this.provider.generate(prompt, toolsToUse, this.abortController.signal);
 
       if (response.content) {
@@ -87,6 +94,7 @@ export class LLMClient extends EventEmitter {
   }
 
   interrupt() {
+    this.rateLimiter.interrupt();  // 中断rate limiter等待
     if (this.abortController) {
       this.abortController.abort();
     }
@@ -101,13 +109,17 @@ export class LLMClient extends EventEmitter {
     // 添加tool结果消息
     this.provider.addToolMessage(toolCallId, result);
 
-    await this.rateLimiter.waitForAvailability();
-    this.rateLimiter.recordRequest();
-
+    // 提前创建AbortController
     this.abortController = new AbortController();
 
     try {
-      // 发起生成请求
+      await this.rateLimiter.waitForAvailability(this.abortController.signal);
+
+      if (this.abortController.signal.aborted) {
+        throw new Error('Interrupted during rate limit wait');
+      }
+
+      this.rateLimiter.recordRequest();
       const response = await this.provider.generateFromHistory(toolsToUse, this.abortController.signal);
 
       if (response.content) {
@@ -121,7 +133,6 @@ export class LLMClient extends EventEmitter {
     }
   }
 
-  // 添加多个工具结果后继续生成
   async continueWithAllToolResults(toolResults: Array<{ name: string; result: string }>, tools?: ToolDefinition[]): Promise<LLMResponse> {
     const toolsToUse = tools || this.tools;
     const lastMessage = this.provider.getMessages()[this.provider.getMessages().length - 1];
@@ -132,12 +143,17 @@ export class LLMClient extends EventEmitter {
       this.provider.addToolMessage(toolCallId, result);
     }
 
-    await this.rateLimiter.waitForAvailability();
-    this.rateLimiter.recordRequest();
-
+    // 提前创建AbortController
     this.abortController = new AbortController();
 
     try {
+      await this.rateLimiter.waitForAvailability(this.abortController.signal);
+
+      if (this.abortController.signal.aborted) {
+        throw new Error('Interrupted during rate limit wait');
+      }
+
+      this.rateLimiter.recordRequest();
       const response = await this.provider.generateFromHistory(toolsToUse, this.abortController.signal);
 
       if (response.content) {

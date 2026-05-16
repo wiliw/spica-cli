@@ -7,6 +7,7 @@ export class RateLimiter {
   private requestTimestamps: number[] = [];
   private tokenUsage: { timestamp: number; tokens: number }[] = [];
   private config: RateLimitConfig;
+  private pendingInterrupt = false;
 
   constructor(config: RateLimitConfig = {}) {
     this.config = {
@@ -15,26 +16,54 @@ export class RateLimiter {
     };
   }
 
-  async waitForAvailability(): Promise<void> {
+  // 设置中断标记（外部调用）
+  interrupt(): void {
+    this.pendingInterrupt = true;
+  }
+
+  async waitForAvailability(signal?: AbortSignal): Promise<void> {
+    if (this.pendingInterrupt) {
+      this.pendingInterrupt = false;
+      return;
+    }
+
     let now = Date.now();
     const minuteAgo = now - 60000;
 
     this.requestTimestamps = this.requestTimestamps.filter(t => t > minuteAgo);
     this.tokenUsage = this.tokenUsage.filter(u => u.timestamp > minuteAgo);
 
+    // 等待请求限制
     while (this.requestTimestamps.length >= this.config.requestsPerMinute!) {
+      if (signal?.aborted || this.pendingInterrupt) {
+        this.pendingInterrupt = false;
+        return;
+      }
+
       const oldest = this.requestTimestamps[0];
       const waitTime = oldest + 60000 - now + 100;
-      await this.sleep(waitTime);
+      await this.interruptibleSleep(waitTime, signal);
+
+      if (this.pendingInterrupt) {
+        this.pendingInterrupt = false;
+        return;
+      }
+
       now = Date.now();
       this.requestTimestamps = this.requestTimestamps.filter(t => t > now - 60000);
     }
 
+    // 等待token限制
     const totalTokens = this.tokenUsage.reduce((sum, u) => sum + u.tokens, 0);
     if (totalTokens >= this.config.tokensPerMinute!) {
+      if (signal?.aborted || this.pendingInterrupt) {
+        this.pendingInterrupt = false;
+        return;
+      }
+
       const oldestToken = this.tokenUsage[0];
       const waitTime = oldestToken.timestamp + 60000 - now + 100;
-      await this.sleep(waitTime);
+      await this.interruptibleSleep(waitTime, signal);
       this.tokenUsage = this.tokenUsage.filter(u => u.timestamp > Date.now() - 60000);
     }
   }
@@ -62,7 +91,31 @@ export class RateLimiter {
     };
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  // 可中断的sleep
+  private interruptibleSleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted || this.pendingInterrupt) {
+        resolve();
+        return;
+      }
+
+      const timer = setTimeout(() => {
+        resolve();
+      }, ms);
+
+      signal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+
+      // 也检查pendingInterrupt
+      const checkInterval = setInterval(() => {
+        if (this.pendingInterrupt) {
+          clearTimeout(timer);
+          clearInterval(checkInterval);
+          resolve();
+        }
+      }, 100);
+    });
   }
 }

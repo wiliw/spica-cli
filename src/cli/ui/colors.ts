@@ -1,57 +1,51 @@
-// 清晰配色方案 - 语义明确、对比度高
-// 适配深色和浅色终端背景
+// Serial Experiments Lain 配色方案
+// 赛博朋克风格：冷色调、深色背景、红色警告
 
 import chalk from 'chalk';
 import readline from 'readline';
 import { padRight, getStringWidth } from './stringWidth';
 
-// 核心配色 - ANSI标准色为主，确保兼容性
+// Lain经典配色
 export const LAIN_COLORS = {
-  // 主要输出 - AI回复
-  primary: chalk.cyanBright,
+  // 主色调 - 冷色系
+  primary: chalk.hex('#00CED1'),
+  secondary: chalk.hex('#7B68EE'),
+  accent: chalk.hex('#00BFFF'),
 
-  // 次要信息
-  secondary: chalk.blueBright,
+  // 状态色
+  success: chalk.hex('#00FA9A'),
+  error: chalk.hex('#FF4444'),
+  warning: chalk.hex('#FF6B6B'),
 
-  // 状态
-  success: chalk.greenBright,
-  error: chalk.redBright,
-  warning: chalk.yellowBright,
+  // 界面色
+  border: chalk.hex('#4169E1'),
+  prompt: chalk.hex('#00CED1'),
+  muted: chalk.hex('#696969'),
+  dim: chalk.hex('#4A4A4A'),
 
-  // 提示符
-  prompt: chalk.cyan,
+  // 特殊色
+  reasoning: chalk.hex('#9370DB'),
+  tool: chalk.hex('#20B2AA'),
+  file: chalk.hex('#5F9EA0'),
+  diffAdd: chalk.hex('#00FA9A'),
+  diffRemove: chalk.hex('#FF6B6B'),
 
-  // 次要文本（说明、提示）
-  muted: chalk.gray,
-  dim: chalk.dim,
+  // 权限请求
+  permissionBorder: chalk.hex('#DC143C'),
+  permissionTitle: chalk.hex('#FF0000').bold,
+  permissionText: chalk.hex('#F0F0F0'),
 
-  // 工具调用 - 使用箭头标识
-  tool: chalk.blue,
-
-  // 文件路径
-  file: chalk.white,
-
-  // Diff
-  diffAdd: chalk.green,
-  diffRemove: chalk.red,
-
-  // Reasoning（思维过程）
-  reasoning: chalk.magentaBright,
-
-  // 权限请求 - 高警示
-  permissionBorder: chalk.red,
-  permissionTitle: chalk.redBright.bold,
-  permissionText: chalk.white,
-
-  // Bypass模式 - 警示色
-  bypass: chalk.yellow,
-  bypassAuto: chalk.yellowBright,
+  // Bypass模式
+  bypass: chalk.hex('#FF8C00'),
+  bypassAuto: chalk.hex('#FFA500'),
 
   // 子agent
-  subAgent: chalk.gray,
+  subAgent: chalk.hex('#708090'),
 
-  // 上下文压缩
-  compress: chalk.blueBright,
+  // 背景
+  bg: chalk.bgHex('#0D1117'),
+  bgAlt: chalk.bgHex('#1A1B26'),
+  bgBorder: chalk.bgHex('#161B22'),
 };
 
 // ANSI背景色控制
@@ -62,8 +56,6 @@ export const BG = {
   banner: (): Promise<void> => {
     const reset = '\x1b[0m';
     const esc = '\x1b';
-    const cyan = '\x1b[36m'; // ANSI cyan
-    const dimCyan = '\x1b[36;2m'; // dim cyan
     const lines = [
       '              _)              ',
       '   __|  __ \\   |   __|   _` | ',
@@ -75,39 +67,50 @@ export const BG = {
     BG._bannerStopSignal = false;
 
     return new Promise<void>((resolve) => {
-      // 打印空行和banner
+      // 先打印初始空行（一行）和banner（5行）
       process.stdout.write('\n');
-      lines.forEach(line => process.stdout.write(dimCyan + line + reset + '\n'));
+      const dimColor = esc + '[38;2;0;60;63m';
+      lines.forEach(line => process.stdout.write(dimColor + line + reset + '\n'));
 
-      // 简单渐入
+      // 入场渐变
       const fadeIn = async () => {
-        for (let i = 0; i < 3 && !BG._bannerStopSignal; i++) {
-          await new Promise(r => setTimeout(r, 100));
+        for (let t = 1; t <= 5; t++) {
+          const g = 60 + t * 35;
+          const color = esc + `[38;2;0;${g};${g+3}m`;
+          // 上移5行重写
+          process.stdout.write(esc + '[5A');
+          lines.forEach(line => process.stdout.write(color + line + reset + '\n'));
+          await new Promise(r => setTimeout(r, 80));
         }
-        // 显示亮色
-        process.stdout.write(esc + '[5A');
-        lines.forEach(line => process.stdout.write(cyan + line + reset + '\n'));
       };
 
-      // 简单呼吸效果
+      // 呼吸渐变（持续直到收到停止信号）
       const breathe = async () => {
         while (!BG._bannerStopSignal) {
-          // 变暗
-          process.stdout.write(esc + '[5A');
-          lines.forEach(line => process.stdout.write(dimCyan + line + reset + '\n'));
-          await new Promise(r => setTimeout(r, 300));
-          // 变亮
-          if (!BG._bannerStopSignal) {
+          // 渐暗
+          for (let dim = 0; dim < 6 && !BG._bannerStopSignal; dim++) {
+            const g = 206 - dim * 15;
+            const color = esc + `[38;2;0;${g};${g+3}m`;
             process.stdout.write(esc + '[5A');
-            lines.forEach(line => process.stdout.write(cyan + line + reset + '\n'));
-            await new Promise(r => setTimeout(r, 300));
+            lines.forEach(line => process.stdout.write(color + line + reset + '\n'));
+            await new Promise(r => setTimeout(r, 100));
+          }
+          // 渐亮
+          for (let dim = 5; dim >= 0 && !BG._bannerStopSignal; dim--) {
+            const g = 206 - dim * 15;
+            const color = esc + `[38;2;0;${g};${g+3}m`;
+            process.stdout.write(esc + '[5A');
+            lines.forEach(line => process.stdout.write(color + line + reset + '\n'));
+            await new Promise(r => setTimeout(r, 100));
           }
         }
 
-        // 停止后显示亮色
+        // 停止后恢复最亮状态并空一行
+        const cyan = esc + '[38;2;0;206;209m';
         process.stdout.write(esc + '[5A');
         lines.forEach(line => process.stdout.write(cyan + line + reset + '\n'));
         process.stdout.write('\n');
+
         resolve();
       };
 
@@ -119,12 +122,12 @@ export const BG = {
     BG._bannerStopSignal = true;
   },
 
-  // Compression spinner
+  // Compression spinner - shows during context compression
   compressSpinner: (): Promise<void> => {
     const reset = '\x1b[0m';
     const esc = '\x1b';
-    const cyan = '\x1b[36m';
-    const frames = ['|', '/', '-', '\\'];
+    const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    const color = esc + '[38;2;0;206;209m'; // Cyan
 
     BG._compressStopSignal = false;
 
@@ -134,8 +137,10 @@ export const BG = {
       const spin = async () => {
         while (!BG._compressStopSignal) {
           const frame = frames[frameIndex % frames.length];
-          process.stdout.write(cyan + frame + ' Compressing...' + reset);
-          await new Promise(r => setTimeout(r, 100));
+          // Write spinner frame
+          process.stdout.write(color + frame + ' Compressing...' + reset);
+          await new Promise(r => setTimeout(r, 80));
+          // Clear line
           process.stdout.write(esc + '[2K' + esc + '[1G');
           frameIndex++;
         }
@@ -159,11 +164,11 @@ export const format = {
   warning: (text: string) => LAIN_COLORS.warning(text),
   toolCall: (name: string) => LAIN_COLORS.tool(`→ ${name}`),
   toolResult: (name: string, success: boolean, output: string) => {
-    const icon = success ? LAIN_COLORS.success('[OK]') : LAIN_COLORS.error('[ERR]');
+    const icon = success ? LAIN_COLORS.success('✓') : LAIN_COLORS.error('✗');
     return `${icon} ${name}: ${output}`;
   },
   reasoning: (content: string) => LAIN_COLORS.reasoning(content),
-  diffFile: (path: string) => LAIN_COLORS.file(`[FILE] ${path}`),
+  diffFile: (path: string) => LAIN_COLORS.file(`📄 ${path}`),
   diffAdd: (line: string) => LAIN_COLORS.diffAdd(`+ ${line}`),
   diffRemove: (line: string) => LAIN_COLORS.diffRemove(`- ${line}`),
   permissionBox: (reason: string) => {
@@ -173,7 +178,7 @@ export const format = {
     const dimBorder = LAIN_COLORS.muted('─'.repeat(50));
     return `
 ${border('═'.repeat(50))}
-${title('  [WARN] PERMISSION REQUIRED')}
+${title('  ⚠  PERMISSION REQUIRED')}
 ${border('═'.repeat(50))}
 ${text(`  Action: ${reason}`)}
 ${dimBorder}
