@@ -100,6 +100,32 @@ export class LLMClient extends EventEmitter {
     }
   }
 
+  // 直接生成（不使用历史消息，用于摘要等）
+  async generateDirect(prompt: string): Promise<LLMResponse> {
+    this.abortController = new AbortController();
+
+    try {
+      await this.rateLimiter.waitForAvailability(this.abortController.signal);
+
+      if (this.abortController.signal.aborted) {
+        throw new Error('Interrupted during rate limit wait');
+      }
+
+      this.rateLimiter.recordRequest();
+      // 使用 provider 的 generateDirect 方法（不添加到历史）
+      const response = await this.provider.generateDirect(prompt, this.abortController.signal);
+
+      if (response.content) {
+        const tokens = this.tokenCounter.estimateTokens(response.content);
+        this.rateLimiter.recordTokenUsage(tokens);
+      }
+
+      return response;
+    } finally {
+      this.abortController = null;
+    }
+  }
+
   async continueWithToolResult(toolCallName: string, result: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
     const toolsToUse = tools || this.tools;
 

@@ -1,61 +1,71 @@
 // Skills系统 - 用户自定义命令
 
 import fs from 'fs-extra';
-import { join, dirname } from 'path';
-import os from 'os';
+import { join, dirname, basename } from 'path';
 import { execa } from 'execa';
 import { fileURLToPath } from 'url';
-import {
-  loadGlobalSettings,
-  GLOBAL_DIR,
-  SkillDefinition,
-  loadProjectSkills,
-} from '../utils/settings';
+import { GLOBAL_DIR, SkillDefinition, loadProjectSkills } from '../utils/settings';
 
 // ES module 中获取 __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// SkillPackage 定义（仅在本模块）
-export interface SkillPackage {
+// 默认 skills 包源码目录（随 spica-cli npm 分发）
+const DEFAULT_PACKAGE_DIR = join(__dirname, '..', 'builtin-skills');
+// 用户 skills 目录（统一存放所有 skills）
+const SKILLS_DIR = join(GLOBAL_DIR, 'skills');
+
+// Skill 包信息
+export interface SkillPackageInfo {
   name: string;
-  version: string;
-  description: string;
-  author?: string;
-  skills: Record<string, SkillDefinition>;
+  skills: string[];
 }
 
-// 内置 skills 目录（随 spica-cli 一起分发）
-const BUILTIN_DIR = join(__dirname, '..', 'builtin-skills', 'superpowers');
-// 预装 skills 目录（用户全局安装）
-const PREINSTALLED_DIR = join(GLOBAL_DIR, 'installed-skills', 'superpowers');
+// 初始化：首次运行时复制默认包到用户目录（不覆盖已有）
+export async function initSkills(): Promise<void> {
+  if (!fs.existsSync(SKILLS_DIR)) {
+    await fs.ensureDir(SKILLS_DIR);
 
-// 加载所有 skills（内置 -> 预装 -> 全局 -> 项目覆盖）
+    // 复制默认包（如 superpowers）
+    if (fs.existsSync(DEFAULT_PACKAGE_DIR)) {
+      const packages = fs.readdirSync(DEFAULT_PACKAGE_DIR).filter(d => {
+        const fullPath = join(DEFAULT_PACKAGE_DIR, d);
+        return fs.statSync(fullPath).isDirectory() && !d.startsWith('_') && !d.startsWith('.');
+      });
+
+      for (const pkgName of packages) {
+        const srcDir = join(DEFAULT_PACKAGE_DIR, pkgName);
+        const destDir = join(SKILLS_DIR, pkgName);
+        await fs.copy(srcDir, destDir, { overwrite: false });  // 不覆盖已有
+      }
+    }
+  }
+}
+
+// 加载所有 skills（统一目录 -> 项目补充）
 export function loadSkills(workspacePath?: string): Map<string, SkillDefinition> {
   const skills = new Map<string, SkillDefinition>();
   const ws = workspacePath || process.cwd();
 
-  // 1. 加载内置 skills (superpowers - 随 spica-cli 分发)
-  loadSkillsFromDir(BUILTIN_DIR, skills);
-
-  // 2. 加载预装 skills (用户全局安装的 superpowers)
-  loadSkillsFromDir(PREINSTALLED_DIR, skills);
-
-  // 3. 加载全局 skills (覆盖预装)
-  const globalSettings = loadGlobalSettingsSync();
-  if (globalSettings.skills) {
-    Object.entries(globalSettings.skills).forEach(([name, def]) => {
-      def.name = name;
-      skills.set(name, def);
+  // 1. 加载用户 skills 目录（所有安装的 skills）
+  if (fs.existsSync(SKILLS_DIR)) {
+    const packageDirs = fs.readdirSync(SKILLS_DIR).filter(d => {
+      const fullPath = join(SKILLS_DIR, d);
+      return fs.statSync(fullPath).isDirectory() && !d.startsWith('_') && !d.startsWith('.');
     });
+    for (const pkgName of packageDirs) {
+      loadSkillsFromDir(join(SKILLS_DIR, pkgName), skills);
+    }
   }
 
-  // 4. 加载项目 skills（覆盖全局）
+  // 2. 加载项目 skills（只补充）
   const projectSkills = loadProjectSkills(ws);
   if (projectSkills) {
     Object.entries(projectSkills).forEach(([name, def]) => {
-      def.name = name;
-      skills.set(name, def);
+      if (!skills.has(name)) {
+        def.name = name;
+        skills.set(name, def);
+      }
     });
   }
 
@@ -78,7 +88,10 @@ function loadSkillsFromDir(dir: string, skills: Map<string, SkillDefinition>): v
         const content = fs.readFileSync(skillFile, 'utf-8');
         const skillDef = parseSkillMarkdown(dirName, content);
         if (skillDef) {
-          skills.set(dirName, skillDef);
+          // 已有的不被覆盖
+          if (!skills.has(dirName)) {
+            skills.set(dirName, skillDef);
+          }
         }
       } catch {}
     }
@@ -87,7 +100,6 @@ function loadSkillsFromDir(dir: string, skills: Map<string, SkillDefinition>): v
 
 // 解析 SKILL.md 文件
 function parseSkillMarkdown(name: string, content: string): SkillDefinition | null {
-  // 提取 frontmatter 中的 name 和 description
   let skillName = name;
   let description = `Skill: ${name}`;
   let promptTemplate = content;
@@ -99,7 +111,6 @@ function parseSkillMarkdown(name: string, content: string): SkillDefinition | nu
       const frontmatter = content.slice(3, endIdx).trim();
       const body = content.slice(endIdx + 3).trim();
 
-      // 提取 name 和 description
       const nameMatch = frontmatter.match(/name:\s*(.+)/);
       const descMatch = frontmatter.match(/description:\s*(.+)/);
 
@@ -116,29 +127,15 @@ function parseSkillMarkdown(name: string, content: string): SkillDefinition | nu
   };
 }
 
-// 同步加载全局 settings（用于 loadSkills）
-function loadGlobalSettingsSync(): { skills?: Record<string, SkillDefinition> } {
-  const globalPath = join(GLOBAL_DIR, 'settings.json');
-  if (fs.existsSync(globalPath)) {
-    try {
-      return fs.readJsonSync(globalPath);
-    } catch {
-      return {};
-    }
-  }
-  return {};
-}
-
 // 获取skill定义
 export function getSkill(name: string, workspacePath?: string): SkillDefinition | null {
   return loadSkills(workspacePath).get(name);
 }
 
-// 检查输入是否是skill调用（如 /search api）
+// 检查输入是否是skill调用
 export function parseSkillInput(input: string, workspacePath?: string): { skillName: string; args: Record<string, any> } | null {
   const trimmed = input.trim();
 
-  // 检查 /skill 格式
   if (trimmed.startsWith('/')) {
     const parts = trimmed.slice(1).split(/\s+/);
     const skillName = parts[0];
@@ -146,7 +143,6 @@ export function parseSkillInput(input: string, workspacePath?: string): { skillN
 
     const skill = getSkill(skillName, workspacePath);
     if (skill) {
-      // 解析模板变量
       const templateArgs = parseTemplateArgs(skill.promptTemplate, args);
       return { skillName, args: templateArgs };
     }
@@ -157,28 +153,23 @@ export function parseSkillInput(input: string, workspacePath?: string): { skillN
 
 // 解析模板变量
 function parseTemplateArgs(template: string | undefined, input: string): Record<string, any> {
-  // 处理 undefined 或空模板
   if (!template) {
     return { input };
   }
 
-  // 找出模板中的变量名 {var}
   const vars = template.match(/\{(\w+)\}/g) || [];
   const varNames = vars.map(v => v.slice(1, -1));
 
   const args: Record<string, any> = {};
 
-  // 如果只有一个变量，直接赋值
   if (varNames.length === 1) {
     args[varNames[0]] = input;
   } else if (varNames.length > 1) {
-    // 多个变量时，尝试按逗号或空格分割
     const parts = input.split(/[,\s]+/);
     varNames.forEach((name, i) => {
       args[name] = parts[i] || '';
     });
   } else {
-    // 没有变量时，使用默认 input
     args.input = input;
   }
 
@@ -189,17 +180,14 @@ function parseTemplateArgs(template: string | undefined, input: string): Record<
 export function buildSkillPrompt(skill: SkillDefinition, args: Record<string, any>): string {
   let prompt = skill.promptTemplate || '';
 
-  // 替换模板中的变量
   Object.entries(args).forEach(([key, value]) => {
     prompt = prompt.replace(`{${key}}`, value);
   });
 
-  // 如果模板没有变量占位符，把用户输入追加到末尾
   if (!skill.promptTemplate?.match(/\{(\w+)\}/) && args.input) {
     prompt += `\n\nUser request: ${args.input}`;
   }
 
-  // 如果模板为空，直接返回 args 内容
   if (!skill.promptTemplate) {
     return Object.entries(args).map(([k, v]) => `${k}: ${v}`).join('\n');
   }
@@ -212,150 +200,135 @@ export function listSkills(workspacePath?: string): SkillDefinition[] {
   return Array.from(loadSkills(workspacePath).values());
 }
 
-// Skills安装目录
-const SKILLS_DIR = join(GLOBAL_DIR, 'installed-skills');
+// 列出已安装的包
+export async function listInstalledPackages(): Promise<SkillPackageInfo[]> {
+  const packages: SkillPackageInfo[] = [];
 
-// 安装skill包（从URL或本地路径）
+  if (!fs.existsSync(SKILLS_DIR)) {
+    return packages;
+  }
+
+  const dirs = fs.readdirSync(SKILLS_DIR).filter(d => {
+    const fullPath = join(SKILLS_DIR, d);
+    return fs.statSync(fullPath).isDirectory() && !d.startsWith('_') && !d.startsWith('.');
+  });
+
+  for (const pkgName of dirs) {
+    const skills = getPackageSkills(pkgName);
+    packages.push({
+      name: pkgName,
+      skills,
+    });
+  }
+
+  return packages;
+}
+
+// 获取包中的 skills 列表
+function getPackageSkills(pkgName: string): string[] {
+  const pkgDir = join(SKILLS_DIR, pkgName);
+  if (!fs.existsSync(pkgDir)) return [];
+
+  const dirs = fs.readdirSync(pkgDir).filter(d => {
+    const fullPath = join(pkgDir, d);
+    return fs.statSync(fullPath).isDirectory() && !d.startsWith('_') && !d.startsWith('.');
+  });
+
+  return dirs.filter(d => fs.existsSync(join(pkgDir, d, 'SKILL.md')));
+}
+
+// 安装 skill 包（从 GitHub 或本地目录，不覆盖已有）
 export async function installSkill(source: string): Promise<{ success: boolean; message: string; skills?: string[] }> {
   try {
     await fs.ensureDir(SKILLS_DIR);
 
-    let skillPackage: SkillPackage;
+    let pkgName: string;
+    let sourceDir: string;
 
-    // GitHub URL 处理
+    // GitHub URL
     if (source.includes('github.com')) {
-      // 转换 GitHub URL 到 raw URL
-      let rawUrl = source;
-
-      // https://github.com/user/repo -> https://raw.githubusercontent.com/user/repo/main/skills.json
-      if (source.match(/github\.com\/[^/]+\/[^/]+$/)) {
-        // 没有指定文件，尝试 skills.json
-        const match = source.match(/github\.com\/([^/]+)\/([^/]+)/);
-        if (match) {
-          rawUrl = `https://raw.githubusercontent.com/${match[1]}/${match[2]}/main/skills.json`;
-        }
-      }
-      // https://github.com/user/repo/blob/main/file.json -> raw.githubusercontent.com
-      else if (source.includes('/blob/')) {
-        rawUrl = source
-          .replace('github.com', 'raw.githubusercontent.com')
-          .replace('/blob/', '/');
+      const match = source.match(/github\.com\/([^/]+)\/([^/]+)/);
+      if (!match) {
+        return { success: false, message: 'Invalid GitHub URL format' };
       }
 
-      const result = await execa('curl', ['-sL', rawUrl]);
-      skillPackage = JSON.parse(result.stdout);
+      pkgName = match[2];
+      const tempDir = join(SKILLS_DIR, `_temp_${pkgName}`);
+
+      await execa('git', ['clone', '--depth', '1', source, tempDir]);
+
+      if (fs.existsSync(join(tempDir, 'skills'))) {
+        sourceDir = join(tempDir, 'skills');
+      } else {
+        sourceDir = tempDir;
+      }
+
+      const destDir = join(SKILLS_DIR, pkgName);
+      // 不覆盖已有的包
+      if (fs.existsSync(destDir)) {
+        await fs.remove(tempDir);
+        return { success: false, message: `Package "${pkgName}" already exists. Delete it first to reinstall.` };
+      }
+
+      await fs.copy(sourceDir, destDir, { overwrite: false });
+      await fs.remove(tempDir);
     }
-    // 直接 URL（指向 JSON）
-    else if (source.startsWith('http://') || source.startsWith('https://')) {
-      const result = await execa('curl', ['-sL', source]);
-      skillPackage = JSON.parse(result.stdout);
-    }
-    // 本地文件
-    else if (source.endsWith('.json') || fs.existsSync(source)) {
-      skillPackage = await fs.readJson(source);
+    // 本地目录
+    else if (fs.existsSync(source) && fs.statSync(source).isDirectory()) {
+      pkgName = basename(source);
+      sourceDir = source;
+      const destDir = join(SKILLS_DIR, pkgName);
+
+      if (fs.existsSync(destDir)) {
+        return { success: false, message: `Package "${pkgName}" already exists. Delete it first to reinstall.` };
+      }
+
+      await fs.copy(sourceDir, destDir, { overwrite: false });
     }
     else {
-      return { success: false, message: 'Unsupported source format. Use GitHub URL, JSON URL, or local file.' };
+      return { success: false, message: 'Source must be GitHub URL or local directory' };
     }
 
-    if (!skillPackage.name || !skillPackage.skills) {
-      return { success: false, message: 'Invalid skill package: missing name or skills field' };
-    }
-
-    // 保存到安装目录
-    const packageFile = join(SKILLS_DIR, `${skillPackage.name}.json`);
-    await fs.writeJson(packageFile, skillPackage, { spaces: 2 });
-
-    // 加载skills到全局 settings
-    const { loadGlobalSettings, saveGlobalSettings } = await import('../utils/settings');
-    const settings = await loadGlobalSettings();
-
-    if (!settings.skills) settings.skills = {};
-
-    const skillNames: string[] = [];
-    Object.entries(skillPackage.skills).forEach(([name, def]) => {
-      const fullKey = `${skillPackage.name}/${name}`;
-      const skillDef = def as SkillDefinition;
-      skillDef.name = fullKey;
-      settings.skills![fullKey] = skillDef;
-      skillNames.push(fullKey);
-    });
-
-    await saveGlobalSettings(settings);
-
+    const skills = getPackageSkills(pkgName);
     return {
       success: true,
-      message: `Installed ${skillPackage.name} v${skillPackage.version || '1.0.0'}`,
-      skills: skillNames,
+      message: `Installed ${pkgName}`,
+      skills,
     };
   } catch (error: any) {
     return { success: false, message: `Install failed: ${error.message}` };
   }
 }
 
-// 列出已安装的skill包
-export async function listInstalledPackages(): Promise<SkillPackage[]> {
-  const packages: SkillPackage[] = [];
-
-  if (!await fs.pathExists(SKILLS_DIR)) {
-    return packages;
-  }
-
-  const files = await fs.readdir(SKILLS_DIR);
-  for (const file of files) {
-    if (file.endsWith('.json')) {
-      try {
-        const pkg = await fs.readJson(join(SKILLS_DIR, file));
-        packages.push(pkg);
-      } catch {
-        // 忽略无效文件
-      }
-    }
-  }
-
-  return packages;
-}
-
-// 卸载skill包
+// 卸载 skill 包
 export async function uninstallSkill(packageName: string): Promise<{ success: boolean; message: string }> {
   try {
-    const packageFile = join(SKILLS_DIR, `${packageName}.json`);
+    const pkgDir = join(SKILLS_DIR, packageName);
 
-    if (!await fs.pathExists(packageFile)) {
+    if (!fs.existsSync(pkgDir)) {
       return { success: false, message: `Package "${packageName}" not found` };
     }
 
-    await fs.remove(packageFile);
-
-    // 从全局 settings 中删除
-    const { loadGlobalSettings, saveGlobalSettings } = await import('../utils/settings');
-    const settings = await loadGlobalSettings();
-
-    if (settings.skills) {
-      Object.keys(settings.skills).forEach(key => {
-        if (key.startsWith(`${packageName}/`)) {
-          delete settings.skills![key];
-        }
-      });
-      await saveGlobalSettings(settings);
-    }
-
+    await fs.remove(pkgDir);
     return { success: true, message: `Uninstalled ${packageName}` };
   } catch (error: any) {
     return { success: false, message: `Uninstall failed: ${error.message}` };
   }
 }
 
-// 保存单个 skill 到全局 settings
-export async function saveSkill(name: string, skill: SkillDefinition): Promise<boolean> {
+// 保存单个 skill（写入到指定包目录）
+export async function saveSkill(skillName: string, skill: SkillDefinition, pkgName: string = 'custom'): Promise<boolean> {
   try {
-    const { loadGlobalSettings, saveGlobalSettings } = await import('../utils/settings');
-    const settings = await loadGlobalSettings();
+    const pkgDir = join(SKILLS_DIR, pkgName);
+    await fs.ensureDir(pkgDir);
 
-    if (!settings.skills) settings.skills = {};
-    settings.skills[name] = skill;
+    const skillDir = join(pkgDir, skillName);
+    await fs.ensureDir(skillDir);
 
-    await saveGlobalSettings(settings);
+    const skillFile = join(skillDir, 'SKILL.md');
+    const content = `---\nname: ${skill.name}\ndescription: ${skill.description}\n---\n\n${skill.promptTemplate || ''}`;
+    await fs.writeFile(skillFile, content);
+
     return true;
   } catch (error: any) {
     console.error(`Failed to save skill: ${error.message}`);
@@ -363,27 +336,37 @@ export async function saveSkill(name: string, skill: SkillDefinition): Promise<b
   }
 }
 
-// 删除单个 skill 从全局 settings
-export async function deleteSkill(name: string): Promise<boolean> {
+// 删除单个 skill
+export async function deleteSkill(skillName: string, pkgName?: string): Promise<boolean> {
   try {
-    const { loadGlobalSettings, saveGlobalSettings } = await import('../utils/settings');
-    const settings = await loadGlobalSettings();
-
-    if (settings.skills && settings.skills[name]) {
-      delete settings.skills[name];
-      await saveGlobalSettings(settings);
-      return true;
+    if (pkgName) {
+      const skillDir = join(SKILLS_DIR, pkgName, skillName);
+      if (fs.existsSync(skillDir)) {
+        await fs.remove(skillDir);
+        return true;
+      }
+      return false;
     }
+
+    // 搜索所有包
+    if (!fs.existsSync(SKILLS_DIR)) return false;
+
+    const dirs = fs.readdirSync(SKILLS_DIR).filter(d => {
+      const fullPath = join(SKILLS_DIR, d);
+      return fs.statSync(fullPath).isDirectory() && !d.startsWith('_') && !d.startsWith('.');
+    });
+
+    for (const pkg of dirs) {
+      const skillDir = join(SKILLS_DIR, pkg, skillName);
+      if (fs.existsSync(skillDir)) {
+        await fs.remove(skillDir);
+        return true;
+      }
+    }
+
     return false;
   } catch (error: any) {
     console.error(`Failed to delete skill: ${error.message}`);
     return false;
   }
-}
-
-// 搜索可用的skill包（从远程registry）
-export async function searchSkills(query: string): Promise<Array<{ name: string; description: string; author: string }>> {
-  // 未来可以实现从registry搜索
-  // 目前返回空数组
-  return [];
 }

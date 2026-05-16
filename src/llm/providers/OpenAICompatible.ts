@@ -251,6 +251,26 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
       throw new Error(`${this.providerName} API error: ${error.message}`);
     }
   }
+
+  // 直接生成（不添加到历史，用于摘要等）
+  async generateDirect(prompt: string, signal?: AbortSignal): Promise<LLMResponse> {
+    try {
+      const response = await this.client.chat.completions.create({
+        model: this.config.model,
+        messages: [{ role: 'user', content: prompt }],
+        stream: false,
+        temperature: 0.3,
+      }, { signal });
+
+      const content = response.choices[0]?.message?.content || '';
+      return { content, finished: true };
+    } catch (error: any) {
+      if (signal?.aborted) {
+        return { finished: true };
+      }
+      throw new Error(`${this.providerName} API error: ${error.message}`);
+    }
+  }
   
   private async generateNonStreaming(prompt: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
     this.messages.pop();

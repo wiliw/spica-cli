@@ -466,13 +466,12 @@ program
           // 压缩上下文
           if (cmd === 'compact') {
             const before = agent.getMessages().length;
-            // Show spinner briefly
+            // Show spinner
             const spinnerPromise = BG.compressSpinner();
-            // Run compression (synchronous but we animate briefly)
-            agent.compact();
+            // Run compression (now async with LLM summary)
+            await agent.compact();
             const after = agent.getMessages().length;
-            // Stop spinner after 200ms to show animation effect
-            setTimeout(() => BG.stopCompress(), 200);
+            BG.stopCompress();
             await spinnerPromise;
             console.log(LAIN_COLORS.secondary(`[COMPRESS] ${before} → ${after} messages`));
             rl.prompt();
@@ -910,7 +909,7 @@ program
         console.log(LAIN_COLORS.muted('  (none)'));
       } else {
         packages.forEach(p => {
-          console.log(`  ${LAIN_COLORS.success('●')} ${p.name} v${p.version || '1.0.0'} - ${p.description}`);
+          console.log(`  ${LAIN_COLORS.success('●')} ${p.name} (${p.skills.length} skills)`);
         });
       }
 
@@ -975,11 +974,8 @@ program
           console.log(LAIN_COLORS.muted('  (none)'));
         } else {
           packages.forEach(p => {
-            console.log(`  ${LAIN_COLORS.success('●')} ${p.name} v${p.version || '1.0.0'}`);
-            console.log(LAIN_COLORS.muted(`    ${p.description}`));
-            if (p.author) {
-              console.log(LAIN_COLORS.muted(`    Author: ${p.author}`));
-            }
+            console.log(`  ${LAIN_COLORS.success('●')} ${p.name}`);
+            console.log(LAIN_COLORS.muted(`    Skills: ${p.skills.join(', ')}`));
           });
         }
         break;

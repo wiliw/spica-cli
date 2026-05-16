@@ -2,6 +2,7 @@ import { LLMClient } from './llm/LLMClient';
 import { TokenCounter } from './llm/TokenCounter';
 import { executeTool, getAllToolDefinitions, setWorkspace, getWorkspace } from './tools/index';
 import { initMCP, shutdownMCP } from './mcp/client';
+import { initSkills } from './skills/index';
 import { getProviderConfig } from './utils/config';
 import { getSystemPrompt } from './prompts/system';
 import { loadProjectConfig as loadAgentsConfig, autoDetectProject, createAgentsMd } from './utils/projectConfig';
@@ -198,11 +199,13 @@ async init() {
   private async _doInit(): Promise<void> {
     this._initAbortController = new AbortController();
 
+    // 初始化Skills（首次运行时复制默认包）
+    await initSkills();
+
     // 初始化MCP服务器连接
     try {
       await initMCP();
     } catch (error) {
-      // MCP初始化失败不影响主流程
       console.log('MCP init skipped (no config or servers unavailable)');
     }
 
@@ -326,13 +329,10 @@ async init() {
     const remainingTokens = tokenCounter.getRemainingTokens(existingMessages);
     const threshold = Math.floor(provider.getContextWindow() * 0.15);  // 15%阈值
 
-    // 当剩余token少于阈值时才压缩
+    // 当剩余token少于阈值时自动压缩（使用统一的 compact 方法）
     if (remainingTokens < threshold) {
       console.log(LAIN_COLORS.muted(`[COMPRESS] ${usedTokens} tokens used, ${remainingTokens} remaining, compressing...`));
-      const compressed = this.compressHistory(existingMessages);
-      this.llm.setMessages(compressed);
-      const newTokens = tokenCounter.estimateMessages(compressed);
-      this.emit('context_compressed', { before: usedTokens, after: newTokens });
+      await this.compact();
     }
 
     // Simplified project context (减少token)
@@ -595,43 +595,69 @@ async init() {
     return baseSuggestion;
   }
 
-  // 公开方法：手动压缩历史
-  public compact(): void {
+  // 公开方法：手动压缩历史（使用 LLM 生成摘要）
+  public async compact(): Promise<void> {
     if (!this.llm) return;
     const allMessages = this.llm.getMessages();
-    const compressed = this.compressHistory(allMessages);
-    this.llm.setMessages(compressed);
-  }
 
-  private compressHistory(messages: ChatMessage[]): ChatMessage[] {
-    const MAX_MESSAGES = 80;  // 保留80条
-
-    if (messages.length <= MAX_MESSAGES) {
-      return messages;
+    if (allMessages.length <= 20) {
+      this.emit('context_compressed', { before: allMessages.length, after: allMessages.length });
+      return;
     }
 
-    // 简单策略：保留最近的80条，之前的压缩为一条摘要
-    const oldMessages = messages.slice(0, -MAX_MESSAGES);
-    const recentMessages = messages.slice(-MAX_MESSAGES);
+    // 保留最近 15 条消息完整
+    const recentMessages = allMessages.slice(-15);
+    const oldMessages = allMessages.slice(0, -15);
 
-    // 创建旧消息摘要
-    const userTopics = oldMessages
-      .filter(m => m.role === 'user')
-      .map(m => (m.content || '').slice(0, 30))
-      .join(' | ');
+    // 用 LLM 生成摘要
+    const summary = await this.generateSummary(oldMessages);
 
-    const summary: ChatMessage = {
-      role: 'assistant',
-      content: `[历史摘要] 用户需求: ${userTopics.slice(0, 150)}...`,
-    };
+    const compressed = [summary, ...recentMessages];
+    this.llm.setMessages(compressed);
 
-    return [summary, ...recentMessages];
+    this.emit('context_compressed', { before: allMessages.length, after: compressed.length });
   }
 
-  private createSummary(messages: ChatMessage[]): string {
-    return messages
-      .filter(m => m.role === 'user')
-      .map(m => (m.content || '').slice(0, 30))
-      .join('; ');
+  // 用 LLM 生成历史摘要
+  private async generateSummary(messages: ChatMessage[]): Promise<ChatMessage> {
+    // 构建摘要 prompt
+    const prompt = `请总结以下对话历史的关键内容，包括：
+1. 用户的主要需求/任务
+2. 已完成的重要工作（文件修改、工具执行结果）
+3. 重要的决策或结论
+4. 遇到的问题和解决方案
+
+用简洁的中文总结（不超过 200 字）：
+
+${messages.map(m => {
+  const role = m.role === 'user' ? '用户' : m.role === 'assistant' ? 'AI' : '系统';
+  let content = m.content || '';
+  // 工具调用信息
+  if (m.toolCalls) {
+    content += ` [工具: ${m.toolCalls.map(tc => tc.name).join(', ')}]`;
   }
-}
+  return `${role}: ${content.slice(0, 100)}`;
+}).join('\n')}`;
+
+    try {
+      // 临时创建一个不带历史的请求
+      const response = await this.llm.generateDirect(prompt);
+      return {
+        role: 'assistant',
+        content: `[历史摘要] ${response.content || '早期对话已压缩'}`,
+      };
+    } catch {
+      // 如果 LLM 调用失败，使用简单摘要
+      const userTopics = messages
+        .filter(m => m.role === 'user')
+        .map(m => (m.content || '').slice(0, 50))
+        .join(' | ');
+      return {
+        role: 'assistant',
+        content: `[历史摘要] ${userTopics.slice(0, 200)}`,
+      };
+    }
+  }
+
+  // 旧的简单压缩方法（备用）
+  }
