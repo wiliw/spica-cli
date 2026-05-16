@@ -20,12 +20,36 @@ export interface SkillPackage {
   skills: Record<string, SkillDefinition>;
 }
 
-// 加载所有 skills（全局 + 项目覆盖）
+// 预装 skills 目录
+const PREINSTALLED_DIR = join(GLOBAL_DIR, 'installed-skills', 'superpowers');
+
+// 加载所有 skills（预装 + 全局 + 项目覆盖）
 export function loadSkills(workspacePath?: string): Map<string, SkillDefinition> {
   const skills = new Map<string, SkillDefinition>();
   const ws = workspacePath || process.cwd();
 
-  // 加载全局 skills
+  // 1. 加载预装 skills (superpowers)
+  if (fs.existsSync(PREINSTALLED_DIR)) {
+    const dirs = fs.readdirSync(PREINSTALLED_DIR).filter(d => {
+      const fullPath = join(PREINSTALLED_DIR, d);
+      return fs.statSync(fullPath).isDirectory() && !d.startsWith('_') && !d.startsWith('.');
+    });
+
+    for (const dir of dirs) {
+      const skillFile = join(PREINSTALLED_DIR, dir, 'SKILL.md');
+      if (fs.existsSync(skillFile)) {
+        try {
+          const content = fs.readFileSync(skillFile, 'utf-8');
+          const skillDef = parseSkillMarkdown(dir, content);
+          if (skillDef) {
+            skills.set(dir, skillDef);
+          }
+        } catch {}
+      }
+    }
+  }
+
+  // 2. 加载全局 skills (覆盖预装)
   const globalSettings = loadGlobalSettingsSync();
   if (globalSettings.skills) {
     Object.entries(globalSettings.skills).forEach(([name, def]) => {
@@ -34,7 +58,7 @@ export function loadSkills(workspacePath?: string): Map<string, SkillDefinition>
     });
   }
 
-  // 加载项目 skills（覆盖全局）
+  // 3. 加载项目 skills（覆盖全局）
   const projectSkills = loadProjectSkills(ws);
   if (projectSkills) {
     Object.entries(projectSkills).forEach(([name, def]) => {
@@ -44,6 +68,37 @@ export function loadSkills(workspacePath?: string): Map<string, SkillDefinition>
   }
 
   return skills;
+}
+
+// 解析 SKILL.md 文件
+function parseSkillMarkdown(name: string, content: string): SkillDefinition | null {
+  // 提取 frontmatter 中的 name 和 description
+  let skillName = name;
+  let description = `Skill: ${name}`;
+  let promptTemplate = content;
+
+  // 解析 YAML frontmatter
+  if (content.startsWith('---')) {
+    const endIdx = content.indexOf('---', 3);
+    if (endIdx !== -1) {
+      const frontmatter = content.slice(3, endIdx).trim();
+      const body = content.slice(endIdx + 3).trim();
+
+      // 提取 name 和 description
+      const nameMatch = frontmatter.match(/name:\s*(.+)/);
+      const descMatch = frontmatter.match(/description:\s*(.+)/);
+
+      if (nameMatch) skillName = nameMatch[1].trim();
+      if (descMatch) description = descMatch[1].trim();
+      promptTemplate = body || content;
+    }
+  }
+
+  return {
+    name: skillName,
+    description,
+    promptTemplate,
+  };
 }
 
 // 同步加载全局 settings（用于 loadSkills）
