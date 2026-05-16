@@ -310,8 +310,8 @@ program
     currentAgent = agent;
     globalProviderConfig = providerConfig;
 
-    // 开始banner动画（并行）
-    const bannerPromise = BG.banner();
+    // 开始banner动画（并行，但管道模式跳过）
+    const bannerPromise = process.stdin.isTTY ? BG.banner() : Promise.resolve();
 
     try {
       await agent.init();
@@ -332,9 +332,11 @@ program
       // 显示初始状态（简化版本）
       console.log(LAIN_COLORS.muted(`${providerConfig.model} | /h help | TAB complete`));
 
-      // 启用 Bracketed Paste Mode（粘贴内容作为整体到达）
+      // 启用 Bracketed Paste Mode（粘贴内容作为整体到达，仅TTY模式）
       const ESC = '\x1b';
-      process.stdout.write(`${ESC}[?2004h`);
+      if (process.stdin.isTTY) {
+        process.stdout.write(`${ESC}[?2004h`);
+      }
 
       // 可用指令列表（用于 Tab 补全）
       const COMMANDS = [
@@ -365,111 +367,114 @@ program
       let lastLine = '';
       let shownList = false;
 
-      // 粘贴检测：Bracketed Paste Mode
+      // 粘贴检测：Bracketed Paste Mode（仅TTY模式）
       let pasteBuffer: string[] = [];
       let isInPaste = false;
 
-      // 直接监听 stdin data 来检测粘贴序列
-      const originalWrite = process.stdin.write;
-      process.stdin.on('data', (chunk: Buffer) => {
-        const str = chunk.toString('utf8');
+      // 直接监听 stdin data 来检测粘贴序列（仅TTY模式）
+      if (process.stdin.isTTY) {
+        process.stdin.on('data', (chunk: Buffer) => {
+          const str = chunk.toString('utf8');
 
-        // 检测粘贴开始
-        if (str.includes(`${ESC}[200~`)) {
-          isInPaste = true;
-          pasteBuffer = [];
-          // 提取粘贴开始后的内容
-          const parts = str.split(`${ESC}[200~`);
-          if (parts.length > 1) {
-            const afterStart = parts[1] || '';
-            // 检测粘贴结束（可能在同一数据块）
-            if (afterStart.includes(`${ESC}[201~`)) {
-              const pasteParts = afterStart.split(`${ESC}[201~`);
-              const pasteContent = pasteParts[0];
-              pasteBuffer.push(pasteContent);
-              isInPaste = false;
-              // 提交合并的粘贴内容
-              const mergedPaste = pasteBuffer.join('');
-              if (mergedPaste.trim()) {
-                // 触发 line 事件（模拟 readline）
-                rl.emit('line', mergedPaste.replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
-              }
-              pasteBuffer = [];
-              // 处理粘贴结束后的剩余内容
-              const afterPaste = pasteParts[1] || '';
-              if (afterPaste) {
-                // 不处理，让 readline 处理
-              }
-            } else {
-              pasteBuffer.push(afterStart);
-            }
-          }
-          return;  // 不继续传递给 readline
-        }
-
-        // 检测粘贴结束
-        if (str.includes(`${ESC}[201~`) && isInPaste) {
-          const parts = str.split(`${ESC}[201~`);
-          pasteBuffer.push(parts[0] || '');
-          isInPaste = false;
-          // 提交合并的粘贴内容
-          const mergedPaste = pasteBuffer.join('');
-          if (mergedPaste.trim()) {
-            rl.emit('line', mergedPaste.replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
-          }
-          pasteBuffer = [];
-          // 处理粘贴结束后的剩余内容
-          const afterPaste = parts[1] || '';
-          if (afterPaste) {
-            // 不处理，让 readline 处理
-          }
-          return;
-        }
-
-        // 正在粘贴中，累积内容
-        if (isInPaste) {
-          pasteBuffer.push(str);
-          return;
-        }
-      });
-
-      process.stdin.on('keypress', (char: string, key: readline.Key) => {
-        // 粘贴时不处理 keypress
-        if (isInPaste) return;
-
-        if (key.name === 'tab') {
-          const currentLine = rl.line;
-          if (currentLine.startsWith('/')) {
-            const hits = COMMANDS.filter(c => c.startsWith(currentLine));
-
-            if (hits.length === 1) {
-              // 只有一个匹配，直接补全
-              rl.write(hits[0].slice(currentLine.length));
-              shownList = false;
-              lastLine = hits[0];
-            } else if (hits.length > 1) {
-              // 多个匹配
-              if (!shownList || currentLine !== lastLine) {
-                // 第一次Tab：显示列表
-                process.stdout.write('\n');
-                hits.forEach(h => process.stdout.write(`${h}  `));
-                process.stdout.write('\n> ' + currentLine);
-                shownList = true;
-                lastLine = currentLine;
+          // 检测粘贴开始
+          if (str.includes(`${ESC}[200~`)) {
+            isInPaste = true;
+            pasteBuffer = [];
+            // 提取粘贴开始后的内容
+            const parts = str.split(`${ESC}[200~`);
+            if (parts.length > 1) {
+              const afterStart = parts[1] || '';
+              // 检测粘贴结束（可能在同一数据块）
+              if (afterStart.includes(`${ESC}[201~`)) {
+                const pasteParts = afterStart.split(`${ESC}[201~`);
+                const pasteContent = pasteParts[0];
+                pasteBuffer.push(pasteContent);
+                isInPaste = false;
+                // 提交合并的粘贴内容
+                const mergedPaste = pasteBuffer.join('');
+                if (mergedPaste.trim()) {
+                  // 触发 line 事件（模拟 readline）
+                  rl.emit('line', mergedPaste.replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
+                }
+                pasteBuffer = [];
+                // 处理粘贴结束后的剩余内容
+                const afterPaste = pasteParts[1] || '';
+                if (afterPaste) {
+                  // 不处理，让 readline 处理
+                }
               } else {
-                // 第二次Tab：补全第一个
+                pasteBuffer.push(afterStart);
+              }
+            }
+            return;  // 不继续传递给 readline
+          }
+
+          // 检测粘贴结束
+          if (str.includes(`${ESC}[201~`) && isInPaste) {
+            const parts = str.split(`${ESC}[201~`);
+            pasteBuffer.push(parts[0] || '');
+            isInPaste = false;
+            // 提交合并的粘贴内容
+            const mergedPaste = pasteBuffer.join('');
+            if (mergedPaste.trim()) {
+              rl.emit('line', mergedPaste.replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
+            }
+            pasteBuffer = [];
+            // 处理粘贴结束后的剩余内容
+            const afterPaste = parts[1] || '';
+            if (afterPaste) {
+              // 不处理，让 readline 处理
+            }
+            return;
+          }
+
+          // 正在粘贴中，累积内容
+          if (isInPaste) {
+            pasteBuffer.push(str);
+            return;
+          }
+        });
+      }
+
+      if (process.stdin.isTTY) {
+        process.stdin.on('keypress', (char: string, key: readline.Key) => {
+          // 粘贴时不处理 keypress
+          if (isInPaste) return;
+
+          if (key.name === 'tab') {
+            const currentLine = rl.line;
+            if (currentLine.startsWith('/')) {
+              const hits = COMMANDS.filter(c => c.startsWith(currentLine));
+
+              if (hits.length === 1) {
+                // 只有一个匹配，直接补全
                 rl.write(hits[0].slice(currentLine.length));
                 shownList = false;
                 lastLine = hits[0];
+              } else if (hits.length > 1) {
+                // 多个匹配
+                if (!shownList || currentLine !== lastLine) {
+                  // 第一次Tab：显示列表
+                  process.stdout.write('\n');
+                  hits.forEach(h => process.stdout.write(`${h}  `));
+                  process.stdout.write('\n> ' + currentLine);
+                  shownList = true;
+                  lastLine = currentLine;
+                } else {
+                  // 第二次Tab：补全第一个
+                  rl.write(hits[0].slice(currentLine.length));
+                  shownList = false;
+                  lastLine = hits[0];
+                }
               }
             }
+          } else if (key.name !== 'return' && key.name !== 'enter') {
+            // 其他按键重置状态
+            shownList = false;
+            lastLine = '';
           }
-        } else if (key.name !== 'return' && key.name !== 'enter') {
-          // 其他按键重置状态
-          shownList = false;
-          lastLine = '';
-        }
-      });
+        });
+      }
 
       // 设置agent事件监听（需要rl来恢复输入行）
       setupAgentEvents(agent, rl, true);
@@ -776,8 +781,10 @@ program
           return;
         }
 
-        // 正常退出 - 禁用 Bracketed Paste Mode
-        process.stdout.write(`${ESC}[?2004l`);
+        // 正常退出 - 禁用 Bracketed Paste Mode（仅TTY模式）
+        if (process.stdin.isTTY) {
+          process.stdout.write(`${ESC}[?2004l`);
+        }
         const messages = agent.getMessages();
         saveSession(process.cwd(), messages);
         await shutdownMCP();

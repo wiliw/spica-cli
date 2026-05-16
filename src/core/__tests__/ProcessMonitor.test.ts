@@ -98,10 +98,15 @@ describe('ProcessMonitor', () => {
     });
 
     it('captures stderr', async () => {
-      await monitor.start('node', ['-e', 'console.error("error output")'], 'stderr-test');
-      
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
+      const info = await monitor.start('node', ['-e', 'console.error("error output")'], 'stderr-test');
+
+      // Wait for process to exit (check status)
+      for (let i = 0; i < 20; i++) {
+        const currentInfo = await monitor.monitor('stderr-test');
+        if (currentInfo?.status === ProcessStatus.EXITED) break;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
       const logs = await monitor.getLogs('stderr-test');
       expect(logs.stderr).toContain('error output');
     });
