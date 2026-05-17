@@ -49,8 +49,9 @@ export class ScreenManager {
 
   // 输出到滚动区域
   appendScroll(text: string): void {
-    // 如果光标不在滚动区域，先定位到滚动区域底部
+    // 如果光标不在滚动区域，先定位到滚动区域底部并隐藏光标
     if (!this.state.cursorInScrollArea) {
+      fs.writeSync(1, `${ESC}[?25l`);  // 隐藏光标
       fs.writeSync(1, `${ESC}[${this.state.scrollBottom};1H`);
       this.state.cursorInScrollArea = true;
     }
@@ -62,6 +63,7 @@ export class ScreenManager {
   restoreCursor(): void {
     const col = this.getDisplayCol(this.state.inputBuffer[0], this.state.cursorCol) + 3; // +3 for "> "
     fs.writeSync(1, `${ESC}[${this.state.inputRow};${col}H`);
+    fs.writeSync(1, `${ESC}[?25h`);  // 显示光标
     this.state.cursorInScrollArea = false;
   }
 
