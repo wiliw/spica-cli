@@ -13,6 +13,7 @@ export interface ScreenState {
   completer: ((line: string) => string[]) | null;
   shownCompletionList: boolean;
   lastCompletionLine: string;
+  cursorInScrollArea: boolean;  // 光标是否在滚动区域
 }
 
 export class ScreenManager {
@@ -31,6 +32,7 @@ export class ScreenManager {
       completer: null,
       shownCompletionList: false,
       lastCompletionLine: '',
+      cursorInScrollArea: false,
     };
   }
 
@@ -45,20 +47,22 @@ export class ScreenManager {
     fs.writeSync(1, `${ESC}[r${ESC}[2J${ESC}[1;1H`);
   }
 
-  // 输出到滚动区域，完成后光标回到输入框
+  // 输出到滚动区域
   appendScroll(text: string): void {
-    // 1. 定位到滚动区域底部
-    fs.writeSync(1, `${ESC}[${this.state.scrollBottom};1H`);
-    // 2. 写入内容
+    // 如果光标不在滚动区域，先定位到滚动区域底部
+    if (!this.state.cursorInScrollArea) {
+      fs.writeSync(1, `${ESC}[${this.state.scrollBottom};1H`);
+      this.state.cursorInScrollArea = true;
+    }
+    // 直接追加内容（滚动区域会自然滚动）
     fs.writeSync(1, text);
-    // 3. 立即恢复光标到输入框
-    this.restoreCursor();
   }
 
   // 恢复光标到输入框
   restoreCursor(): void {
-    const col = this.getDisplayCol(this.state.inputBuffer[0], this.state.cursorCol) + 1;
+    const col = this.getDisplayCol(this.state.inputBuffer[0], this.state.cursorCol) + 3; // +3 for "> "
     fs.writeSync(1, `${ESC}[${this.state.inputRow};${col}H`);
+    this.state.cursorInScrollArea = false;
   }
 
   // 刷新输入框显示
