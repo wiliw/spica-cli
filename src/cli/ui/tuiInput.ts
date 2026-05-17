@@ -1,4 +1,3 @@
-import { LAIN_COLORS } from './colors';
 import { getScreenManager } from './screenManager';
 
 const ESC = '\x1b';
@@ -11,25 +10,14 @@ export interface TUIInputResult {
 }
 
 export class TUIInputHandler {
-  private screen: ReturnType<typeof getScreenManager>;
+  private screen = getScreenManager();
   private lastEscTime: number = 0;
   private interruptCount: number = 0;
 
-  constructor() {
-    this.screen = getScreenManager();
-  }
+  getScreen() { return this.screen; }
 
-  getScreen() {
-    return this.screen;
-  }
-
-  start(): void {
-    this.screen.start();
-  }
-
-  end(): void {
-    this.screen.end();
-  }
+  start(): void { this.screen.start(); }
+  end(): void { this.screen.end(); }
 
   handleStdin(data: string, permissionDialogActive: boolean): TUIInputResult {
     if (permissionDialogActive) {
@@ -56,13 +44,11 @@ export class TUIInputHandler {
     }
 
     const shouldSend = this.screen.handleInput(data);
-
     if (shouldSend) {
       const content = this.screen.getContent();
       this.screen.clear();
       return { content, shouldProcess: true, shouldExit: false, isInterrupt: false };
     }
-
     return { content: '', shouldProcess: false, shouldExit: false, isInterrupt: false };
   }
 }
