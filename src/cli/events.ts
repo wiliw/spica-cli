@@ -50,8 +50,9 @@ export function setupAgentEvents(
   agent.on('stream', (data: any) => {
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
-      inputBox?.moveToScrollArea();
     }
+    // 每次输出都要移到滚动区域（因为用户输入可能改变光标位置）
+    inputBox?.moveToScrollArea();
     if (lastWasReasoning) {
       process.stdout.write('\n');
       lastWasReasoning = false;
@@ -62,8 +63,9 @@ export function setupAgentEvents(
   agent.on('reasoning', (data: any) => {
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
-      inputBox?.moveToScrollArea();
     }
+    // 每次输出都要移到滚动区域
+    inputBox?.moveToScrollArea();
     process.stderr.write(LAIN_COLORS.reasoning(data.content));
     lastWasReasoning = true;
   });

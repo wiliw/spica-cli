@@ -122,6 +122,22 @@ program
       tuiHandler = new TUIInputHandler();
       tuiHandler.start();
 
+      // Tab 补全命令列表
+      const BASE_COMMANDS = [
+        '/help', '/h', '/status', '/bypass', '/strict',
+        '/queue', '/q', '/undo', '/clear', '/reset',
+        '/skills', '/skill-add', '/skill-remove', '/skill-edit',
+        '/history', '/compact', '/init',
+      ];
+      const getCommands = () => {
+        const skills = listSkills(process.cwd());
+        const skillCommands = skills.map(s => `/${s.name}`);
+        return [...BASE_COMMANDS, ...skillCommands];
+      };
+      tuiHandler.getInputBox().setCompleter((line: string) => {
+        return getCommands().filter(c => c.startsWith(line));
+      });
+
       // 显示状态栏
       tuiHandler.getInputBox().showStatus(`${providerConfig.model} | strict`);
 

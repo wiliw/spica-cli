@@ -15,9 +15,17 @@ export class InputBox {
   private scrollBottom: number = 0; // 滚动区域底部
   private terminalHeight: number = 24;
   private terminalWidth: number = 80;
+  private completer: ((line: string) => string[]) | null = null;
+  private shownCompletionList: boolean = false;
+  private lastCompletionLine: string = '';
 
   constructor() {
     this.updateTerminalSize();
+  }
+
+  // 设置补全函数
+  setCompleter(completer: (line: string) => string[]): void {
+    this.completer = completer;
   }
 
   private updateTerminalSize(): void {
@@ -130,6 +138,13 @@ export class InputBox {
 
     if (data === '\x7f' || data === '\b') {
       this.backspace();
+      this.shownCompletionList = false;
+      return false;
+    }
+
+    // Tab 补全
+    if (data === '\t') {
+      this.handleTab();
       return false;
     }
 
@@ -141,10 +156,12 @@ export class InputBox {
     // 粘贴
     if (data.includes(`${ESC}[200~`)) {
       this.handlePaste(data);
+      this.shownCompletionList = false;
       return false;
     }
 
     this.insert(data);
+    this.shownCompletionList = false;
     return false;
   }
 
@@ -162,6 +179,40 @@ export class InputBox {
       }
     } else if (seq === `${ESC}[3~`) {  // Delete
       this.delete();
+    }
+  }
+
+  // Tab 补全处理
+  private handleTab(): void {
+    const currentLine = this.buffer[this.cursorRow];
+    if (!currentLine.startsWith('/') || !this.completer) {
+      return;
+    }
+
+    const hits = this.completer(currentLine);
+
+    if (hits.length === 1) {
+      // 只有一个匹配，直接补全
+      const completion = hits[0].slice(currentLine.length);
+      this.insert(completion);
+      this.shownCompletionList = false;
+      this.lastCompletionLine = hits[0];
+    } else if (hits.length > 1) {
+      if (!this.shownCompletionList || currentLine !== this.lastCompletionLine) {
+        // 第一次Tab：显示列表（在滚动区域）
+        this.moveToScrollArea();
+        process.stdout.write('\n');
+        hits.forEach(h => process.stdout.write(`${h}  `));
+        process.stdout.write('\n');
+        this.shownCompletionList = true;
+        this.lastCompletionLine = currentLine;
+      } else {
+        // 第二次Tab：补全第一个
+        const completion = hits[0].slice(currentLine.length);
+        this.insert(completion);
+        this.shownCompletionList = false;
+        this.lastCompletionLine = hits[0];
+      }
     }
   }
 
