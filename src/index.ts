@@ -97,6 +97,9 @@ program
     // 开始banner动画（并行）
     const bannerPromise = BG.banner();
 
+    // TUI handler (defined before try to be accessible in catch)
+    let tuiHandler: TUIInputHandler | null = null;
+
     try {
       await agent.init();
 
@@ -116,7 +119,7 @@ program
       }
 
       // TUI 输入处理（设置滚动区域）
-      const tuiHandler = new TUIInputHandler();
+      tuiHandler = new TUIInputHandler();
       tuiHandler.start();
 
       // 显示状态栏
@@ -164,6 +167,13 @@ program
 
       // 设置agent事件监听
       setupAgentEvents(agent, tuiHandler.getInputBox(), true);
+
+      // TUI 输出辅助函数
+      const tuiPrint = (text: string) => {
+        tuiHandler.getInputBox().moveToScrollArea();
+        process.stdout.write(text);
+        tuiHandler.getInputBox().render();
+      };
 
       // 输入处理函数
       const handleInput = async (line: string) => {
@@ -216,15 +226,16 @@ program
           if (cmd === 'queue' || cmd === 'q') {
             const queue = getInputQueue();
             const status = queue.getStatus();
-            console.log(LAIN_COLORS.primary.bold('\nInput Queue:'));
-            console.log(`  Pending: ${status.pending}`);
+            tuiHandler.getInputBox().moveToScrollArea();
+            process.stdout.write(LAIN_COLORS.primary.bold('\nInput Queue:\n'));
+            process.stdout.write(`  Pending: ${status.pending}\n`);
             if (status.pendingPreview.length > 0) {
-              console.log(LAIN_COLORS.muted('  Recent:'));
+              process.stdout.write(LAIN_COLORS.muted('  Recent:\n'));
               status.pendingPreview.forEach((p, i) => {
-                console.log(LAIN_COLORS.muted(`    ${i + 1}. ${p}`));
+                process.stdout.write(LAIN_COLORS.muted(`    ${i + 1}. ${p}\n`));
               });
             }
-            console.log('');
+            process.stdout.write('\n');
             tuiHandler.getInputBox().render();
             return;
           }
@@ -232,10 +243,11 @@ program
           if (cmd === 'undo') {
             const queue = getInputQueue();
             const removed = queue.undoLast();
+            tuiHandler.getInputBox().moveToScrollArea();
             if (removed) {
-              console.log(LAIN_COLORS.muted(`[QUEUE] Removed: ${removed.content.slice(0, 30)}...`));
+              process.stdout.write(LAIN_COLORS.muted(`\n[QUEUE] Removed: ${removed.content.slice(0, 30)}...\n`));
             } else {
-              console.log(LAIN_COLORS.muted('[QUEUE] No pending inputs'));
+              process.stdout.write(LAIN_COLORS.muted('\n[QUEUE] No pending inputs\n'));
             }
             tuiHandler.getInputBox().render();
             return;
@@ -244,7 +256,8 @@ program
           if (cmd === 'clear' || cmd === 'reset') {
             agent.setMessages([]);
             clearInputQueue();
-            console.log(LAIN_COLORS.muted('[OK] Session cleared'));
+            tuiHandler.getInputBox().moveToScrollArea();
+            process.stdout.write(LAIN_COLORS.muted('\n[OK] Session cleared\n'));
             tuiHandler.getInputBox().render();
             return;
           }
@@ -269,12 +282,12 @@ program
             const msgs = agent.getMessages().length;
             const queue = getInputQueue();
             const queueStatus = queue.getStatus();
-            console.log(LAIN_COLORS.primary.bold('\nStatus:'));
-            console.log(`  Mode: ${bypass ? 'BYPASS' : 'STRICT'}`);
-            console.log(`  Messages: ${msgs}`);
-            console.log(`  Queue: ${queueStatus.pending} pending`);
-            console.log(`  Workspace: ${agent.getWorkspacePath()}`);
-            console.log('');
+            tuiHandler.getInputBox().moveToScrollArea();
+            process.stdout.write(LAIN_COLORS.primary.bold('\nStatus:\n'));
+            process.stdout.write(`  Mode: ${bypass ? 'BYPASS' : 'STRICT'}\n`);
+            process.stdout.write(`  Messages: ${msgs}\n`);
+            process.stdout.write(`  Queue: ${queueStatus.pending} pending\n`);
+            process.stdout.write(`  Workspace: ${agent.getWorkspacePath()}\n\n`);
             tuiHandler.getInputBox().render();
             return;
           }
@@ -282,18 +295,18 @@ program
           // Skills
           if (cmd === 'skills') {
             const skills = listSkills(process.cwd());
-            console.log(LAIN_COLORS.primary.bold('\nSkills:'));
+            tuiHandler.getInputBox().moveToScrollArea();
+            process.stdout.write(LAIN_COLORS.primary.bold('\nSkills:\n'));
             if (skills.length === 0) {
-              console.log(LAIN_COLORS.muted('  (none)'));
+              process.stdout.write(LAIN_COLORS.muted('  (none)\n'));
             } else {
               skills.forEach(s => {
-                // 截断description到50字符
                 const desc = s.description || '';
                 const shortDesc = desc.length > 50 ? desc.slice(0, 50) + '...' : desc;
-                console.log(LAIN_COLORS.muted(`  /${s.name} - ${shortDesc}`));
+                process.stdout.write(LAIN_COLORS.muted(`  /${s.name} - ${shortDesc}\n`));
               });
             }
-            console.log('');
+            process.stdout.write('\n');
             tuiHandler.getInputBox().render();
             return;
           }
@@ -308,23 +321,22 @@ program
           // 历史（显示最近消息）
           if (cmd === 'history') {
             const msgs = agent.getMessages();
-            console.log(LAIN_COLORS.primary.bold('\nHistory:'));
+            tuiHandler.getInputBox().moveToScrollArea();
+            process.stdout.write(LAIN_COLORS.primary.bold('\nHistory:\n'));
             if (msgs.length === 0) {
-              console.log(LAIN_COLORS.muted('  (empty)'));
+              process.stdout.write(LAIN_COLORS.muted('  (empty)\n'));
             } else {
-              // 显示全部消息，完整内容
               msgs.forEach((m, i) => {
                 const role = m.role === 'user' ? 'YOU' : m.role === 'assistant' ? 'AI' : 'SYS';
                 const content = m.content || '';
-                console.log(LAIN_COLORS.muted(`  ${i + 1}. [${role}]`));
-                // 分行显示完整内容
-                content.split('\n').forEach(line => {
-                  console.log(LAIN_COLORS.muted(`     ${line}`));
+                process.stdout.write(LAIN_COLORS.muted(`  ${i + 1}. [${role}]\n`));
+                content.split('\n').slice(0, 5).forEach(line => {
+                  process.stdout.write(LAIN_COLORS.muted(`     ${line.slice(0, 60)}${line.length > 60 ? '...' : ''}\n`));
                 });
               });
-              console.log(LAIN_COLORS.muted(`\n  Total: ${msgs.length} messages`));
+              process.stdout.write(LAIN_COLORS.muted(`\n  Total: ${msgs.length} messages\n`));
             }
-            console.log('');
+            process.stdout.write('\n');
             tuiHandler.getInputBox().render();
             return;
           }
@@ -332,14 +344,10 @@ program
           // 压缩上下文
           if (cmd === 'compact') {
             const before = agent.getMessages().length;
-            // Show spinner
-            const spinnerPromise = BG.compressSpinner();
-            // Run compression (now async with LLM summary)
             await agent.compact();
             const after = agent.getMessages().length;
-            BG.stopCompress();
-            await spinnerPromise;
-            console.log(LAIN_COLORS.secondary(`[COMPRESS] ${before} → ${after} messages`));
+            tuiHandler.getInputBox().moveToScrollArea();
+            process.stdout.write(LAIN_COLORS.secondary(`\n[COMPRESS] ${before} → ${after} messages\n`));
             tuiHandler.getInputBox().render();
             return;
           }
@@ -373,14 +381,16 @@ program
             const parts = cmd.slice('skill-add '.length).split(' ');
             const skillName = parts[0];
             if (!skillName) {
-              console.log(LAIN_COLORS.warning('Usage: /skill-add <name> [promptTemplate]'));
+              tuiHandler.getInputBox().moveToScrollArea();
+            process.stdout.write(LAIN_COLORS.warning('\nUsage: /skill-add <name> [promptTemplate]\n'));
               tuiHandler.getInputBox().render();
               return;
             }
             const promptTemplate = parts.slice(1).join(' ') || '{input}';
             const description = `Custom skill: ${skillName}`;
             await saveSkill(skillName, { name: skillName, description, promptTemplate });
-            console.log(LAIN_COLORS.success(`[OK] Skill added: ${skillName}`));
+            tuiHandler.getInputBox().moveToScrollArea();
+            process.stdout.write(LAIN_COLORS.success(`\n[OK] Skill added: ${skillName}\n`));
             tuiHandler.getInputBox().render();
             return;
           }
@@ -388,16 +398,18 @@ program
           if (cmd.startsWith('skill-remove ')) {
             const skillName = cmd.slice('skill-remove '.length).trim();
             if (!skillName) {
-              console.log(LAIN_COLORS.warning('Usage: /skill-remove <name>'));
+              tuiHandler.getInputBox().moveToScrollArea();
+              process.stdout.write(LAIN_COLORS.warning('\nUsage: /skill-remove <name>\n'));
               tuiHandler.getInputBox().render();
               return;
             }
             const result = await deleteSkill(skillName);
-            if (result) {
-              console.log(LAIN_COLORS.success(`[OK] Skill removed: ${skillName}`));
-            } else {
-              console.log(LAIN_COLORS.warning(`[WARN] Skill not found: ${skillName}`));
-            }
+            tuiHandler.getInputBox().moveToScrollArea();
+              if (result) {
+                process.stdout.write(LAIN_COLORS.success(`\n[OK] Skill removed: ${skillName}\n`));
+              } else {
+                process.stdout.write(LAIN_COLORS.warning(`\n[WARN] Skill not found: ${skillName}\n`));
+              }
             tuiHandler.getInputBox().render();
             return;
           }
@@ -406,7 +418,8 @@ program
             const rest = cmd.slice('skill-edit '.length);
             const firstSpace = rest.indexOf(' ');
             if (firstSpace === -1) {
-              console.log(LAIN_COLORS.warning('Usage: /skill-edit <name> <promptTemplate>'));
+              tuiHandler.getInputBox().moveToScrollArea();
+              process.stdout.write(LAIN_COLORS.warning('\nUsage: /skill-edit <name> <promptTemplate>\n'));
               tuiHandler.getInputBox().render();
               return;
             }
@@ -414,12 +427,14 @@ program
             const promptTemplate = rest.slice(firstSpace + 1) || '{input}';
             const existing = getSkill(skillName, process.cwd());
             if (!existing) {
-              console.log(LAIN_COLORS.warning(`[WARN] Skill not found: ${skillName}`));
+              tuiHandler.getInputBox().moveToScrollArea();
+              process.stdout.write(LAIN_COLORS.warning(`\n[WARN] Skill not found: ${skillName}\n`));
               tuiHandler.getInputBox().render();
               return;
             }
             await saveSkill(skillName, { ...existing, promptTemplate });
-            console.log(LAIN_COLORS.success(`[OK] Skill updated: ${skillName}`));
+            tuiHandler.getInputBox().moveToScrollArea();
+            process.stdout.write(LAIN_COLORS.success(`\n[OK] Skill updated: ${skillName}\n`));
             tuiHandler.getInputBox().render();
             return;
           }
@@ -430,14 +445,17 @@ program
             const skill = getSkill(skillInput.skillName, process.cwd());
             if (skill) {
               const prompt = buildSkillPrompt(skill, skillInput.args);
-              console.log(LAIN_COLORS.muted(`\n[${skill.name}] ${skill.description}`));
+              tuiHandler.getInputBox().moveToScrollArea();
+              process.stdout.write(LAIN_COLORS.muted(`\n[${skill.name}] ${skill.description}\n`));
               isProcessing = true;
               state.setProcessing(true);
               try {
                 await agent.runLoop(prompt);
-                console.log(LAIN_COLORS.success('\n[OK] Done\n'));
+                tuiHandler.getInputBox().moveToScrollArea();
+                process.stdout.write(LAIN_COLORS.success('\n[OK] Done\n'));
               } catch (error: any) {
-                console.log(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
+                tuiHandler.getInputBox().moveToScrollArea();
+                process.stdout.write(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
               }
               isProcessing = false;
               state.setProcessing(false);
@@ -450,20 +468,23 @@ program
           }
 
           // 未知的 / 命令
-          console.log(LAIN_COLORS.warning(`Unknown command: ${trimmed}`));
-          console.log(LAIN_COLORS.muted('Type /h for help'));
+          tuiHandler.getInputBox().moveToScrollArea();
+          process.stdout.write(LAIN_COLORS.warning(`\nUnknown command: ${trimmed}\n`));
+          process.stdout.write(LAIN_COLORS.muted('Type /h for help\n'));
           tuiHandler.getInputBox().render();
           return;
         }
 
         // === 执行请求 ===
-        console.log('');
+        // 先显示用户输入在输出区
+        tuiHandler.getInputBox().moveToScrollArea();
+        process.stdout.write(LAIN_COLORS.primary(`\n> ${trimmed}\n`));
+
         isProcessing = true;
         state.setProcessing(true);
 
-        // 移到输出区显示处理状态
-        tuiHandler.getInputBox().moveToScrollArea();
-        process.stdout.write(LAIN_COLORS.primary('\nProcessing... (ESC ESC to interrupt)\n'));
+        // 显示处理状态
+        process.stdout.write(LAIN_COLORS.muted('Processing... (ESC ESC to interrupt)\n'));
 
         try {
           await agent.runLoop(trimmed);
@@ -489,33 +510,27 @@ program
 
       // 帮助信息
       const showHelp = () => {
-        console.log(LAIN_COLORS.primary.bold('\nCommands:'));
-        console.log(LAIN_COLORS.muted('  quit/exit   Exit'));
-        console.log(LAIN_COLORS.muted('  help        Show help'));
-        console.log('');
-        console.log(LAIN_COLORS.primary.bold('Session:'));
-        console.log(LAIN_COLORS.muted('  /clear      Clear session'));
-        console.log(LAIN_COLORS.muted('  /history    Show recent messages'));
-        console.log(LAIN_COLORS.muted('  /compact    Compress context'));
-        console.log(LAIN_COLORS.muted('  /init       Create AGENTS.md (--force to overwrite)'));
-        console.log('');
-        console.log(LAIN_COLORS.primary.bold('Queue:'));
-        console.log(LAIN_COLORS.muted('  /queue      Show queue'));
-        console.log(LAIN_COLORS.muted('  /undo       Remove last input'));
-        console.log('');
-        console.log(LAIN_COLORS.primary.bold('Mode:'));
-        console.log(LAIN_COLORS.muted('  /bypass     Auto-approve'));
-        console.log(LAIN_COLORS.muted('  /strict     Ask permission'));
-        console.log(LAIN_COLORS.muted('  /status     Show status'));
-        console.log('');
-        console.log(LAIN_COLORS.primary.bold('Skills:'));
-        console.log(LAIN_COLORS.muted('  /skills           List skills'));
-        console.log(LAIN_COLORS.muted('  /skill-add <name> <template>  Add skill'));
-        console.log(LAIN_COLORS.muted('  /skill-remove <name>          Remove skill'));
-        console.log(LAIN_COLORS.muted('  /skill-edit <name> <template> Edit skill'));
-        console.log('');
-        console.log(LAIN_COLORS.muted('TAB for autocomplete'));
-        console.log('');
+        tuiHandler.getInputBox().moveToScrollArea();
+        process.stdout.write(LAIN_COLORS.primary.bold('\nCommands:\n'));
+        process.stdout.write(LAIN_COLORS.muted('  quit/exit   Exit\n'));
+        process.stdout.write(LAIN_COLORS.muted('  help        Show help\n'));
+        process.stdout.write('\n');
+        process.stdout.write(LAIN_COLORS.primary.bold('Session:\n'));
+        process.stdout.write(LAIN_COLORS.muted('  /clear      Clear session\n'));
+        process.stdout.write(LAIN_COLORS.muted('  /history    Show messages\n'));
+        process.stdout.write(LAIN_COLORS.muted('  /compact    Compress context\n'));
+        process.stdout.write('\n');
+        process.stdout.write(LAIN_COLORS.primary.bold('Queue:\n'));
+        process.stdout.write(LAIN_COLORS.muted('  /queue      Show queue\n'));
+        process.stdout.write(LAIN_COLORS.muted('  /undo       Remove last input\n'));
+        process.stdout.write('\n');
+        process.stdout.write(LAIN_COLORS.primary.bold('Mode:\n'));
+        process.stdout.write(LAIN_COLORS.muted('  /bypass     Auto-approve\n'));
+        process.stdout.write(LAIN_COLORS.muted('  /strict     Ask permission\n'));
+        process.stdout.write('\n');
+        process.stdout.write(LAIN_COLORS.primary.bold('Skills:\n'));
+        process.stdout.write(LAIN_COLORS.muted('  /skills     List skills\n'));
+        process.stdout.write('\n');
       };
 
       // 处理队列中的输入
@@ -523,18 +538,22 @@ program
         const queue = getInputQueue();
         if (!queue.hasPending()) return;
 
-        console.log(LAIN_COLORS.muted(`\n[QUEUE] Processing ${queue.getStatus().pending} inputs...`));
+        tuiHandler.getInputBox().moveToScrollArea();
+        process.stdout.write(LAIN_COLORS.muted(`\n[QUEUE] Processing ${queue.getStatus().pending} inputs...\n`));
         const mergedInput = queue.mergePending();
 
         if (mergedInput) {
-          console.log(LAIN_COLORS.muted(`Combined input:\n${mergedInput.slice(0, 100)}${mergedInput.length > 100 ? '...' : ''}\n`));
+          tuiHandler.getInputBox().moveToScrollArea();
+          process.stdout.write(LAIN_COLORS.muted(`\nCombined input:\n${mergedInput.slice(0, 100)}${mergedInput.length > 100 ? '...' : ''}\n`));
           isProcessing = true;
           state.setProcessing(true);
           try {
             await agent.runLoop(mergedInput);
-            console.log(LAIN_COLORS.success('\n[OK] Done\n'));
+            tuiHandler.getInputBox().moveToScrollArea();
+            process.stdout.write(LAIN_COLORS.success('\n[OK] Done\n'));
           } catch (error: any) {
-            console.log(LAIN_COLORS.error(`\n[ERR] Error: ${error.message}\n`));
+            tuiHandler.getInputBox().moveToScrollArea();
+            process.stdout.write(LAIN_COLORS.error(`\n[ERR] Error: ${error.message}\n`));
           }
           isProcessing = false;
           state.setProcessing(false);
@@ -549,7 +568,12 @@ program
 
     } catch (error: any) {
       if (!state.isConnectionErrorShown()) {
-        console.log(LAIN_COLORS.error(`Error: ${error.message}`));
+        if (tuiHandler) {
+          tuiHandler.getInputBox().moveToScrollArea();
+          process.stdout.write(LAIN_COLORS.error(`\nError: ${error.message}\n`));
+        } else {
+          console.log(LAIN_COLORS.error(`Error: ${error.message}`));
+        }
       }
     }
 
