@@ -99,7 +99,7 @@ program
     try {
       await agent.init();
 
-      // 停止banner动画
+      // 停止banner动画（在设置滚动区域之前）
       BG.stopBanner();
       await bannerPromise;
 
@@ -108,15 +108,16 @@ program
         const session = loadSession(process.cwd());
         if (session && session.messages && session.messages.length > 0) {
           agent.setMessages(session.messages);
-          console.log(LAIN_COLORS.muted(`Loaded ${session.messages.length} messages from history`));
+          process.stdout.write(LAIN_COLORS.muted(`Loaded ${session.messages.length} messages from history\n`));
         }
       }
 
-      console.log(LAIN_COLORS.muted(`${providerConfig.model} | /h help | ESC ESC interrupt`));
-
-      // TUI 输入处理
+      // TUI 输入处理（设置滚动区域）
       const tuiHandler = new TUIInputHandler();
       tuiHandler.start();
+
+      // 显示状态栏（在输入框上方）
+      tuiHandler.getInputBox().showStatus(`${providerConfig.model} | strict`);
 
       // 启用 rawMode
       if (process.stdin.isTTY) {

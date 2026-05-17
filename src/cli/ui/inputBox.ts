@@ -50,25 +50,74 @@ export class InputBox {
     process.stdout.write(`${ESC}[2K`);
     process.stdout.write(LAIN_COLORS.muted('─'.repeat(this.terminalWidth)));
 
-    // 绘制输入内容
-    for (let i = 0; i < Math.min(this.buffer.length, this.maxRows); i++) {
-      const row = this.inputStartRow + 1 + i;
-      process.stdout.write(`${ESC}[${row};1H`);
-      process.stdout.write(`${ESC}[2K`);
-      if (i === 0) {
-        process.stdout.write(LAIN_COLORS.primary('> ') + this.buffer[i]);
+    // 绘制输入内容（处理换行）
+    const promptWidth = 2; // '> ' 的宽度
+    const maxWidth = this.terminalWidth - promptWidth - 1;
+
+    let displayLines: string[] = [];
+    for (let i = 0; i < this.buffer.length; i++) {
+      const line = this.buffer[i];
+      if (line.length <= maxWidth) {
+        displayLines.push(line);
       } else {
-        process.stdout.write('  ' + this.buffer[i]);
+        // 分割长行
+        for (let j = 0; j < line.length; j += maxWidth) {
+          displayLines.push(line.slice(j, j + maxWidth));
+        }
       }
     }
 
-    // 光标定位到输入区
-    const displayRow = Math.min(this.cursorRow, this.maxRows - 1);
-    const actualRow = this.inputStartRow + 1 + displayRow;
-    const colOffset = (this.cursorRow === 0 ? 3 : 2) + this.cursorCol;
-    process.stdout.write(`${ESC}[${actualRow};${colOffset}H`);
+    // 只显示最后 maxRows 行
+    const visibleLines = displayLines.slice(-this.maxRows);
 
-    // 不恢复光标 - 保持光标在输入区
+    for (let i = 0; i < this.maxRows; i++) {
+      const row = this.inputStartRow + 1 + i;
+      process.stdout.write(`${ESC}[${row};1H`);
+      process.stdout.write(`${ESC}[2K`);
+
+      if (i < visibleLines.length) {
+        if (i === 0 && displayLines.length <= this.maxRows) {
+          process.stdout.write(LAIN_COLORS.primary('> ') + visibleLines[i]);
+        } else {
+          process.stdout.write('  ' + visibleLines[i]);
+        }
+      }
+    }
+
+    // 光标定位
+    // 计算光标在显示中的位置
+    const cursorDisplayPos = this.calculateCursorDisplayPosition(maxWidth);
+    const displayRow = Math.min(cursorDisplayPos.row, this.maxRows - 1);
+    const actualRow = this.inputStartRow + 1 + displayRow;
+    const colOffset = (displayRow === 0 && displayLines.length <= this.maxRows ? 3 : 2) + cursorDisplayPos.col;
+    process.stdout.write(`${ESC}[${actualRow};${colOffset}H`);
+  }
+
+  // 计算光标在显示中的位置（考虑换行）
+  private calculateCursorDisplayPosition(maxWidth: number): { row: number; col: number } {
+    let row = 0;
+    let col = 0;
+
+    for (let i = 0; i < this.cursorRow; i++) {
+      const line = this.buffer[i];
+      row += Math.ceil(line.length / maxWidth) || 1;
+    }
+
+    const currentLine = this.buffer[this.cursorRow];
+    col = this.cursorCol % maxWidth;
+    row += Math.floor(this.cursorCol / maxWidth);
+
+    return { row, col };
+  }
+
+  // 显示状态栏（在分隔线上方）
+  showStatus(status: string): void {
+    const statusRow = this.inputStartRow - 1;
+    process.stdout.write(`${ESC}[${statusRow};1H`);
+    process.stdout.write(`${ESC}[2K`);
+    process.stdout.write(LAIN_COLORS.muted(status));
+    // 重绘输入框
+    this.render();
   }
 
   // 输出时：光标移到滚动区域
