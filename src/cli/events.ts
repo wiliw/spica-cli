@@ -37,7 +37,8 @@ function outputToScroll(inputBox: InputBox | null, text: string): void {
 export function setupAgentEvents(
   agent: SpicaAgent,
   inputBox: InputBox | null,
-  interactive: boolean = false
+  interactive: boolean = false,
+  model?: string  // 用于状态栏更新
 ): void {
   const state = getRuntimeState();
   let lastWasReasoning = false;
@@ -151,6 +152,11 @@ export function setupAgentEvents(
     outputToScroll(inputBox, data.enabled
       ? LAIN_COLORS.bypass('\n[WARN] Bypass mode activated\n')
       : LAIN_COLORS.success('\n[OK] Strict mode activated\n'));
+    // 更新状态栏
+    if (inputBox && model) {
+      const mode = data.enabled ? 'bypass' : 'strict';
+      inputBox.showStatus(`${model} | ${mode} | /h help | ESC ESC interrupt`);
+    }
   });
 
   agent.on('permission_bypassed', (data: any) => {

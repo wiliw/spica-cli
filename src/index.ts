@@ -141,8 +141,9 @@ program
         return getCommands().filter(c => c.startsWith(line));
       });
 
-      // 显示状态栏
-      tuiHandler.getInputBox().showStatus(`${providerConfig.model} | strict`);
+      // 显示状态栏（包含帮助提示）
+      const mode = state.isBypassMode() ? 'bypass' : 'strict';
+      tuiHandler.getInputBox().showStatus(`${providerConfig.model} | ${mode} | /h help | ESC ESC interrupt`);
 
       // 启用 Bracketed Paste Mode（粘贴内容作为整体到达）
       process.stdout.write(`${ESC}[?2004h`);
@@ -190,7 +191,7 @@ program
       });
 
       // 设置agent事件监听
-      setupAgentEvents(agent, tuiHandler.getInputBox(), true);
+      setupAgentEvents(agent, tuiHandler.getInputBox(), true, providerConfig.model);
 
       // TUI 输出辅助函数
       const tuiPrint = (text: string) => {
