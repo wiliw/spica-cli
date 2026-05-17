@@ -10,14 +10,12 @@ import { getRuntimeState } from '../core/RuntimeState';
 function formatArgs(args: Record<string, any>): string {
   if (!args || Object.keys(args).length === 0) return '';
 
-  const keys = Object.keys(args).slice(0, 3);  // 只显示前3个参数
+  const keys = Object.keys(args).slice(0, 3);
   const parts = keys.map(k => {
     const v = args[k];
     if (typeof v === 'string') {
-      // 路径只显示文件名
       if (k === 'path' || k === 'source' || k === 'destination') {
-        const shortPath = v.split('/').pop() || v;
-        return `${k}=${shortPath}`;
+        return `${k}=${v.split('/').pop() || v}`;
       }
       return `${k}=${v.slice(0, 30)}${v.length > 30 ? '...' : ''}`;
     }
@@ -29,6 +27,13 @@ function formatArgs(args: Record<string, any>): string {
   return `(${parts.join(', ')})`;
 }
 
+// 输出到滚动区域（不干扰输入框）
+function outputToScroll(inputBox: InputBox | null, text: string): void {
+  inputBox?.moveToScrollArea();
+  process.stdout.write(text);
+  inputBox?.render();
+}
+
 export function setupAgentEvents(
   agent: SpicaAgent,
   inputBox: InputBox | null,
@@ -37,16 +42,12 @@ export function setupAgentEvents(
   const state = getRuntimeState();
   let lastWasReasoning = false;
 
-  // 连接错误事件（只显示一次简洁信息）
   agent.on('connection_error', (data: any) => {
     state.setConnectionErrorShown(true);
-    inputBox?.moveToScrollArea();
-    process.stdout.write(LAIN_COLORS.error(`\n[ERR] ${data.type}: ${data.hint}\n`));
-    inputBox?.render();
+    outputToScroll(inputBox, LAIN_COLORS.error(`\n[ERR] ${data.type}: ${data.hint}\n`));
   });
 
   agent.on('stream', (data: any) => {
-    // 流式输出：移到滚动区域
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
       inputBox?.moveToScrollArea();
@@ -85,24 +86,20 @@ export function setupAgentEvents(
     const output = data.output || data.error || '';
 
     if (data.diff) {
-      process.stdout.write(`${icon} ${data.name}\n`);
-      process.stdout.write(data.diff + '\n');
+      process.stdout.write(`${icon} ${data.name}\n${data.diff}\n`);
     } else if (output) {
       const firstLine = output.split('\n')[0].slice(0, 80);
-      process.stdout.write(`${icon} ${data.name}: ${firstLine}${output.split('\n')[0].length >= 80 ? '...' : ''}\n`);
+      process.stdout.write(`${icon} ${data.name}: ${firstLine}${firstLine.length >= 80 ? '...' : ''}\n`);
     } else {
       process.stdout.write(`${icon} ${data.name}\n`);
     }
-    // 重绘输入框
     inputBox?.render();
   });
 
   agent.on('permission_request', async (data: any) => {
-    // 暂停 raw mode
     if (inputBox && process.stdin.isTTY) {
       process.stdin.setRawMode(false);
       state.setPermissionDialogActive(true);
-      // 移到滚动区域显示权限请求
       inputBox.moveToScrollArea();
     }
 
@@ -115,13 +112,11 @@ export function setupAgentEvents(
         message: LAIN_COLORS.primary.bold('Do you want to allow this action?'),
         initial: false,
       });
-      console.log(LAIN_COLORS.permissionBorder('═'.repeat(50)) + '\n');
+      process.stdout.write(LAIN_COLORS.permissionBorder('═'.repeat(50)) + '\n');
       approved = answer.approve;
     } catch (e) {
-      // prompts 可能因为中断抛出异常，默认拒绝
       approved = false;
     } finally {
-      // 确保总是恢复状态
       state.setPermissionDialogActive(false);
       if (inputBox && process.stdin.isTTY) {
         process.stdin.setRawMode(true);
@@ -137,64 +132,60 @@ export function setupAgentEvents(
   });
 
   agent.on('error_suggestion', (data: any) => {
-    console.log(LAIN_COLORS.warning(`[HINT] ${data.suggestion}`));
+    outputToScroll(inputBox, LAIN_COLORS.warning(`\n[HINT] ${data.suggestion}\n`));
   });
 
   agent.on('workspace_changed', (data: any) => {
-    console.log(LAIN_COLORS.file(`[DIR] Workspace: ${data.path}`));
+    outputToScroll(inputBox, LAIN_COLORS.file(`\n[DIR] Workspace: ${data.path}\n`));
   });
 
-  // Bypass模式事件
   agent.on('bypass_changed', (data: any) => {
     state.setBypassMode(data.enabled);
-    if (data.enabled) {
-      console.log(LAIN_COLORS.bypass('[WARN] Bypass mode activated'));
-    } else {
-      console.log(LAIN_COLORS.success('[OK] Strict mode activated'));
-    }
+    outputToScroll(inputBox, data.enabled
+      ? LAIN_COLORS.bypass('\n[WARN] Bypass mode activated\n')
+      : LAIN_COLORS.success('\n[OK] Strict mode activated\n'));
   });
 
   agent.on('permission_bypassed', (data: any) => {
-    console.log(LAIN_COLORS.bypassAuto(`[AUTO] Approved: ${data.reason}`));
+    outputToScroll(inputBox, LAIN_COLORS.bypassAuto(`\n[AUTO] Approved: ${data.reason}\n`));
   });
 
-  // 子agent事件
   agent.on('sub_agent_start', (data: any) => {
-    console.log(LAIN_COLORS.subAgent(`  [${data.type || 'sub'}] ${data.description}`));
+    outputToScroll(inputBox, LAIN_COLORS.subAgent(`\n  [${data.type || 'sub'}] ${data.description}\n`));
   });
 
   agent.on('sub_agent_tool_call', (data: any) => {
-    console.log(LAIN_COLORS.subAgent(`    -> [sub] ${data.name}`));
+    inputBox?.moveToScrollArea();
+    process.stdout.write(LAIN_COLORS.subAgent(`    -> [sub] ${data.name}\n`));
   });
 
   agent.on('sub_agent_tool_result', (data: any) => {
     const icon = data.success ? LAIN_COLORS.success('[OK]') : LAIN_COLORS.error('[ERR]');
-    console.log(LAIN_COLORS.subAgent(`    ${icon} [sub] ${data.name}`));
+    inputBox?.moveToScrollArea();
+    process.stdout.write(LAIN_COLORS.subAgent(`    ${icon} [sub] ${data.name}\n`));
   });
 
   agent.on('sub_agent_done', (data: any) => {
-    console.log(LAIN_COLORS.success(`  [OK] [sub] Done: ${data.summary.slice(0, 50)}`));
+    outputToScroll(inputBox, LAIN_COLORS.success(`\n  [OK] [sub] Done: ${data.summary.slice(0, 50)}\n`));
   });
 
   agent.on('sub_agent_error', (data: any) => {
-    console.log(LAIN_COLORS.error(`  [ERR] [sub] Error: ${data.error}`));
+    outputToScroll(inputBox, LAIN_COLORS.error(`\n  [ERR] [sub] Error: ${data.error}\n`));
   });
 
-  // Hooks事件
   agent.on('hook_blocked', (data: any) => {
-    console.log(LAIN_COLORS.error(`[BLOCKED] ${data.tool} - ${data.reason}`));
+    outputToScroll(inputBox, LAIN_COLORS.error(`\n[BLOCKED] ${data.tool} - ${data.reason}\n`));
   });
 
   agent.on('hook_warning', (data: any) => {
-    console.log(LAIN_COLORS.warning(`[WARN] ${data.message}`));
+    outputToScroll(inputBox, LAIN_COLORS.warning(`\n[WARN] ${data.message}\n`));
   });
 
   agent.on('hook_log', (data: any) => {
-    console.log(LAIN_COLORS.muted(`[LOG] ${data.message}`));
+    outputToScroll(inputBox, LAIN_COLORS.muted(`\n[LOG] ${data.message}\n`));
   });
 
-  // Context compression event
   agent.on('context_compressed', (data: any) => {
-    console.log(LAIN_COLORS.secondary(`[COMPRESS] ${data.before} -> ${data.after} messages`));
+    outputToScroll(inputBox, LAIN_COLORS.secondary(`\n[COMPRESS] ${data.before} -> ${data.after} messages\n`));
   });
 }

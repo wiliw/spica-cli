@@ -29,6 +29,7 @@ import os from 'os';
 
 const program = new Command();
 const state = getRuntimeState();
+const ESC = '\x1b';
 
 // Ctrl+C中断处理
 let interruptCount = 0;
@@ -99,16 +100,18 @@ program
     try {
       await agent.init();
 
-      // 停止banner动画（在设置滚动区域之前）
+      // 停止banner动画
       BG.stopBanner();
       await bannerPromise;
 
-      // 自动加载历史（除非 --fresh）
+      // 清屏，准备设置滚动区域
+      process.stdout.write(`${ESC}[2J${ESC}[1;1H`);
+
+      // 自动加载历史
       if (!options.fresh) {
         const session = loadSession(process.cwd());
         if (session && session.messages && session.messages.length > 0) {
           agent.setMessages(session.messages);
-          process.stdout.write(LAIN_COLORS.muted(`Loaded ${session.messages.length} messages from history\n`));
         }
       }
 
@@ -116,7 +119,7 @@ program
       const tuiHandler = new TUIInputHandler();
       tuiHandler.start();
 
-      // 显示状态栏（在输入框上方）
+      // 显示状态栏
       tuiHandler.getInputBox().showStatus(`${providerConfig.model} | strict`);
 
       // 启用 rawMode
@@ -458,29 +461,29 @@ program
         isProcessing = true;
         state.setProcessing(true);
 
-        // 显示处理状态
-        process.stdout.write(LAIN_COLORS.primary('Processing... (ESC ESC to interrupt)\n'));
+        // 移到输出区显示处理状态
+        tuiHandler.getInputBox().moveToScrollArea();
+        process.stdout.write(LAIN_COLORS.primary('\nProcessing... (ESC ESC to interrupt)\n'));
 
         try {
           await agent.runLoop(trimmed);
-          // 如果还在 stream 状态，结束它
           if (state.isStreamingOutput()) {
             state.setStreamingOutput(false);
             process.stdout.write('\n');
           }
-          console.log(LAIN_COLORS.success('\n[OK] Done\n'));
+          process.stdout.write(LAIN_COLORS.success('\n[OK] Done\n'));
         } catch (error: any) {
           if (state.isStreamingOutput()) {
             state.setStreamingOutput(false);
             process.stdout.write('\n');
           }
-          console.log(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
+          process.stdout.write(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
         }
         isProcessing = false;
         state.setProcessing(false);
         saveSession(process.cwd(), agent.getMessages());
         await processQueue(agent);
-        displayStatusLine();  // 只在完成时显示一次
+        // 重绘输入框
         tuiHandler.getInputBox().render();
       };
 
