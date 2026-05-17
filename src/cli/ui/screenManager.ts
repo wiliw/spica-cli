@@ -22,13 +22,17 @@ export class ScreenManager {
   constructor() {
     const height = process.stdout.rows || 24;
     const width = process.stdout.columns || 80;
+    // 滚动区域：行1 到 height-2（保留最后1行给输入框）
+    const scrollBottom = height - 2;
+    const inputRow = height - 1;  // 输入框在最后一行
+
     this.state = {
       inputBuffer: [''],
       cursorCol: 0,
       terminalHeight: height,
       terminalWidth: width,
-      inputRow: height,
-      scrollBottom: height - 1,
+      inputRow: inputRow,
+      scrollBottom: scrollBottom,
       completer: null,
       shownCompletionList: false,
       lastCompletionLine: '',
@@ -37,8 +41,9 @@ export class ScreenManager {
   }
 
   start(): void {
-    // 设置滚动区域：1 到 height-1
+    // 设置滚动区域：1 到 scrollBottom
     fs.writeSync(1, `${ESC}[1;${this.state.scrollBottom}r`);
+    // 清屏
     fs.writeSync(1, `${ESC}[2J${ESC}[1;1H`);
     this.refreshInput();
   }
