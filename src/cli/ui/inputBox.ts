@@ -60,21 +60,29 @@ export class InputBox {
 
   // 渲染固定区域（状态栏、分隔线、输入框）
   renderFixedArea(): void {
-    // 清除并写入状态栏
+    // 清除状态栏
     process.stdout.write(`${ESC}[${this.statusRow};1H${ESC}[2K`);
 
     // 清除并写入分隔线
     process.stdout.write(`${ESC}[${this.separatorRow};1H${ESC}[2K`);
     process.stdout.write(LAIN_COLORS.muted('─'.repeat(this.terminalWidth)));
 
-    // 清除并写入输入区
+    // 输入区
     process.stdout.write(`${ESC}[${this.inputRow};1H${ESC}[2K`);
-    const displayContent = this.buffer.join('\n').slice(-this.terminalWidth + 3);  // 限制宽度
+    const fullContent = this.buffer[this.cursorRow] || '';
+    const maxDisplay = this.terminalWidth - 3;  // 减去 "> " 的宽度
+    const displayContent = fullContent.slice(-maxDisplay);  // 显示末尾部分
     process.stdout.write(LAIN_COLORS.primary('> ') + displayContent);
 
-    // 光标定位到输入位置
-    const cursorDisplayCol = Math.min(this.cursorCol, this.terminalWidth - 4);
-    process.stdout.write(`${ESC}[${this.inputRow};${cursorDisplayCol + 3}H`);
+    // 光标位置：在显示内容的末尾
+    // 如果内容被截断，光标在最右边
+    const cursorColInDisplay = Math.min(this.cursorCol, maxDisplay);
+    // 如果光标在截断部分之前，计算相对位置
+    const actualCursorCol = fullContent.length > maxDisplay
+      ? maxDisplay  // 内容被截断，光标在末尾
+      : this.cursorCol;  // 内容未截断，光标在原位置
+
+    process.stdout.write(`${ESC}[${this.inputRow};${actualCursorCol + 3}H`);
   }
 
   // 显示状态
