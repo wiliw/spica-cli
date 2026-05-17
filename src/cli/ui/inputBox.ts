@@ -1,41 +1,28 @@
-// Input Box - 正确使用滚动区域
+// Input Box - 正确使用滚动区域，支持多行输入
 
 import { LAIN_COLORS } from './colors';
+import { getOutputCoordinator } from './outputCoordinator';
 
 const ESC = '\x1b';
 
 export class InputBox {
-  private buffer: string[] = [''];
+  private buffer: string[] = [''];  // 多行缓冲
   private cursorRow: number = 0;
   private cursorCol: number = 0;
-  private maxInputRows: number = 2;
-  private statusRow: number = 0;    // 状态栏行
-  private separatorRow: number = 0; // 分隔线行
-  private inputRow: number = 0;     // 输入行
-  private scrollBottom: number = 0; // 滚动区域底部
+  private statusRow: number = 0;
+  private separatorRow: number = 0;
+  private inputStartRow: number = 0;  // 输入区起始行
+  private maxInputRows: number = 3;   // 最大显示3行
+  private scrollBottom: number = 0;
   private terminalHeight: number = 24;
   private terminalWidth: number = 80;
   private completer: ((line: string) => string[]) | null = null;
   private shownCompletionList: boolean = false;
   private lastCompletionLine: string = '';
-  private outputLock: boolean = false;  // 输出锁：流式输出时禁止渲染输入框
+  private coordinator = getOutputCoordinator();
 
   constructor() {
     this.updateTerminalSize();
-  }
-
-  // 设置/释放输出锁
-  setOutputLock(locked: boolean): void {
-    this.outputLock = locked;
-  }
-
-  isOutputLocked(): boolean {
-    return this.outputLock;
-  }
-
-  // 设置补全函数
-  setCompleter(completer: (line: string) => string[]): void {
-    this.completer = completer;
   }
 
   private updateTerminalSize(): void {
@@ -43,37 +30,41 @@ export class InputBox {
     this.terminalWidth = process.stdout.columns || 80;
 
     // 计算位置（从底部往上）
-    // 底部3行：状态栏、分隔线、输入区
-    this.statusRow = this.terminalHeight - 2;
-    this.separatorRow = this.terminalHeight - 1;
-    this.inputRow = this.terminalHeight;  // 最底部
-    this.scrollBottom = this.terminalHeight - 3;  // 滚动区域底部
+    // 底部区域：状态栏(1行) + 分隔线(1行) + 输入区(maxInputRows行)
+    this.statusRow = this.terminalHeight - this.maxInputRows - 2;
+    this.separatorRow = this.terminalHeight - this.maxInputRows - 1;
+    this.inputStartRow = this.terminalHeight - this.maxInputRows;
+    this.scrollBottom = this.statusRow - 1;  // 滚动区域底部在状态栏上方
+  }
+
+  // 设置补全函数
+  setCompleter(completer: (line: string) => string[]): void {
+    this.completer = completer;
   }
 
   // 启动：设置滚动区域
   start(): void {
     this.updateTerminalSize();
 
-    // 1. 设置滚动区域（行1 到 scrollBottom）
-    process.stdout.write(`${ESC}[1;${this.scrollBottom}r`);
+    // 设置滚动区域（行1 到 scrollBottom）
+    this.coordinator.write(`${ESC}[1;${this.scrollBottom}r`);
 
-    // 2. 清除屏幕并移到滚动区域顶部
-    process.stdout.write(`${ESC}[2J${ESC}[1;1H`);
+    // 清除屏幕并移到滚动区域顶部
+    this.coordinator.write(`${ESC}[2J${ESC}[1;1H`);
 
-    // 3. 初始渲染输入区
+    // 初始渲染输入区
     this.renderFixedArea();
   }
 
   // 结束：重置滚动区域
   end(): void {
-    process.stdout.write(`${ESC}[r`);  // 重置为全屏滚动
-    process.stdout.write(`${ESC}[2J${ESC}[1;1H`);  // 清屏
+    this.coordinator.write(`${ESC}[r`);  // 重置为全屏滚动
+    this.coordinator.write(`${ESC}[2J${ESC}[1;1H`);  // 清屏
   }
 
   // 移动光标到滚动区域底部（准备输出）
   moveToScrollArea(): void {
-    // 光标移到滚动区域最后一行
-    process.stdout.write(`${ESC}[${this.scrollBottom};1H`);
+    this.coordinator.write(`${ESC}[${this.scrollBottom};1H`);
   }
 
   // 计算字符串的显示宽度（中文=2，英文=1）
@@ -92,60 +83,101 @@ export class InputBox {
     return width;
   }
 
-  // 渲染固定区域（状态栏、分隔线、输入框）
+  // 渲染固定区域（状态栏、分隔线、多行输入框）
   renderFixedArea(): void {
-    // 清除状态栏
-    process.stdout.write(`${ESC}[${this.statusRow};1H${ESC}[2K`);
+    let output = '';
 
-    // 清除并写入分隔线
-    process.stdout.write(`${ESC}[${this.separatorRow};1H${ESC}[2K`);
-    process.stdout.write(LAIN_COLORS.muted('─'.repeat(this.terminalWidth)));
+    // 清除并渲染状态栏
+    output += `${ESC}[${this.statusRow};1H${ESC}[2K`;
 
-    // 输入区
-    process.stdout.write(`${ESC}[${this.inputRow};1H${ESC}[2K`);
-    const fullContent = this.buffer[this.cursorRow] || '';
-    const maxDisplayWidth = this.terminalWidth - 3;  // 减去 "> " 的宽度
+    // 清除并渲染分隔线
+    output += `${ESC}[${this.separatorRow};1H${ESC}[2K`;
+    output += LAIN_COLORS.muted('─'.repeat(this.terminalWidth));
 
-    // 从末尾截取，保证显示宽度不超限
-    let displayContent = '';
-    let displayWidth = 0;
-    for (let i = fullContent.length - 1; i >= 0 && displayWidth < maxDisplayWidth; i--) {
-      const charWidth = this.getStringWidth(fullContent[i]);
-      if (displayWidth + charWidth <= maxDisplayWidth) {
-        displayContent = fullContent[i] + displayContent;
-        displayWidth += charWidth;
-      } else {
-        break;
+    // 清除输入区所有行
+    for (let i = 0; i < this.maxInputRows; i++) {
+      output += `${ESC}[${this.inputStartRow + i};1H${ESC}[2K`;
+    }
+
+    // 计算所有行的显示内容（每行最多 terminalWidth - 2 个字符宽度）
+    const maxLineWidth = this.terminalWidth - 2;
+    const displayLines: string[] = [];
+
+    // 将 buffer 内容按显示宽度分割成显示行
+    for (const bufLine of this.buffer) {
+      let remaining = bufLine;
+      while (remaining.length > 0) {
+        let lineContent = '';
+        let lineWidth = 0;
+        for (const char of remaining) {
+          const charWidth = this.getStringWidth(char);
+          if (lineWidth + charWidth > maxLineWidth) break;
+          lineContent += char;
+          lineWidth += charWidth;
+        }
+        displayLines.push(lineContent);
+        remaining = remaining.slice(lineContent.length);
       }
     }
 
-    process.stdout.write(LAIN_COLORS.primary('> ') + displayContent);
+    // 只显示最后 maxInputRows 行（确保当前输入可见）
+    const startDisplay = Math.max(0, displayLines.length - this.maxInputRows);
+    for (let i = 0; i < this.maxInputRows && startDisplay + i < displayLines.length; i++) {
+      output += `${ESC}[${this.inputStartRow + i};1H`;
+      output += displayLines[startDisplay + i];
+    }
 
-    // 光标位置：计算光标前内容的显示宽度
-    const contentBeforeCursor = fullContent.slice(0, this.cursorCol);
-    const cursorDisplayWidth = this.getStringWidth(contentBeforeCursor);
+    // 计算光标显示位置
+    // 需要计算光标所在行之前的所有显示行数量
+    let displayLinesBeforeCursorRow = 0;
+    for (let r = 0; r < this.cursorRow; r++) {
+      const bufLine = this.buffer[r] || '';
+      let remaining = bufLine;
+      while (remaining.length > 0) {
+        let lineWidth = 0;
+        let charCount = 0;
+        for (const char of remaining) {
+          const cw = this.getStringWidth(char);
+          if (lineWidth + cw > maxLineWidth) break;
+          lineWidth += cw;
+          charCount++;
+        }
+        displayLinesBeforeCursorRow++;
+        remaining = remaining.slice(charCount);
+      }
+    }
 
-    // 如果内容被截断（光标在截断部分），光标在显示末尾
-    const actualCursorCol = fullContent.length > displayContent.length
-      ? displayWidth  // 内容被截断，光标在末尾
-      : cursorDisplayWidth;  // 内容未截断，光标在原位置
+    // 计算当前行光标前的显示宽度，确定光标在哪一个显示行
+    const cursorLine = this.buffer[this.cursorRow] || '';
+    const beforeCursor = cursorLine.slice(0, this.cursorCol);
+    let cursorDisplayCol = this.getStringWidth(beforeCursor);
+    let cursorDisplayRowOffset = Math.floor(cursorDisplayCol / maxLineWidth);
+    cursorDisplayCol = cursorDisplayCol % maxLineWidth + 1;  // +1 因为列从1开始
 
-    process.stdout.write(`${ESC}[${this.inputRow};${actualCursorCol + 3}H`);
+    // 光标在输入区的绝对行号
+    const cursorAbsoluteDisplayRow = displayLinesBeforeCursorRow + cursorDisplayRowOffset;
+    const adjustedRow = Math.min(cursorAbsoluteDisplayRow, this.maxInputRows - 1);
+
+    output += `${ESC}[${this.inputStartRow + adjustedRow};${cursorDisplayCol + 1}H`;
+
+    // 通过协调器一次性输出
+    this.coordinator.write(output);
   }
 
   // 显示状态
   showStatus(status: string): void {
-    process.stdout.write(`${ESC}[${this.statusRow};1H${ESC}[2K`);
-    process.stdout.write(LAIN_COLORS.muted(status));
-    this.renderFixedArea();
+    this.coordinator.write(`${ESC}[${this.statusRow};1H${ESC}[2K`);
+    this.coordinator.write(LAIN_COLORS.muted(status));
   }
 
-  // 处理输入
+  // 处理输入（Enter发送，其他键正常处理）
   handleInput(data: string): boolean {
-    if (data === '\r' || data === '\n') {
+    // 单独 Enter 发送内容
+    if (data === '\r') {
       return true;
     }
 
+    // Backspace
     if (data === '\x7f' || data === '\b') {
       this.backspace();
       this.shownCompletionList = false;
@@ -158,27 +190,49 @@ export class InputBox {
       return false;
     }
 
+    // 方向键等 ANSI 序列
     if (data.startsWith(ESC)) {
       this.handleAnsi(data);
       return false;
     }
 
-    // 粘贴
+    // 粘贴（包含换行）
     if (data.includes(`${ESC}[200~`)) {
       this.handlePaste(data);
       this.shownCompletionList = false;
       return false;
     }
 
-    this.insert(data);
+    // 普通字符输入（包含换行符 \n 则插入换行）
+    if (data.includes('\n')) {
+      // 多行内容，逐行插入
+      const lines = data.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (i > 0) {
+          this.newLine();  // 插入新行
+        }
+        if (lines[i]) {
+          this.insert(lines[i]);
+        }
+      }
+    } else {
+      this.insert(data);
+    }
     this.shownCompletionList = false;
     return false;
   }
 
   private handleAnsi(seq: string): void {
-    if (seq === `${ESC}[A`) {  // 上
-      // 可扩展：历史记录
-    } else if (seq === `${ESC}[B`) {  // 下
+    if (seq === `${ESC}[A`) {  // 上箭头：移动到上一行
+      if (this.cursorRow > 0) {
+        this.cursorRow--;
+        this.cursorCol = Math.min(this.cursorCol, this.buffer[this.cursorRow].length);
+      }
+    } else if (seq === `${ESC}[B`) {  // 下箭头：移动到下一行
+      if (this.cursorRow < this.buffer.length - 1) {
+        this.cursorRow++;
+        this.cursorCol = Math.min(this.cursorCol, this.buffer[this.cursorRow].length);
+      }
     } else if (seq === `${ESC}[C`) {  // 右
       if (this.cursorCol < this.buffer[this.cursorRow].length) {
         this.cursorCol++;
@@ -192,6 +246,18 @@ export class InputBox {
     }
   }
 
+  // 插入新行
+  private newLine(): void {
+    const currentLine = this.buffer[this.cursorRow];
+    const beforeCursor = currentLine.slice(0, this.cursorCol);
+    const afterCursor = currentLine.slice(this.cursorCol);
+
+    this.buffer[this.cursorRow] = beforeCursor;
+    this.buffer.splice(this.cursorRow + 1, 0, afterCursor);
+    this.cursorRow++;
+    this.cursorCol = 0;
+  }
+
   // Tab 补全处理
   private handleTab(): void {
     const currentLine = this.buffer[this.cursorRow];
@@ -202,18 +268,15 @@ export class InputBox {
     const hits = this.completer(currentLine);
 
     if (hits.length === 1) {
-      // 只有一个匹配，直接补全
       const completion = hits[0].slice(currentLine.length);
       this.insert(completion);
       this.shownCompletionList = false;
       this.lastCompletionLine = hits[0];
     } else if (hits.length > 1) {
       if (!this.shownCompletionList || currentLine !== this.lastCompletionLine) {
-        // 第一次Tab：显示列表（在滚动区域）
+        // 第一次Tab：显示列表（通过协调器）
         this.moveToScrollArea();
-        process.stdout.write('\n');
-        hits.forEach(h => process.stdout.write(`${h}  `));
-        process.stdout.write('\n');
+        this.coordinator.write('\n' + hits.map(h => `${h}  `).join('') + '\n');
         this.shownCompletionList = true;
         this.lastCompletionLine = currentLine;
       } else {
@@ -233,7 +296,16 @@ export class InputBox {
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n');
     if (content.trim()) {
-      this.insert(content);
+      // 粘贴可能包含多行
+      const lines = content.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (i > 0) {
+          this.newLine();
+        }
+        if (lines[i]) {
+          this.insert(lines[i]);
+        }
+      }
     }
   }
 
@@ -248,6 +320,14 @@ export class InputBox {
       const line = this.buffer[this.cursorRow];
       this.buffer[this.cursorRow] = line.slice(0, this.cursorCol - 1) + line.slice(this.cursorCol);
       this.cursorCol--;
+    } else if (this.cursorRow > 0) {
+      // 当前行开头，删除到上一行末尾
+      const prevLine = this.buffer[this.cursorRow - 1];
+      const currLine = this.buffer[this.cursorRow];
+      this.buffer[this.cursorRow - 1] = prevLine + currLine;
+      this.buffer.splice(this.cursorRow, 1);
+      this.cursorRow--;
+      this.cursorCol = prevLine.length;
     }
   }
 
@@ -255,6 +335,11 @@ export class InputBox {
     const line = this.buffer[this.cursorRow];
     if (this.cursorCol < line.length) {
       this.buffer[this.cursorRow] = line.slice(0, this.cursorCol) + line.slice(this.cursorCol + 1);
+    } else if (this.cursorRow < this.buffer.length - 1) {
+      // 当前行末尾，合并下一行
+      const nextLine = this.buffer[this.cursorRow + 1];
+      this.buffer[this.cursorRow] = line + nextLine;
+      this.buffer.splice(this.cursorRow + 1, 1);
     }
   }
 
@@ -270,7 +355,6 @@ export class InputBox {
 
   // 渲染（只更新输入区）
   render(): void {
-    if (this.outputLock) return;  // 输出锁定时不渲染
     this.renderFixedArea();
   }
 }

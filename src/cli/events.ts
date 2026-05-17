@@ -3,8 +3,11 @@
 import { SpicaAgent } from '../agent';
 import { InputBox } from './ui/inputBox';
 import { LAIN_COLORS, format } from './ui/colors';
+import { getOutputCoordinator } from './ui/outputCoordinator';
 import prompts from 'prompts';
 import { getRuntimeState } from '../core/RuntimeState';
+
+const coordinator = getOutputCoordinator();
 
 // 格式化工具参数（简洁显示）
 function formatArgs(args: Record<string, any>): string {
@@ -30,8 +33,7 @@ function formatArgs(args: Record<string, any>): string {
 // 输出到滚动区域（不干扰输入框）
 function outputToScroll(inputBox: InputBox | null, text: string): void {
   inputBox?.moveToScrollArea();
-  process.stdout.write(text);
-  inputBox?.render();
+  coordinator.write(text);
 }
 
 export function setupAgentEvents(
@@ -51,57 +53,49 @@ export function setupAgentEvents(
   agent.on('stream', (data: any) => {
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
-      inputBox?.setOutputLock(true);  // 锁定输入框渲染
-      // 只在开始时定位到滚动区域
       inputBox?.moveToScrollArea();
     }
-    // 不再每次都 moveToScrollArea()，直接追加内容
     if (lastWasReasoning) {
-      process.stdout.write('\n');
+      coordinator.write('\n');
       lastWasReasoning = false;
     }
-    process.stdout.write(LAIN_COLORS.primary(data.chunk));
+    coordinator.write(LAIN_COLORS.primary(data.chunk));
   });
 
   agent.on('reasoning', (data: any) => {
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
-      inputBox?.setOutputLock(true);
       inputBox?.moveToScrollArea();
     }
-    // 不再每次定位
-    process.stderr.write(LAIN_COLORS.reasoning(data.content));
+    coordinator.write(LAIN_COLORS.reasoning(data.content));
     lastWasReasoning = true;
   });
 
   agent.on('tool_call', (data: any) => {
     state.setStreamingOutput(false);
-    inputBox?.setOutputLock(false);  // 释放锁，允许渲染
     inputBox?.moveToScrollArea();
     if (lastWasReasoning) {
-      process.stdout.write('\n');
+      coordinator.write('\n');
       lastWasReasoning = false;
     }
     const argsStr = formatArgs(data.arguments);
-    process.stdout.write(LAIN_COLORS.tool(`\n-> ${data.name}${argsStr ? ` ${argsStr}` : ''}\n`));
+    coordinator.write(LAIN_COLORS.tool(`\n-> ${data.name}${argsStr ? ` ${argsStr}` : ''}\n`));
   });
 
   agent.on('tool_result', (data: any) => {
     state.setStreamingOutput(false);
-    inputBox?.setOutputLock(false);  // 释放锁
     inputBox?.moveToScrollArea();
     const icon = data.success ? LAIN_COLORS.success('[OK]') : LAIN_COLORS.error('[ERR]');
     const output = data.output || data.error || '';
 
     if (data.diff) {
-      process.stdout.write(`${icon} ${data.name}\n${data.diff}\n`);
+      coordinator.write(`${icon} ${data.name}\n${data.diff}\n`);
     } else if (output) {
       const firstLine = output.split('\n')[0].slice(0, 80);
-      process.stdout.write(`${icon} ${data.name}: ${firstLine}${firstLine.length >= 80 ? '...' : ''}\n`);
+      coordinator.write(`${icon} ${data.name}: ${firstLine}${firstLine.length >= 80 ? '...' : ''}\n`);
     } else {
-      process.stdout.write(`${icon} ${data.name}\n`);
+      coordinator.write(`${icon} ${data.name}\n`);
     }
-    inputBox?.render();
   });
 
   agent.on('permission_request', async (data: any) => {
@@ -113,14 +107,14 @@ export function setupAgentEvents(
 
     let approved = false;
     try {
-      process.stdout.write(format.permissionBox(data.reason));
+      coordinator.write(format.permissionBox(data.reason));
       const answer = await prompts({
         type: 'confirm',
         name: 'approve',
         message: LAIN_COLORS.primary.bold('Do you want to allow this action?'),
         initial: false,
       });
-      process.stdout.write(LAIN_COLORS.permissionBorder('═'.repeat(50)) + '\n');
+      coordinator.write(LAIN_COLORS.permissionBorder('═'.repeat(50)) + '\n');
       approved = answer.approve;
     } catch (e) {
       approved = false;

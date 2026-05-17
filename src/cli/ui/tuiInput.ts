@@ -2,6 +2,7 @@
 
 import { LAIN_COLORS } from './colors';
 import { InputBox } from './inputBox';
+import { getOutputCoordinator } from './outputCoordinator';
 
 const ESC = '\x1b';
 
@@ -16,6 +17,7 @@ export class TUIInputHandler {
   private inputBox: InputBox;
   private lastEscTime: number = 0;
   private interruptCount: number = 0;
+  private coordinator = getOutputCoordinator();
 
   constructor() {
     this.inputBox = new InputBox();
