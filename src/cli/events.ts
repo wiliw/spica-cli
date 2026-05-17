@@ -1,7 +1,7 @@
 // Agent事件监听 - 与UI的桥梁
 
 import { SpicaAgent } from '../agent';
-import * as readline from 'readline';
+import { InputBox } from './ui/inputBox';
 import { LAIN_COLORS, format } from './ui/colors';
 import prompts from 'prompts';
 import { getRuntimeState } from '../core/RuntimeState';
@@ -31,7 +31,7 @@ function formatArgs(args: Record<string, any>): string {
 
 export function setupAgentEvents(
   agent: SpicaAgent,
-  rl: readline.Interface | null,
+  inputBox: InputBox | null,
   interactive: boolean = false
 ): void {
   const state = getRuntimeState();
@@ -40,94 +40,73 @@ export function setupAgentEvents(
   // 连接错误事件（只显示一次简洁信息）
   agent.on('connection_error', (data: any) => {
     state.setConnectionErrorShown(true);
-    console.log(LAIN_COLORS.error(`\n[ERR] ${data.type}: ${data.hint}`));
-    console.log('');
+    inputBox?.moveToOutputArea();
+    process.stdout.write(LAIN_COLORS.error(`\n[ERR] ${data.type}: ${data.hint}\n`));
   });
 
-  // 恢复输入行的辅助函数
-  const restoreInputLine = () => {
-    if (rl) {
-      process.stdout.write('\n> ' + (rl.line || ''));
-    }
-  };
-
   agent.on('stream', (data: any) => {
-    // 开始输出时清除输入行（只做一次）
+    // 输出到输出区
+    inputBox?.moveToOutputArea();
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
-      const esc = '\x1b';
-      process.stdout.write(esc + '[2K' + esc + '[1G');
     }
     if (lastWasReasoning) {
       process.stdout.write('\n');
       lastWasReasoning = false;
     }
-    // 直接输出，不要每次都恢复
     process.stdout.write(LAIN_COLORS.primary(data.chunk));
   });
 
   agent.on('reasoning', (data: any) => {
+    inputBox?.moveToOutputArea();
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
-      const esc = '\x1b';
-      process.stdout.write(esc + '[2K' + esc + '[1G');
     }
     process.stderr.write(LAIN_COLORS.reasoning(data.content));
     lastWasReasoning = true;
   });
 
   agent.on('tool_call', (data: any) => {
-    // 强制结束stream状态
     state.setStreamingOutput(false);
+    inputBox?.moveToOutputArea();
     if (lastWasReasoning) {
       process.stdout.write('\n');
       lastWasReasoning = false;
     }
-    // 清除当前行，确保工具调用显示清晰
-    process.stdout.write('\x1b[2K\x1b[1G');
-    // 显示工具调用
     const argsStr = formatArgs(data.arguments);
-    console.log(LAIN_COLORS.tool(`\n-> ${data.name}${argsStr ? ` ${argsStr}` : ''}`));
+    process.stdout.write(LAIN_COLORS.tool(`\n-> ${data.name}${argsStr ? ` ${argsStr}` : ''}\n`));
   });
 
   agent.on('tool_result', (data: any) => {
-    // 强制结束stream状态
     state.setStreamingOutput(false);
+    inputBox?.moveToOutputArea();
     const icon = data.success ? LAIN_COLORS.success('[OK]') : LAIN_COLORS.error('[ERR]');
     const output = data.output || data.error || '';
 
-    // 显示结果（简洁）
     if (data.diff) {
-      console.log(`${icon} ${data.name}`);
-      console.log(data.diff);
+      process.stdout.write(`${icon} ${data.name}\n`);
+      process.stdout.write(data.diff + '\n');
     } else if (output) {
       const firstLine = output.split('\n')[0].slice(0, 80);
-      console.log(`${icon} ${data.name}: ${firstLine}${output.split('\n')[0].length >= 80 ? '...' : ''}`);
+      process.stdout.write(`${icon} ${data.name}: ${firstLine}${output.split('\n')[0].length >= 80 ? '...' : ''}\n`);
     } else {
-      console.log(`${icon} ${data.name}`);
+      process.stdout.write(`${icon} ${data.name}\n`);
     }
   });
 
-  // diff_preview 不再单独处理，在 tool_result 中统一显示
-
   agent.on('permission_request', async (data: any) => {
-    // 暂停 readline 和 raw mode，让 prompts 正常工作
-    // 同时需要暂停 stdin 监听器（在 index.ts 中注册），避免拦截输入
-    if (rl) {
-      rl.pause();
-      if (process.stdin.isTTY) {
-        process.stdin.setRawMode(false);
-      }
-      // 通知 RuntimeState 进入 permission 模式，stdin 监听器会检查此状态
+    // 暂停 raw mode，让 prompts 正常工作
+    if (inputBox && process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
       state.setPermissionDialogActive(true);
-      // 清除当前输入行显示
-      process.stdout.write('\x1b[2K\x1b[1G');
+      // 清除输入区
+      inputBox.moveToOutputArea();
+      process.stdout.write('\n');
     }
 
     let approved = false;
     try {
-      // Lain红色警示框
-      console.log(format.permissionBox(data.reason));
+      process.stdout.write(format.permissionBox(data.reason));
       const answer = await prompts({
         type: 'confirm',
         name: 'approve',
@@ -141,18 +120,10 @@ export function setupAgentEvents(
       approved = false;
     } finally {
       // 确保总是恢复状态
-      if (rl) {
-        // 先退出 permission 模式，再恢复 rawMode
-        state.setPermissionDialogActive(false);
-        if (process.stdin.isTTY) {
-          process.stdin.setRawMode(true);
-        }
-        rl.resume();
-        // 清除 readline 输入缓冲区：使用 Ctrl+U 清除当前行
-        rl.write(null, { ctrl: true, name: 'u' });
-        // 清除残留输出，重绘空输入行
-        process.stdout.write('\x1b[2K\x1b[1G');
-        process.stdout.write('> ');
+      state.setPermissionDialogActive(false);
+      if (inputBox && process.stdin.isTTY) {
+        process.stdin.setRawMode(true);
+        inputBox.render();
       }
     }
 

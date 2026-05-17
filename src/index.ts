@@ -17,6 +17,7 @@ import { runInit } from './cli/init';
 import { getMCPManager, generateExampleConfig, shutdownMCP } from './mcp/client';
 import { LAIN_COLORS, format, BG } from './cli/ui/colors';
 import { getInputQueue, clearInputQueue } from './cli/ui/queue';
+import { TUIInputHandler } from './cli/ui/tuiInput';
 import { setupAgentEvents } from './cli/events';
 import { displayStatusLine } from './cli/status';
 import { getRuntimeState, resetRuntimeState } from './core/RuntimeState';
@@ -111,212 +112,71 @@ program
         }
       }
 
-      console.log(LAIN_COLORS.muted(`${providerConfig.model} | /h help | TAB complete | ESC ESC interrupt`));
+      console.log(LAIN_COLORS.muted(`${providerConfig.model} | /h help | ESC ESC interrupt`));
 
-      // 启用 Bracketed Paste Mode（粘贴内容作为整体到达）
-      const ESC = '\x1b';
-      process.stdout.write(`${ESC}[?2004h`);
+      // 启用 TUI 模式
+      const tuiHandler = new TUIInputHandler();
+      tuiHandler.start();
 
-      // 先启用 rawMode（在 readline 创建之前）
+      // 先启用 rawMode
       if (process.stdin.isTTY) {
         process.stdin.setRawMode(true);
       }
 
-      // 粘贴处理变量
-      let pasteBuffer = '';
-      let isInPaste = false;
-
-      // stdin data 监听 - 检测粘贴序列和ESC（在 readline 之前注册）
-      process.stdin.on('data', (chunk: Buffer) => {
-        // 如果权限对话框激活，跳过所有处理，让 prompts 正常接收输入
-        if (state.isPermissionDialogActive()) {
-          return;
-        }
-
-        const str = chunk.toString('utf8');
-
-        // 检测ESC键（用于中断）
-        if (str === '\x1b') {
-          const now = Date.now();
-          if (now - lastEscTime < 500) {
-            if (isProcessing && state.getAgent()) {
-              state.getAgent().interrupt();
-              isProcessing = false;
-              state.setProcessing(false);
-              console.log(LAIN_COLORS.warning('\n[INTERRUPTED] ESC'));
-              rl.prompt();
-            }
-            lastEscTime = 0;
-          } else {
-            lastEscTime = now;
-          }
-          return;
-        }
-
-        // 检测粘贴开始 \x1b[200~
-        if (str.includes('\x1b[200~')) {
-          isInPaste = true;
-          pasteBuffer = '';
-          const idx = str.indexOf('\x1b[200~');
-          const after = str.slice(idx + 6);
-          if (after.includes('\x1b[201~')) {
-            const endIdx = after.indexOf('\x1b[201~');
-            pasteBuffer = after.slice(0, endIdx);
-            isInPaste = false;
-            const content = pasteBuffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-            if (content.trim()) {
-              const lines = content.split('\n');
-              const chars = content.length;
-              // 写入 readline 输入缓冲区
-              rl.write(content);
-              // 显示粘贴信息（在同一行开头）
-              process.stdout.write('\x1b[2K\x1b[1G');
-              process.stdout.write(LAIN_COLORS.muted(`[PASTE] ${chars} chars, ${lines.length} lines > `));
-              process.stdout.write(content);
-            }
-            pasteBuffer = '';
-          } else {
-            pasteBuffer = after;
-          }
-          return;
-        }
-
-        // 检测粘贴结束 \x1b[201~
-        if (str.includes('\x1b[201~') && isInPaste) {
-          const idx = str.indexOf('\x1b[201~');
-          pasteBuffer += str.slice(0, idx);
-          isInPaste = false;
-          const content = pasteBuffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-          if (content.trim()) {
-            const lines = content.split('\n');
-            const chars = content.length;
-            // 写入 readline 输入缓冲区
-            rl.write(content);
-            // 显示粘贴信息
-            process.stdout.write('\x1b[2K\x1b[1G');
-            process.stdout.write(LAIN_COLORS.muted(`[PASTE] ${chars} chars, ${lines.length} lines > `));
-            process.stdout.write(content);
-          }
-          pasteBuffer = '';
-          return;
-        }
-
-        // 累积粘贴内容
-        if (isInPaste) {
-          pasteBuffer += str;
-          return;
-        }
-
-        // 备用粘贴检测：一次性收到多行（Bracketed Paste Mode 未生效时）
-        if (str.includes('\n') && str.trim() && !isInPaste) {
-          const lines = str.split('\n').filter(l => l.trim());
-          if (lines.length > 1) {
-            // 多行一次性到达，视为粘贴
-            const content = lines.join('\n');
-            const chars = content.length;
-            rl.write(content);
-            process.stdout.write('\x1b[2K\x1b[1G');
-            process.stdout.write(LAIN_COLORS.muted(`[PASTE] ${chars} chars, ${lines.length} lines > `));
-            process.stdout.write(content);
-            return;
-          }
-        }
-      });
-
-      // Tab补全状态
-      let lastLine = '';
-      let shownList = false;
-
-      // 可用指令列表（用于 Tab 补全） - 基础命令
-      const BASE_COMMANDS = [
-        '/help', '/h', '/status', '/bypass', '/strict',
-        '/queue', '/q', '/undo', '/clear', '/reset',
-        '/skills', '/skill-add', '/skill-remove', '/skill-edit',
-        '/history', '/compact', '/init',
-      ];
-
-      // 动态获取完整命令列表（包含skills）
-      const getCommands = () => {
-        const skills = listSkills(process.cwd());
-        const skillCommands = skills.map(s => `/${s.name}`);
-        return [...BASE_COMMANDS, ...skillCommands];
-      };
-
-      // Tab 补全 - Shell风格
-      const completer = (line: string): [string[], string] => {
-        return [[], line];
-      };
-
-      // 非阻塞 REPL 循环
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-        completer,
-      });
-
-      // 监听 Tab 键 - Shell风格补全
-      readline.emitKeypressEvents(process.stdin, rl);
-
-      // 先定义isProcessing，供keypress事件使用
       let isProcessing = false;
       let shouldExit = false;
 
-      // ESC双击中断
-      let lastEscTime = 0;
+      // stdin 监听 - 使用 TUIInputHandler
+      process.stdin.on('data', (chunk: Buffer) => {
+        const result = tuiHandler.handleStdin(chunk.toString('utf8'), state.isPermissionDialogActive());
 
-      process.stdin.on('keypress', (char: string, key: readline.Key) => {
-        // 粘贴时不处理 keypress
-        if (isInPaste) return;
-
-        // Tab补全
-        if (key.name === 'tab') {
-          const currentLine = rl.line;
-          if (currentLine.startsWith('/')) {
-            const hits = getCommands().filter(c => c.startsWith(currentLine));
-
-            if (hits.length === 1) {
-              // 只有一个匹配，直接补全
-              rl.write(hits[0].slice(currentLine.length));
-              shownList = false;
-              lastLine = hits[0];
-            } else if (hits.length > 1) {
-              // 多个匹配
-              if (!shownList || currentLine !== lastLine) {
-                // 第一次Tab：显示列表
-                process.stdout.write('\n');
-                hits.forEach(h => process.stdout.write(`${h}  `));
-                process.stdout.write('\n> ' + currentLine);
-                shownList = true;
-                lastLine = currentLine;
-              } else {
-                // 第二次Tab：补全第一个
-                rl.write(hits[0].slice(currentLine.length));
-                shownList = false;
-                lastLine = hits[0];
-              }
-            }
+        // ESC ESC 中断
+        if (result.isInterrupt) {
+          if (state.getAgent()) {
+            state.getAgent().interrupt();
+            isProcessing = false;
+            state.setProcessing(false);
+            tuiHandler.showInterrupted();
           }
-        } else if (key.name !== 'return' && key.name !== 'enter') {
-          // 其他按键重置状态
-          shownList = false;
-          lastLine = '';
+          return;
+        }
+
+        // 退出
+        if (result.shouldExit) {
+          shouldExit = true;
+          tuiHandler.end();
+          console.log(LAIN_COLORS.error('\n[FORCE EXIT]'));
+          process.exit(0);
+          return;
+        }
+
+        // 处理输入
+        if (result.shouldProcess && result.content.trim()) {
+          handleInput(result.content.trim());
         }
       });
 
-      // 设置agent事件监听（需要rl来恢复输入行）
-      setupAgentEvents(agent, rl, true);
+      // 设置agent事件监听
+      setupAgentEvents(agent, tuiHandler.getInputBox(), true);
 
       // 输入处理函数
       const handleInput = async (line: string) => {
         const trimmed = line.trim();
 
-        // quit/exit 命令始终有效（即使正在处理）
+        // quit/exit 命令始终有效
         if (trimmed === 'quit' || trimmed === 'exit') {
           shouldExit = true;
           if (isProcessing && state.getAgent()) {
             state.getAgent().interrupt();
           }
-          rl.close();
+          tuiHandler.end();
+          const messages = agent.getMessages();
+          saveSession(process.cwd(), messages);
+          await shutdownMCP();
+          state.setAgent(null);
+          tuiHandler.printOutput(LAIN_COLORS.muted(`\nSession saved (${messages.length} messages)`));
+          tuiHandler.printOutput(LAIN_COLORS.muted('Goodbye!\n'));
+          process.exit(0);
           return;
         }
 
@@ -325,19 +185,19 @@ program
           const queue = getInputQueue();
           queue.add(trimmed);
           const status = queue.getStatus();
-          console.log(LAIN_COLORS.muted(`[QUEUE] Added (${status.pending} pending)`));
-          rl.prompt();
+          tuiHandler.printOutput(LAIN_COLORS.muted(`[QUEUE] Added (${status.pending} pending)\n`));
+          tuiHandler.getInputBox().render();
           return;
         }
 
         if (!trimmed) {
-          rl.prompt();
+          tuiHandler.getInputBox().render();
           return;
         }
 
         if (trimmed === 'help') {
           showHelp();
-          rl.prompt();
+          tuiHandler.getInputBox().render();
           return;
         }
 
@@ -358,7 +218,7 @@ program
               });
             }
             console.log('');
-            rl.prompt();
+            tuiHandler.getInputBox().render();
             return;
           }
 
@@ -370,7 +230,7 @@ program
             } else {
               console.log(LAIN_COLORS.muted('[QUEUE] No pending inputs'));
             }
-            rl.prompt();
+            tuiHandler.getInputBox().render();
             return;
           }
 
@@ -378,7 +238,7 @@ program
             agent.setMessages([]);
             clearInputQueue();
             console.log(LAIN_COLORS.muted('[OK] Session cleared'));
-            rl.prompt();
+            tuiHandler.getInputBox().render();
             return;
           }
 
@@ -386,13 +246,13 @@ program
           if (cmd === 'bypass') {
             agent.setBypassPermissions(true);
             state.setBypassMode(true);
-            rl.prompt();
+            tuiHandler.getInputBox().render();
             return;
           }
           if (cmd === 'strict') {
             agent.setBypassPermissions(false);
             state.setBypassMode(false);
-            rl.prompt();
+            tuiHandler.getInputBox().render();
             return;
           }
 
@@ -408,7 +268,7 @@ program
             console.log(`  Queue: ${queueStatus.pending} pending`);
             console.log(`  Workspace: ${agent.getWorkspacePath()}`);
             console.log('');
-            rl.prompt();
+            tuiHandler.getInputBox().render();
             return;
           }
 
@@ -427,14 +287,14 @@ program
               });
             }
             console.log('');
-            rl.prompt();
+            tuiHandler.getInputBox().render();
             return;
           }
 
           // 帮助
           if (cmd === 'help' || cmd === 'h') {
             showHelp();
-            rl.prompt();
+            tuiHandler.getInputBox().render();
             return;
           }
 
@@ -458,7 +318,7 @@ program
               console.log(LAIN_COLORS.muted(`\n  Total: ${msgs.length} messages`));
             }
             console.log('');
-            rl.prompt();
+            tuiHandler.getInputBox().render();
             return;
           }
 
@@ -473,7 +333,7 @@ program
             BG.stopCompress();
             await spinnerPromise;
             console.log(LAIN_COLORS.secondary(`[COMPRESS] ${before} → ${after} messages`));
-            rl.prompt();
+            tuiHandler.getInputBox().render();
             return;
           }
 
@@ -507,14 +367,14 @@ program
             const skillName = parts[0];
             if (!skillName) {
               console.log(LAIN_COLORS.warning('Usage: /skill-add <name> [promptTemplate]'));
-              rl.prompt();
+              tuiHandler.getInputBox().render();
               return;
             }
             const promptTemplate = parts.slice(1).join(' ') || '{input}';
             const description = `Custom skill: ${skillName}`;
             await saveSkill(skillName, { name: skillName, description, promptTemplate });
             console.log(LAIN_COLORS.success(`[OK] Skill added: ${skillName}`));
-            rl.prompt();
+            tuiHandler.getInputBox().render();
             return;
           }
 
@@ -522,7 +382,7 @@ program
             const skillName = cmd.slice('skill-remove '.length).trim();
             if (!skillName) {
               console.log(LAIN_COLORS.warning('Usage: /skill-remove <name>'));
-              rl.prompt();
+              tuiHandler.getInputBox().render();
               return;
             }
             const result = await deleteSkill(skillName);
@@ -531,7 +391,7 @@ program
             } else {
               console.log(LAIN_COLORS.warning(`[WARN] Skill not found: ${skillName}`));
             }
-            rl.prompt();
+            tuiHandler.getInputBox().render();
             return;
           }
 
@@ -540,7 +400,7 @@ program
             const firstSpace = rest.indexOf(' ');
             if (firstSpace === -1) {
               console.log(LAIN_COLORS.warning('Usage: /skill-edit <name> <promptTemplate>'));
-              rl.prompt();
+              tuiHandler.getInputBox().render();
               return;
             }
             const skillName = rest.slice(0, firstSpace);
@@ -548,12 +408,12 @@ program
             const existing = getSkill(skillName, process.cwd());
             if (!existing) {
               console.log(LAIN_COLORS.warning(`[WARN] Skill not found: ${skillName}`));
-              rl.prompt();
+              tuiHandler.getInputBox().render();
               return;
             }
             await saveSkill(skillName, { ...existing, promptTemplate });
             console.log(LAIN_COLORS.success(`[OK] Skill updated: ${skillName}`));
-            rl.prompt();
+            tuiHandler.getInputBox().render();
             return;
           }
 
@@ -577,7 +437,7 @@ program
               saveSession(process.cwd(), agent.getMessages());
               await processQueue(agent);
               displayStatusLine();  // 只在完成时显示一次
-              rl.prompt();
+              tuiHandler.getInputBox().render();
               return;
             }
           }
@@ -585,7 +445,7 @@ program
           // 未知的 / 命令
           console.log(LAIN_COLORS.warning(`Unknown command: ${trimmed}`));
           console.log(LAIN_COLORS.muted('Type /h for help'));
-          rl.prompt();
+          tuiHandler.getInputBox().render();
           return;
         }
 
@@ -617,7 +477,7 @@ program
         saveSession(process.cwd(), agent.getMessages());
         await processQueue(agent);
         displayStatusLine();  // 只在完成时显示一次
-        rl.prompt();
+        tuiHandler.getInputBox().render();
       };
 
       // 帮助信息
@@ -675,43 +535,9 @@ program
         }
       };
 
-      // 设置粘贴处理器 - 直接调用 handleInput，不通过 readline emit
-      // 设置 readline 事件
-      rl.on('line', (line: string) => {
-        handleInput(line);
-      });
-      rl.on('close', async () => {
-        if (!shouldExit) {
-          // 用户按 Ctrl+C 但不是退出
-          if (isProcessing && state.getAgent()) {
-            state.getAgent().interrupt();
-            console.log(LAIN_COLORS.warning('\n[INTERRUPTED]'));
-          }
-          return;
-        }
-
-        // 正常退出 - 禁用 Bracketed Paste Mode
-        process.stdout.write(`${ESC}[?2004l`);
-        const messages = agent.getMessages();
-        saveSession(process.cwd(), messages);
-        await shutdownMCP();
-        state.setAgent(null);
-        console.log(LAIN_COLORS.muted(`\nSession saved (${messages.length} messages)`));
-        console.log(LAIN_COLORS.muted('Goodbye!\n'));
-        process.exit(0);
-      });
-
-      // 提示符
-      const showPrompt = () => {
-        if (!isProcessing && !shouldExit) {
-          process.stdout.write(LAIN_COLORS.success('> '));
-        }
-      };
-      showPrompt();
-
       // 保持进程运行
       await new Promise<void>((resolve) => {
-        rl.on('close', resolve);
+        process.on('exit', resolve);
       });
 
     } catch (error: any) {
