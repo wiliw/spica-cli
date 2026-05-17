@@ -51,9 +51,10 @@ export function setupAgentEvents(
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
       inputBox?.setOutputLock(true);  // 锁定输入框渲染
+      // 只在开始时定位到滚动区域
+      inputBox?.moveToScrollArea();
     }
-    // 每次输出都要移到滚动区域（因为用户输入可能改变光标位置）
-    inputBox?.moveToScrollArea();
+    // 不再每次都 moveToScrollArea()，直接追加内容
     if (lastWasReasoning) {
       process.stdout.write('\n');
       lastWasReasoning = false;
@@ -64,10 +65,10 @@ export function setupAgentEvents(
   agent.on('reasoning', (data: any) => {
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
-      inputBox?.setOutputLock(true);  // 锁定输入框渲染
+      inputBox?.setOutputLock(true);
+      inputBox?.moveToScrollArea();
     }
-    // 每次输出都要移到滚动区域
-    inputBox?.moveToScrollArea();
+    // 不再每次定位
     process.stderr.write(LAIN_COLORS.reasoning(data.content));
     lastWasReasoning = true;
   });

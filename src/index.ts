@@ -227,9 +227,11 @@ program
           const queue = getInputQueue();
           queue.add(trimmed);
           const status = queue.getStatus();
-          tuiHandler.getInputBox().moveToScrollArea();
+          // 流式输出期间，光标已在滚动区域，直接追加
+          if (!tuiHandler.getInputBox().isOutputLocked()) {
+            tuiHandler.getInputBox().moveToScrollArea();
+          }
           process.stdout.write(LAIN_COLORS.muted(`[QUEUE] Added (${status.pending} pending)\n`));
-          tuiHandler.getInputBox().render();
           return;
         }
 
