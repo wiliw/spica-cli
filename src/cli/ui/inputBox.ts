@@ -1,5 +1,4 @@
-// ANSI Input Box - 简化版
-// 固定在底部，不使用滚动区域
+// ANSI Input Box - 使用滚动区域固定输入框
 
 import { LAIN_COLORS } from './colors';
 
@@ -12,6 +11,7 @@ export class InputBox {
   private maxRows: number = 3;
   private terminalHeight: number = 24;
   private terminalWidth: number = 80;
+  private inputStartRow: number = 0;
 
   constructor() {
     this.updateTerminalSize();
@@ -20,28 +20,41 @@ export class InputBox {
   private updateTerminalSize(): void {
     this.terminalHeight = process.stdout.rows || 24;
     this.terminalWidth = process.stdout.columns || 80;
+    this.inputStartRow = this.terminalHeight - this.maxRows;
+  }
+
+  // 启动：设置滚动区域
+  start(): void {
+    this.updateTerminalSize();
+    // 滚动区域：第1行 到 inputStartRow-1
+    // 输入区域：inputStartRow 到 terminalHeight（不滚动）
+    process.stdout.write(`${ESC}[1;${this.inputStartRow - 1}r`);
+    // 光标移到滚动区域顶部
+    process.stdout.write(`${ESC}[1;1H`);
+    // 初始渲染输入框
+    this.render();
+  }
+
+  // 结束：重置滚动区域
+  end(): void {
+    process.stdout.write(`${ESC}[r`); // 重置滚动区域为整个屏幕
   }
 
   // 渲染输入框（固定在底部）
   render(): void {
-    this.updateTerminalSize();
+    // 保存当前光标位置
+    process.stdout.write(`${ESC}[s`);
 
-    // 输入框起始行（底部预留空间）
-    const startRow = this.terminalHeight - this.maxRows;
-
-    // 清除输入区并绘制分隔线
-    for (let i = startRow; i <= this.terminalHeight; i++) {
-      process.stdout.write(`${ESC}[${i};1H${ESC}[2K`);
-    }
-
-    // 分隔线
-    process.stdout.write(`${ESC}[${startRow};1H`);
+    // 绘制分隔线
+    process.stdout.write(`${ESC}[${this.inputStartRow};1H`);
+    process.stdout.write(`${ESC}[2K`);
     process.stdout.write(LAIN_COLORS.muted('─'.repeat(this.terminalWidth)));
 
-    // 输入内容
+    // 绘制输入内容
     for (let i = 0; i < Math.min(this.buffer.length, this.maxRows); i++) {
-      const row = startRow + 1 + i;
+      const row = this.inputStartRow + 1 + i;
       process.stdout.write(`${ESC}[${row};1H`);
+      process.stdout.write(`${ESC}[2K`);
       if (i === 0) {
         process.stdout.write(LAIN_COLORS.primary('> ') + this.buffer[i]);
       } else {
@@ -49,22 +62,18 @@ export class InputBox {
       }
     }
 
-    // 光标定位
+    // 光标定位到输入区
     const displayRow = Math.min(this.cursorRow, this.maxRows - 1);
-    const actualRow = startRow + 1 + displayRow;
+    const actualRow = this.inputStartRow + 1 + displayRow;
     const colOffset = (this.cursorRow === 0 ? 3 : 2) + this.cursorCol;
     process.stdout.write(`${ESC}[${actualRow};${colOffset}H`);
+
+    // 不恢复光标 - 保持光标在输入区
   }
 
-  // 清除输入框区域（让输出可以打印）
-  clearForOutput(): void {
-    this.updateTerminalSize();
-    const startRow = this.terminalHeight - this.maxRows;
-    for (let i = startRow; i <= this.terminalHeight; i++) {
-      process.stdout.write(`${ESC}[${i};1H${ESC}[2K`);
-    }
-    // 移动光标到清除区上方，让输出从这里开始
-    process.stdout.write(`${ESC}[${startRow - 1};1H`);
+  // 输出时：光标移到滚动区域
+  moveToScrollArea(): void {
+    process.stdout.write(`${ESC}[${this.inputStartRow - 1};1H`);
   }
 
   // 处理输入
@@ -83,7 +92,6 @@ export class InputBox {
       return false;
     }
 
-    // 粘贴
     if (data.includes(`${ESC}[200~`)) {
       this.handlePaste(data);
       return false;
@@ -118,9 +126,13 @@ export class InputBox {
 
     if (content.trim()) {
       this.insertText(content);
-      // 简短提示
-      const msg = LAIN_COLORS.muted(`[PASTE ${content.length}c/${content.split('\n').length}l]`);
-      process.stdout.write(`${ESC}[${this.terminalHeight - this.maxRows - 1};1H${ESC}[2K${msg}`);
+      const lines = content.split('\n');
+      // 显示粘贴提示（在输入区上方一行）
+      process.stdout.write(`${ESC}[s`);
+      process.stdout.write(`${ESC}[${this.inputStartRow - 1};1H`);
+      process.stdout.write(`${ESC}[2K`);
+      process.stdout.write(LAIN_COLORS.muted(`[PASTE ${content.length} chars, ${lines.length} lines]`));
+      process.stdout.write(`${ESC}[u`);
     }
   }
 
@@ -181,15 +193,5 @@ export class InputBox {
     this.buffer = [''];
     this.cursorRow = 0;
     this.cursorCol = 0;
-  }
-
-  // 输出到stdout（自然滚动）
-  print(text: string): void {
-    // 先清除输入区
-    this.clearForOutput();
-    // 打印内容
-    process.stdout.write(text);
-    // 重新渲染输入框
-    this.render();
   }
 }

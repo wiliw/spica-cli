@@ -116,14 +116,12 @@ program
 
       // TUI 输入处理
       const tuiHandler = new TUIInputHandler();
+      tuiHandler.start();
 
-      // 先启用 rawMode
+      // 启用 rawMode
       if (process.stdin.isTTY) {
         process.stdin.setRawMode(true);
       }
-
-      // 初始渲染输入框
-      tuiHandler.getInputBox().render();
 
       let isProcessing = false;
       let shouldExit = false;
@@ -138,7 +136,9 @@ program
             state.getAgent().interrupt();
             isProcessing = false;
             state.setProcessing(false);
-            tuiHandler.showInterrupted();
+            tuiHandler.getInputBox().moveToScrollArea();
+            process.stdout.write(LAIN_COLORS.warning('\n[INTERRUPTED]\n'));
+            tuiHandler.getInputBox().render();
           }
           return;
         }
@@ -146,6 +146,7 @@ program
         // 退出
         if (result.shouldExit) {
           shouldExit = true;
+          tuiHandler.end();
           process.stdout.write(LAIN_COLORS.error('\n[FORCE EXIT]'));
           process.exit(0);
           return;
@@ -170,11 +171,12 @@ program
           if (isProcessing && state.getAgent()) {
             state.getAgent().interrupt();
           }
+          tuiHandler.end();
           const messages = agent.getMessages();
           saveSession(process.cwd(), messages);
           await shutdownMCP();
           state.setAgent(null);
-          process.stdout.write(LAIN_COLORS.muted(`\nSession saved (${messages.length} messages)`));
+          process.stdout.write(LAIN_COLORS.muted(`\nSession saved (${messages.length} messages)\n`));
           process.stdout.write(LAIN_COLORS.muted('Goodbye!\n'));
           process.exit(0);
           return;
@@ -185,7 +187,8 @@ program
           const queue = getInputQueue();
           queue.add(trimmed);
           const status = queue.getStatus();
-          tuiHandler.print(LAIN_COLORS.muted(`[QUEUE] Added (${status.pending} pending)\n`));
+          tuiHandler.getInputBox().moveToScrollArea();
+          process.stdout.write(LAIN_COLORS.muted(`[QUEUE] Added (${status.pending} pending)\n`));
           tuiHandler.getInputBox().render();
           return;
         }

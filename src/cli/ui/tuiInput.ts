@@ -1,4 +1,4 @@
-// TUI 输入处理 - 简化版
+// TUI 输入处理
 
 import { LAIN_COLORS } from './colors';
 import { InputBox } from './inputBox';
@@ -25,13 +25,19 @@ export class TUIInputHandler {
     return this.inputBox;
   }
 
-  // 处理 stdin
+  start(): void {
+    this.inputBox.start();
+  }
+
+  end(): void {
+    this.inputBox.end();
+  }
+
   handleStdin(data: string, permissionDialogActive: boolean): TUIInputResult {
     if (permissionDialogActive) {
       return { content: '', shouldProcess: false, shouldExit: false, isInterrupt: false };
     }
 
-    // Ctrl+C
     if (data === '\x03') {
       this.interruptCount++;
       if (this.interruptCount >= 3) {
@@ -41,7 +47,6 @@ export class TUIInputHandler {
       return { content: '', shouldProcess: false, shouldExit: false, isInterrupt: false };
     }
 
-    // ESC ESC 中断
     if (data === ESC) {
       const now = Date.now();
       if (now - this.lastEscTime < 500) {
@@ -63,22 +68,5 @@ export class TUIInputHandler {
 
     this.inputBox.render();
     return { content: '', shouldProcess: false, shouldExit: false, isInterrupt: false };
-  }
-
-  // 输出
-  print(text: string): void {
-    this.inputBox.print(text);
-  }
-
-  showDone(): void {
-    this.inputBox.print(LAIN_COLORS.success('\n[OK] Done\n'));
-  }
-
-  showError(msg: string): void {
-    this.inputBox.print(LAIN_COLORS.error(`\n[ERR] ${msg}\n`));
-  }
-
-  showInterrupted(): void {
-    this.inputBox.print(LAIN_COLORS.warning('\n[INTERRUPTED]\n'));
   }
 }

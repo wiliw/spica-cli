@@ -40,14 +40,16 @@ export function setupAgentEvents(
   // 连接错误事件（只显示一次简洁信息）
   agent.on('connection_error', (data: any) => {
     state.setConnectionErrorShown(true);
-    inputBox?.print(LAIN_COLORS.error(`\n[ERR] ${data.type}: ${data.hint}\n`));
+    inputBox?.moveToScrollArea();
+    process.stdout.write(LAIN_COLORS.error(`\n[ERR] ${data.type}: ${data.hint}\n`));
+    inputBox?.render();
   });
 
   agent.on('stream', (data: any) => {
-    // 流式输出开始时清除输入区
+    // 流式输出：移到滚动区域
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
-      inputBox?.clearForOutput();
+      inputBox?.moveToScrollArea();
     }
     if (lastWasReasoning) {
       process.stdout.write('\n');
@@ -59,7 +61,7 @@ export function setupAgentEvents(
   agent.on('reasoning', (data: any) => {
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
-      inputBox?.clearForOutput();
+      inputBox?.moveToScrollArea();
     }
     process.stderr.write(LAIN_COLORS.reasoning(data.content));
     lastWasReasoning = true;
@@ -67,7 +69,7 @@ export function setupAgentEvents(
 
   agent.on('tool_call', (data: any) => {
     state.setStreamingOutput(false);
-    inputBox?.clearForOutput();
+    inputBox?.moveToScrollArea();
     if (lastWasReasoning) {
       process.stdout.write('\n');
       lastWasReasoning = false;
@@ -78,7 +80,7 @@ export function setupAgentEvents(
 
   agent.on('tool_result', (data: any) => {
     state.setStreamingOutput(false);
-    inputBox?.clearForOutput();
+    inputBox?.moveToScrollArea();
     const icon = data.success ? LAIN_COLORS.success('[OK]') : LAIN_COLORS.error('[ERR]');
     const output = data.output || data.error || '';
 
@@ -96,12 +98,12 @@ export function setupAgentEvents(
   });
 
   agent.on('permission_request', async (data: any) => {
-    // 暂停 raw mode，让 prompts 正常工作
+    // 暂停 raw mode
     if (inputBox && process.stdin.isTTY) {
       process.stdin.setRawMode(false);
       state.setPermissionDialogActive(true);
-      // 清除输入区
-      inputBox.clearForOutput();
+      // 移到滚动区域显示权限请求
+      inputBox.moveToScrollArea();
     }
 
     let approved = false;
