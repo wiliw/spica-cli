@@ -50,6 +50,7 @@ export function setupAgentEvents(
   agent.on('stream', (data: any) => {
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
+      inputBox?.setOutputLock(true);  // 锁定输入框渲染
     }
     // 每次输出都要移到滚动区域（因为用户输入可能改变光标位置）
     inputBox?.moveToScrollArea();
@@ -63,6 +64,7 @@ export function setupAgentEvents(
   agent.on('reasoning', (data: any) => {
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
+      inputBox?.setOutputLock(true);  // 锁定输入框渲染
     }
     // 每次输出都要移到滚动区域
     inputBox?.moveToScrollArea();
@@ -72,6 +74,7 @@ export function setupAgentEvents(
 
   agent.on('tool_call', (data: any) => {
     state.setStreamingOutput(false);
+    inputBox?.setOutputLock(false);  // 释放锁，允许渲染
     inputBox?.moveToScrollArea();
     if (lastWasReasoning) {
       process.stdout.write('\n');
@@ -83,6 +86,7 @@ export function setupAgentEvents(
 
   agent.on('tool_result', (data: any) => {
     state.setStreamingOutput(false);
+    inputBox?.setOutputLock(false);  // 释放锁
     inputBox?.moveToScrollArea();
     const icon = data.success ? LAIN_COLORS.success('[OK]') : LAIN_COLORS.error('[ERR]');
     const output = data.output || data.error || '';

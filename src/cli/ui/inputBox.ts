@@ -18,9 +18,19 @@ export class InputBox {
   private completer: ((line: string) => string[]) | null = null;
   private shownCompletionList: boolean = false;
   private lastCompletionLine: string = '';
+  private outputLock: boolean = false;  // 输出锁：流式输出时禁止渲染输入框
 
   constructor() {
     this.updateTerminalSize();
+  }
+
+  // 设置/释放输出锁
+  setOutputLock(locked: boolean): void {
+    this.outputLock = locked;
+  }
+
+  isOutputLocked(): boolean {
+    return this.outputLock;
   }
 
   // 设置补全函数
@@ -260,6 +270,7 @@ export class InputBox {
 
   // 渲染（只更新输入区）
   render(): void {
+    if (this.outputLock) return;  // 输出锁定时不渲染
     this.renderFixedArea();
   }
 }

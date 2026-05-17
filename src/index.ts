@@ -110,17 +110,20 @@ program
       // 清屏，准备设置滚动区域
       process.stdout.write(`${ESC}[2J${ESC}[1;1H`);
 
+      // TUI 输入处理（设置滚动区域）
+      tuiHandler = new TUIInputHandler();
+      tuiHandler.start();
+
       // 自动加载历史
       if (!options.fresh) {
         const session = loadSession(process.cwd());
         if (session && session.messages && session.messages.length > 0) {
           agent.setMessages(session.messages);
+          // 显示加载历史提示（在滚动区域）
+          tuiHandler.getInputBox().moveToScrollArea();
+          process.stdout.write(LAIN_COLORS.muted(`Loaded ${session.messages.length} messages from history\n`));
         }
       }
-
-      // TUI 输入处理（设置滚动区域）
-      tuiHandler = new TUIInputHandler();
-      tuiHandler.start();
 
       // Tab 补全命令列表
       const BASE_COMMANDS = [
@@ -140,6 +143,9 @@ program
 
       // 显示状态栏
       tuiHandler.getInputBox().showStatus(`${providerConfig.model} | strict`);
+
+      // 启用 Bracketed Paste Mode（粘贴内容作为整体到达）
+      process.stdout.write(`${ESC}[?2004h`);
 
       // 启用 rawMode
       if (process.stdin.isTTY) {
@@ -169,6 +175,8 @@ program
         // 退出
         if (result.shouldExit) {
           shouldExit = true;
+          // 禁用 Bracketed Paste Mode
+          process.stdout.write(`${ESC}[?2004l`);
           tuiHandler.end();
           process.stdout.write(LAIN_COLORS.error('\n[FORCE EXIT]'));
           process.exit(0);
@@ -201,6 +209,8 @@ program
           if (isProcessing && state.getAgent()) {
             state.getAgent().interrupt();
           }
+          // 禁用 Bracketed Paste Mode
+          process.stdout.write(`${ESC}[?2004l`);
           tuiHandler.end();
           const messages = agent.getMessages();
           saveSession(process.cwd(), messages);
@@ -467,9 +477,11 @@ program
               state.setProcessing(true);
               try {
                 await agent.runLoop(prompt);
+                tuiHandler.getInputBox().setOutputLock(false);
                 tuiHandler.getInputBox().moveToScrollArea();
                 process.stdout.write(LAIN_COLORS.success('\n[OK] Done\n'));
               } catch (error: any) {
+                tuiHandler.getInputBox().setOutputLock(false);
                 tuiHandler.getInputBox().moveToScrollArea();
                 process.stdout.write(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
               }
@@ -504,12 +516,16 @@ program
 
         try {
           await agent.runLoop(trimmed);
+          // 释放输出锁
+          tuiHandler.getInputBox().setOutputLock(false);
           if (state.isStreamingOutput()) {
             state.setStreamingOutput(false);
             process.stdout.write('\n');
           }
           process.stdout.write(LAIN_COLORS.success('\n[OK] Done\n'));
         } catch (error: any) {
+          // 释放输出锁
+          tuiHandler.getInputBox().setOutputLock(false);
           if (state.isStreamingOutput()) {
             state.setStreamingOutput(false);
             process.stdout.write('\n');
@@ -565,9 +581,11 @@ program
           state.setProcessing(true);
           try {
             await agent.runLoop(mergedInput);
+            tuiHandler.getInputBox().setOutputLock(false);
             tuiHandler.getInputBox().moveToScrollArea();
             process.stdout.write(LAIN_COLORS.success('\n[OK] Done\n'));
           } catch (error: any) {
+            tuiHandler.getInputBox().setOutputLock(false);
             tuiHandler.getInputBox().moveToScrollArea();
             process.stdout.write(LAIN_COLORS.error(`\n[ERR] Error: ${error.message}\n`));
           }
