@@ -121,30 +121,37 @@ export function setupAgentEvents(
       process.stdout.write('\x1b[2K\x1b[1G');
     }
 
-    // Lain红色警示框
-    console.log(format.permissionBox(data.reason));
-    const answer = await prompts({
-      type: 'confirm',
-      name: 'approve',
-      message: LAIN_COLORS.primary.bold('Do you want to allow this action?'),
-      initial: false,
-    });
-    console.log(LAIN_COLORS.permissionBorder('═'.repeat(50)) + '\n');
-
-    // 恢复 readline 和 raw mode
-    if (rl) {
-      if (process.stdin.isTTY) {
-        process.stdin.setRawMode(true);
+    let approved = false;
+    try {
+      // Lain红色警示框
+      console.log(format.permissionBox(data.reason));
+      const answer = await prompts({
+        type: 'confirm',
+        name: 'approve',
+        message: LAIN_COLORS.primary.bold('Do you want to allow this action?'),
+        initial: false,
+      });
+      console.log(LAIN_COLORS.permissionBorder('═'.repeat(50)) + '\n');
+      approved = answer.approve;
+    } catch (e) {
+      // prompts 可能因为中断抛出异常，默认拒绝
+      approved = false;
+    } finally {
+      // 确保总是恢复 readline 和 raw mode
+      if (rl) {
+        if (process.stdin.isTTY) {
+          process.stdin.setRawMode(true);
+        }
+        rl.resume();
+        // 清除 readline 输入缓冲区：使用 Ctrl+U 清除当前行
+        rl.write(null, { ctrl: true, name: 'u' });
+        // 清除残留输出，重绘空输入行
+        process.stdout.write('\x1b[2K\x1b[1G');
+        process.stdout.write('> ');
       }
-      rl.resume();
-      // 清除 readline 输入缓冲区：使用 Ctrl+U 清除当前行
-      rl.write(null, { ctrl: true, name: 'u' });
-      // 清除 prompts 留下的残留输出，重绘空输入行
-      process.stdout.write('\x1b[2K\x1b[1G');
-      process.stdout.write('> ');
     }
 
-    if (answer.approve) {
+    if (approved) {
       agent.approvePermission();
     } else {
       agent.denyPermission();
