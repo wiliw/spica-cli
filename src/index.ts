@@ -114,14 +114,16 @@ program
 
       console.log(LAIN_COLORS.muted(`${providerConfig.model} | /h help | ESC ESC interrupt`));
 
-      // 启用 TUI 模式
+      // TUI 输入处理
       const tuiHandler = new TUIInputHandler();
-      tuiHandler.start();
 
       // 先启用 rawMode
       if (process.stdin.isTTY) {
         process.stdin.setRawMode(true);
       }
+
+      // 初始渲染输入框
+      tuiHandler.getInputBox().render();
 
       let isProcessing = false;
       let shouldExit = false;
@@ -144,8 +146,7 @@ program
         // 退出
         if (result.shouldExit) {
           shouldExit = true;
-          tuiHandler.end();
-          console.log(LAIN_COLORS.error('\n[FORCE EXIT]'));
+          process.stdout.write(LAIN_COLORS.error('\n[FORCE EXIT]'));
           process.exit(0);
           return;
         }
@@ -169,13 +170,12 @@ program
           if (isProcessing && state.getAgent()) {
             state.getAgent().interrupt();
           }
-          tuiHandler.end();
           const messages = agent.getMessages();
           saveSession(process.cwd(), messages);
           await shutdownMCP();
           state.setAgent(null);
-          tuiHandler.printOutput(LAIN_COLORS.muted(`\nSession saved (${messages.length} messages)`));
-          tuiHandler.printOutput(LAIN_COLORS.muted('Goodbye!\n'));
+          process.stdout.write(LAIN_COLORS.muted(`\nSession saved (${messages.length} messages)`));
+          process.stdout.write(LAIN_COLORS.muted('Goodbye!\n'));
           process.exit(0);
           return;
         }
@@ -185,7 +185,7 @@ program
           const queue = getInputQueue();
           queue.add(trimmed);
           const status = queue.getStatus();
-          tuiHandler.printOutput(LAIN_COLORS.muted(`[QUEUE] Added (${status.pending} pending)\n`));
+          tuiHandler.print(LAIN_COLORS.muted(`[QUEUE] Added (${status.pending} pending)\n`));
           tuiHandler.getInputBox().render();
           return;
         }

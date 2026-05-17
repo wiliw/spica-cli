@@ -1,5 +1,4 @@
-// TUI 输入处理模块
-// 使用 ANSI 控制码实现独立输入框
+// TUI 输入处理 - 简化版
 
 import { LAIN_COLORS } from './colors';
 import { InputBox } from './inputBox';
@@ -16,51 +15,28 @@ export interface TUIInputResult {
 export class TUIInputHandler {
   private inputBox: InputBox;
   private lastEscTime: number = 0;
-  private isProcessing: boolean = false;
   private interruptCount: number = 0;
 
   constructor() {
     this.inputBox = new InputBox();
   }
 
-  // 启动 TUI 模式
-  start(): void {
-    this.inputBox.enableAltScreen();
-    this.inputBox.setupScrollRegion();
-    this.inputBox.render();
+  getInputBox(): InputBox {
+    return this.inputBox;
   }
 
-  // 结束 TUI 模式
-  end(): void {
-    this.inputBox.resetScrollRegion();
-    this.inputBox.disableAltScreen();
-  }
-
-  // 设置处理状态
-  setProcessing(processing: boolean): void {
-    this.isProcessing = processing;
-    if (processing) {
-      // 显示处理状态
-      this.inputBox.moveToOutputArea();
-      process.stdout.write(LAIN_COLORS.primary('Processing... (ESC ESC to interrupt)\n'));
-    }
-    this.inputBox.render();
-  }
-
-  // 处理 stdin 数据
+  // 处理 stdin
   handleStdin(data: string, permissionDialogActive: boolean): TUIInputResult {
-    // 如果权限对话框激活，跳过处理
     if (permissionDialogActive) {
       return { content: '', shouldProcess: false, shouldExit: false, isInterrupt: false };
     }
 
-    // Ctrl+C 处理
+    // Ctrl+C
     if (data === '\x03') {
       this.interruptCount++;
       if (this.interruptCount >= 3) {
         return { content: '', shouldProcess: false, shouldExit: true, isInterrupt: false };
       }
-      // 重置计数器
       setTimeout(() => this.interruptCount = 0, 1000);
       return { content: '', shouldProcess: false, shouldExit: false, isInterrupt: false };
     }
@@ -70,16 +46,12 @@ export class TUIInputHandler {
       const now = Date.now();
       if (now - this.lastEscTime < 500) {
         this.lastEscTime = 0;
-        if (this.isProcessing) {
-          return { content: '', shouldProcess: false, shouldExit: false, isInterrupt: true };
-        }
-      } else {
-        this.lastEscTime = now;
+        return { content: '', shouldProcess: false, shouldExit: false, isInterrupt: true };
       }
+      this.lastEscTime = now;
       return { content: '', shouldProcess: false, shouldExit: false, isInterrupt: false };
     }
 
-    // InputBox 处理输入
     const shouldSend = this.inputBox.handleInput(data);
 
     if (shouldSend) {
@@ -89,39 +61,24 @@ export class TUIInputHandler {
       return { content, shouldProcess: true, shouldExit: false, isInterrupt: false };
     }
 
-    // 渲染输入框
     this.inputBox.render();
     return { content: '', shouldProcess: false, shouldExit: false, isInterrupt: false };
   }
 
-  // 打印到输出区
-  printOutput(text: string): void {
-    this.inputBox.moveToOutputArea();
-    process.stdout.write(text);
+  // 输出
+  print(text: string): void {
+    this.inputBox.print(text);
   }
 
-  // 显示完成状态
   showDone(): void {
-    this.inputBox.moveToOutputArea();
-    process.stdout.write(LAIN_COLORS.success('\n[OK] Done\n'));
-    this.inputBox.render();
+    this.inputBox.print(LAIN_COLORS.success('\n[OK] Done\n'));
   }
 
-  // 显示错误
-  showError(message: string): void {
-    this.inputBox.moveToOutputArea();
-    process.stdout.write(LAIN_COLORS.error(`\n[ERR] ${message}\n`));
-    this.inputBox.render();
+  showError(msg: string): void {
+    this.inputBox.print(LAIN_COLORS.error(`\n[ERR] ${msg}\n`));
   }
 
-  // 显示中断
   showInterrupted(): void {
-    this.inputBox.moveToOutputArea();
-    process.stdout.write(LAIN_COLORS.warning('\n[INTERRUPTED]\n'));
-    this.inputBox.render();
-  }
-
-  getInputBox(): InputBox {
-    return this.inputBox;
+    this.inputBox.print(LAIN_COLORS.warning('\n[INTERRUPTED]\n'));
   }
 }

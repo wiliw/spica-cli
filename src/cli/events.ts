@@ -40,15 +40,14 @@ export function setupAgentEvents(
   // 连接错误事件（只显示一次简洁信息）
   agent.on('connection_error', (data: any) => {
     state.setConnectionErrorShown(true);
-    inputBox?.moveToOutputArea();
-    process.stdout.write(LAIN_COLORS.error(`\n[ERR] ${data.type}: ${data.hint}\n`));
+    inputBox?.print(LAIN_COLORS.error(`\n[ERR] ${data.type}: ${data.hint}\n`));
   });
 
   agent.on('stream', (data: any) => {
-    // 输出到输出区
-    inputBox?.moveToOutputArea();
+    // 流式输出开始时清除输入区
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
+      inputBox?.clearForOutput();
     }
     if (lastWasReasoning) {
       process.stdout.write('\n');
@@ -58,9 +57,9 @@ export function setupAgentEvents(
   });
 
   agent.on('reasoning', (data: any) => {
-    inputBox?.moveToOutputArea();
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
+      inputBox?.clearForOutput();
     }
     process.stderr.write(LAIN_COLORS.reasoning(data.content));
     lastWasReasoning = true;
@@ -68,7 +67,7 @@ export function setupAgentEvents(
 
   agent.on('tool_call', (data: any) => {
     state.setStreamingOutput(false);
-    inputBox?.moveToOutputArea();
+    inputBox?.clearForOutput();
     if (lastWasReasoning) {
       process.stdout.write('\n');
       lastWasReasoning = false;
@@ -79,7 +78,7 @@ export function setupAgentEvents(
 
   agent.on('tool_result', (data: any) => {
     state.setStreamingOutput(false);
-    inputBox?.moveToOutputArea();
+    inputBox?.clearForOutput();
     const icon = data.success ? LAIN_COLORS.success('[OK]') : LAIN_COLORS.error('[ERR]');
     const output = data.output || data.error || '';
 
@@ -92,6 +91,8 @@ export function setupAgentEvents(
     } else {
       process.stdout.write(`${icon} ${data.name}\n`);
     }
+    // 重绘输入框
+    inputBox?.render();
   });
 
   agent.on('permission_request', async (data: any) => {
@@ -100,8 +101,7 @@ export function setupAgentEvents(
       process.stdin.setRawMode(false);
       state.setPermissionDialogActive(true);
       // 清除输入区
-      inputBox.moveToOutputArea();
-      process.stdout.write('\n');
+      inputBox.clearForOutput();
     }
 
     let approved = false;
