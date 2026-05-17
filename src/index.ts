@@ -125,7 +125,6 @@ program
       // 粘贴处理变量
       let pasteBuffer = '';
       let isInPaste = false;
-      let ignoreLines = 0;
 
       // stdin data 监听 - 检测粘贴序列和ESC（在 readline 之前注册）
       process.stdin.on('data', (chunk: Buffer) => {
@@ -165,17 +164,15 @@ program
             pasteBuffer = after.slice(0, endIdx);
             isInPaste = false;
             const content = pasteBuffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-            const lineCount = content.split('\n').length;
             if (content.trim()) {
-              ignoreLines = lineCount;
-              // 直接处理，不等待 readline
-              if (!isProcessing) {
-                handleInput(content.trim());
-              } else {
-                const queue = getInputQueue();
-                queue.add(content.trim());
-                console.log(LAIN_COLORS.muted(`[QUEUE] Added (${queue.getStatus().pending} pending)`));
-              }
+              const lines = content.split('\n');
+              const chars = content.length;
+              // 写入 readline 输入缓冲区
+              rl.write(content);
+              // 显示粘贴信息（在同一行开头）
+              process.stdout.write('\x1b[2K\x1b[1G');
+              process.stdout.write(LAIN_COLORS.muted(`[PASTE] ${chars} chars, ${lines.length} lines > `));
+              process.stdout.write(content);
             }
             pasteBuffer = '';
           } else {
@@ -190,16 +187,15 @@ program
           pasteBuffer += str.slice(0, idx);
           isInPaste = false;
           const content = pasteBuffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-          const lineCount = content.split('\n').length;
           if (content.trim()) {
-            ignoreLines = lineCount;
-            if (!isProcessing) {
-              handleInput(content.trim());
-            } else {
-              const queue = getInputQueue();
-              queue.add(content.trim());
-              console.log(LAIN_COLORS.muted(`[QUEUE] Added (${queue.getStatus().pending} pending)`));
-            }
+            const lines = content.split('\n');
+            const chars = content.length;
+            // 写入 readline 输入缓冲区
+            rl.write(content);
+            // 显示粘贴信息
+            process.stdout.write('\x1b[2K\x1b[1G');
+            process.stdout.write(LAIN_COLORS.muted(`[PASTE] ${chars} chars, ${lines.length} lines > `));
+            process.stdout.write(content);
           }
           pasteBuffer = '';
           return;
@@ -216,14 +212,12 @@ program
           const lines = str.split('\n').filter(l => l.trim());
           if (lines.length > 1) {
             // 多行一次性到达，视为粘贴
-            ignoreLines = str.split('\n').length;
-            if (!isProcessing) {
-              handleInput(lines.join('\n'));
-            } else {
-              const queue = getInputQueue();
-              queue.add(lines.join('\n'));
-              console.log(LAIN_COLORS.muted(`[QUEUE] Added (${queue.getStatus().pending} pending)`));
-            }
+            const content = lines.join('\n');
+            const chars = content.length;
+            rl.write(content);
+            process.stdout.write('\x1b[2K\x1b[1G');
+            process.stdout.write(LAIN_COLORS.muted(`[PASTE] ${chars} chars, ${lines.length} lines > `));
+            process.stdout.write(content);
             return;
           }
         }
@@ -684,11 +678,6 @@ program
       // 设置粘贴处理器 - 直接调用 handleInput，不通过 readline emit
       // 设置 readline 事件
       rl.on('line', (line: string) => {
-        // 粘贴后忽略所有相关的line事件
-        if (ignoreLines > 0) {
-          ignoreLines--;
-          return;
-        }
         handleInput(line);
       });
       rl.on('close', async () => {
