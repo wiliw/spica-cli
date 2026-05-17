@@ -1,8 +1,5 @@
-// TUI 输入处理
-
 import { LAIN_COLORS } from './colors';
-import { InputBox } from './inputBox';
-import { getOutputCoordinator } from './outputCoordinator';
+import { getScreenManager } from './screenManager';
 
 const ESC = '\x1b';
 
@@ -14,25 +11,24 @@ export interface TUIInputResult {
 }
 
 export class TUIInputHandler {
-  private inputBox: InputBox;
+  private screen: ReturnType<typeof getScreenManager>;
   private lastEscTime: number = 0;
   private interruptCount: number = 0;
-  private coordinator = getOutputCoordinator();
 
   constructor() {
-    this.inputBox = new InputBox();
+    this.screen = getScreenManager();
   }
 
-  getInputBox(): InputBox {
-    return this.inputBox;
+  getScreen() {
+    return this.screen;
   }
 
   start(): void {
-    this.inputBox.start();
+    this.screen.start();
   }
 
   end(): void {
-    this.inputBox.end();
+    this.screen.end();
   }
 
   handleStdin(data: string, permissionDialogActive: boolean): TUIInputResult {
@@ -59,16 +55,15 @@ export class TUIInputHandler {
       return { content: '', shouldProcess: false, shouldExit: false, isInterrupt: false };
     }
 
-    const shouldSend = this.inputBox.handleInput(data);
+    const shouldSend = this.screen.handleInput(data);
 
     if (shouldSend) {
-      const content = this.inputBox.getContent();
-      this.inputBox.clear();
-      this.inputBox.render();
+      const content = this.screen.getContent();
+      this.screen.clear();
+      this.screen.forceRefresh();  // 立即刷新显示清除后的输入框
       return { content, shouldProcess: true, shouldExit: false, isInterrupt: false };
     }
 
-    this.inputBox.render();
     return { content: '', shouldProcess: false, shouldExit: false, isInterrupt: false };
   }
 }
