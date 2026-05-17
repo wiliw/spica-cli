@@ -95,17 +95,16 @@ export class ScreenManager {
     const st = this.state;
     let output = '';
 
-    // 1. 刷新滚动区域新内容（不定位，让它自然滚动）
+    // 1. 刷新滚动区域新内容
     if (st.scrollContent.length > 0) {
-      // 直接追加到当前位置（滚动区域会自动滚动）
+      // 先定位到滚动区域底部（确保在滚动区域内）
+      output += `${ESC}[${st.scrollBottom};1H`;
+      // 输出内容（滚动区域会自动向上滚动）
       for (const line of st.scrollContent) {
         output += line;
       }
       st.scrollContent = [];  // 清空已输出内容
     }
-
-    // 保存当前光标位置（用于恢复）
-    output += `${ESC}[s`;  // Save cursor
 
     // 2. 刷新状态栏
     if (st.statusText) {
