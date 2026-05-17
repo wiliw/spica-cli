@@ -1,51 +1,51 @@
-// Serial Experiments Lain 配色方案
-// 赛博朋克风格：冷色调、深色背景、红色警告
+// ANSI 标准配色方案
+// 使用终端标准颜色，跟随用户的终端配色设置
 
 import chalk from 'chalk';
 import readline from 'readline';
 import { padRight, getStringWidth } from './stringWidth';
 
-// Lain经典配色
+// ANSI 标准配色（跟随终端设置）
 export const LAIN_COLORS = {
-  // 主色调 - 冷色系
-  primary: chalk.hex('#00CED1'),
-  secondary: chalk.hex('#7B68EE'),
-  accent: chalk.hex('#00BFFF'),
+  // 主色调 - 使用亮色版本 (bright colors)
+  primary: chalk.cyanBright,
+  secondary: chalk.magentaBright,
+  accent: chalk.blueBright,
 
   // 状态色
-  success: chalk.hex('#00FA9A'),
-  error: chalk.hex('#FF4444'),
-  warning: chalk.hex('#FF6B6B'),
+  success: chalk.greenBright,
+  error: chalk.redBright,
+  warning: chalk.yellowBright,
 
   // 界面色
-  border: chalk.hex('#4169E1'),
-  prompt: chalk.hex('#00CED1'),
-  muted: chalk.hex('#696969'),
-  dim: chalk.hex('#4A4A4A'),
+  border: chalk.blue,
+  prompt: chalk.cyanBright,
+  muted: chalk.gray,
+  dim: chalk.dim,
 
   // 特殊色
-  reasoning: chalk.hex('#9370DB'),
-  tool: chalk.hex('#20B2AA'),
-  file: chalk.hex('#5F9EA0'),
-  diffAdd: chalk.hex('#00FA9A'),
-  diffRemove: chalk.hex('#FF6B6B'),
+  reasoning: chalk.magenta,
+  tool: chalk.cyan,
+  file: chalk.blue,
+  diffAdd: chalk.greenBright,
+  diffRemove: chalk.redBright,
 
   // 权限请求
-  permissionBorder: chalk.hex('#DC143C'),
-  permissionTitle: chalk.hex('#FF0000').bold,
-  permissionText: chalk.hex('#F0F0F0'),
+  permissionBorder: chalk.red.bold,
+  permissionTitle: chalk.red.bold,
+  permissionText: chalk.whiteBright,
 
   // Bypass模式
-  bypass: chalk.hex('#FF8C00'),
-  bypassAuto: chalk.hex('#FFA500'),
+  bypass: chalk.yellow,
+  bypassAuto: chalk.yellowBright,
 
   // 子agent
-  subAgent: chalk.hex('#708090'),
+  subAgent: chalk.gray,
 
-  // 背景
-  bg: chalk.bgHex('#0D1117'),
-  bgAlt: chalk.bgHex('#1A1B26'),
-  bgBorder: chalk.bgHex('#161B22'),
+  // 背景 - ANSI 不支持自定义背景色，使用标准背景
+  bg: chalk.bgBlack,
+  bgAlt: chalk.bgBlackBright,
+  bgBorder: chalk.bgBlack,
 };
 
 // ANSI背景色控制
@@ -67,54 +67,43 @@ export const BG = {
     BG._bannerStopSignal = false;
 
     return new Promise<void>((resolve) => {
-      // 先打印初始空行（一行）和banner（5行）
+      // 使用终端标准 cyan 颜色
+      const cyanBright = '\x1b[96m'; // bright cyan (cyanBright)
+
+      // 打印 banner（1空行 + 5行 = 6行）
       process.stdout.write('\n');
-      const dimColor = esc + '[38;2;0;60;63m';
-      lines.forEach(line => process.stdout.write(dimColor + line + reset + '\n'));
+      lines.forEach(line => process.stdout.write(cyanBright + line + reset + '\n'));
 
-      // 入场渐变
-      const fadeIn = async () => {
-        for (let t = 1; t <= 5; t++) {
-          const g = 60 + t * 35;
-          const color = esc + `[38;2;0;${g};${g+3}m`;
-          // 上移5行重写
-          process.stdout.write(esc + '[5A');
-          lines.forEach(line => process.stdout.write(color + line + reset + '\n'));
-          await new Promise(r => setTimeout(r, 80));
-        }
-      };
-
-      // 呼吸渐变（持续直到收到停止信号）
+      // 简单的呼吸动画（亮度变化）
       const breathe = async () => {
+        const cyanNormal = '\x1b[36m'; // normal cyan
         while (!BG._bannerStopSignal) {
           // 渐暗
-          for (let dim = 0; dim < 6 && !BG._bannerStopSignal; dim++) {
-            const g = 206 - dim * 15;
-            const color = esc + `[38;2;0;${g};${g+3}m`;
+          for (let i = 0; i < 3 && !BG._bannerStopSignal; i++) {
             process.stdout.write(esc + '[5A');
-            lines.forEach(line => process.stdout.write(color + line + reset + '\n'));
-            await new Promise(r => setTimeout(r, 100));
+            lines.forEach(line => process.stdout.write(cyanNormal + line + reset + '\n'));
+            await new Promise(r => setTimeout(r, 200));
+            if (BG._bannerStopSignal) break;
           }
           // 渐亮
-          for (let dim = 5; dim >= 0 && !BG._bannerStopSignal; dim--) {
-            const g = 206 - dim * 15;
-            const color = esc + `[38;2;0;${g};${g+3}m`;
+          for (let i = 0; i < 3 && !BG._bannerStopSignal; i++) {
             process.stdout.write(esc + '[5A');
-            lines.forEach(line => process.stdout.write(color + line + reset + '\n'));
-            await new Promise(r => setTimeout(r, 100));
+            lines.forEach(line => process.stdout.write(cyanBright + line + reset + '\n'));
+            await new Promise(r => setTimeout(r, 200));
+            if (BG._bannerStopSignal) break;
           }
         }
 
-        // 停止后恢复最亮状态并空一行
-        const cyan = esc + '[38;2;0;206;209m';
+        // 停止后恢复亮色并空一行
         process.stdout.write(esc + '[5A');
-        lines.forEach(line => process.stdout.write(cyan + line + reset + '\n'));
+        lines.forEach(line => process.stdout.write(cyanBright + line + reset + '\n'));
         process.stdout.write('\n');
 
         resolve();
       };
 
-      fadeIn().then(breathe);
+      // 延迟后开始呼吸
+      setTimeout(breathe, 500);
     });
   },
 
@@ -127,7 +116,7 @@ export const BG = {
     const reset = '\x1b[0m';
     const esc = '\x1b';
     const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-    const color = esc + '[38;2;0;206;209m'; // Cyan
+    const cyan = '\x1b[96m'; // bright cyan
 
     BG._compressStopSignal = false;
 
@@ -138,7 +127,7 @@ export const BG = {
         while (!BG._compressStopSignal) {
           const frame = frames[frameIndex % frames.length];
           // Write spinner frame
-          process.stdout.write(color + frame + ' Compressing...' + reset);
+          process.stdout.write(cyan + frame + ' Compressing...' + reset);
           await new Promise(r => setTimeout(r, 80));
           // Clear line
           process.stdout.write(esc + '[2K' + esc + '[1G');
