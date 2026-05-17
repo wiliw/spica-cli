@@ -80,6 +80,8 @@ export function setupAgentEvents(
     } else {
       screen.appendScroll(`${icon} ${data.name}\n`);
     }
+    // 输出完成，恢复光标到输入框
+    screen.restoreCursor();
   });
 
   agent.on('permission_request', async (data: any) => {

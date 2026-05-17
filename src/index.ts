@@ -122,7 +122,7 @@ program
         if (session && session.messages && session.messages.length > 0) {
           agent.setMessages(session.messages);
           // 显示加载历史提示（在滚动区域）
-          // removed;
+          
           screen.appendScroll(LAIN_COLORS.muted(`Loaded ${session.messages.length} messages from history\n`));
         }
       }
@@ -168,9 +168,9 @@ program
             state.getAgent().interrupt();
             isProcessing = false;
             state.setProcessing(false);
-            // removed;
+            
             screen.appendScroll(LAIN_COLORS.warning('\n[INTERRUPTED]\n'));
-            // removed;
+            
           }
           return;
         }
@@ -231,13 +231,13 @@ program
         }
 
         if (!trimmed) {
-          // removed;
+          
           return;
         }
 
         if (trimmed === 'help') {
           showHelp();
-          // removed;
+          
           return;
         }
 
@@ -249,7 +249,7 @@ program
           if (cmd === 'queue' || cmd === 'q') {
             const queue = getInputQueue();
             const status = queue.getStatus();
-            // removed;
+            
             screen.appendScroll(LAIN_COLORS.primary.bold('\nInput Queue:\n'));
             screen.appendScroll(`  Pending: ${status.pending}\n`);
             if (status.pendingPreview.length > 0) {
@@ -259,29 +259,29 @@ program
               });
             }
             screen.appendScroll('\n');
-            // removed;
+            
             return;
           }
 
           if (cmd === 'undo') {
             const queue = getInputQueue();
             const removed = queue.undoLast();
-            // removed;
+            
             if (removed) {
               screen.appendScroll(LAIN_COLORS.muted(`\n[QUEUE] Removed: ${removed.content.slice(0, 30)}...\n`));
             } else {
               screen.appendScroll(LAIN_COLORS.muted('\n[QUEUE] No pending inputs\n'));
             }
-            // removed;
+            
             return;
           }
 
           if (cmd === 'clear' || cmd === 'reset') {
             agent.setMessages([]);
             clearInputQueue();
-            // removed;
+            
             screen.appendScroll(LAIN_COLORS.muted('\n[OK] Session cleared\n'));
-            // removed;
+            
             return;
           }
 
@@ -289,13 +289,13 @@ program
           if (cmd === 'bypass') {
             agent.setBypassPermissions(true);
             state.setBypassMode(true);
-            // removed;
+            
             return;
           }
           if (cmd === 'strict') {
             agent.setBypassPermissions(false);
             state.setBypassMode(false);
-            // removed;
+            
             return;
           }
 
@@ -305,20 +305,20 @@ program
             const msgs = agent.getMessages().length;
             const queue = getInputQueue();
             const queueStatus = queue.getStatus();
-            // removed;
+            
             screen.appendScroll(LAIN_COLORS.primary.bold('\nStatus:\n'));
             screen.appendScroll(`  Mode: ${bypass ? 'BYPASS' : 'STRICT'}\n`);
             screen.appendScroll(`  Messages: ${msgs}\n`);
             screen.appendScroll(`  Queue: ${queueStatus.pending} pending\n`);
             screen.appendScroll(`  Workspace: ${agent.getWorkspacePath()}\n\n`);
-            // removed;
+            
             return;
           }
 
           // Skills
           if (cmd === 'skills') {
             const skills = listSkills(process.cwd());
-            // removed;
+            
             screen.appendScroll(LAIN_COLORS.primary.bold('\nSkills:\n'));
             if (skills.length === 0) {
               screen.appendScroll(LAIN_COLORS.muted('  (none)\n'));
@@ -330,21 +330,21 @@ program
               });
             }
             screen.appendScroll('\n');
-            // removed;
+            
             return;
           }
 
           // 帮助
           if (cmd === 'help' || cmd === 'h') {
             showHelp();
-            // removed;
+            
             return;
           }
 
           // 历史（显示最近消息）
           if (cmd === 'history') {
             const msgs = agent.getMessages();
-            // removed;
+            
             screen.appendScroll(LAIN_COLORS.primary.bold('\nHistory:\n'));
             if (msgs.length === 0) {
               screen.appendScroll(LAIN_COLORS.muted('  (empty)\n'));
@@ -360,7 +360,7 @@ program
               screen.appendScroll(LAIN_COLORS.muted(`\n  Total: ${msgs.length} messages\n`));
             }
             screen.appendScroll('\n');
-            // removed;
+            
             return;
           }
 
@@ -369,9 +369,9 @@ program
             const before = agent.getMessages().length;
             await agent.compact();
             const after = agent.getMessages().length;
-            // removed;
+            
             screen.appendScroll(LAIN_COLORS.secondary(`\n[COMPRESS] ${before} → ${after} messages\n`));
-            // removed;
+            
             return;
           }
 
@@ -404,36 +404,36 @@ program
             const parts = cmd.slice('skill-add '.length).split(' ');
             const skillName = parts[0];
             if (!skillName) {
-              // removed;
+              
             screen.appendScroll(LAIN_COLORS.warning('\nUsage: /skill-add <name> [promptTemplate]\n'));
-              // removed;
+              
               return;
             }
             const promptTemplate = parts.slice(1).join(' ') || '{input}';
             const description = `Custom skill: ${skillName}`;
             await saveSkill(skillName, { name: skillName, description, promptTemplate });
-            // removed;
+            
             screen.appendScroll(LAIN_COLORS.success(`\n[OK] Skill added: ${skillName}\n`));
-            // removed;
+            
             return;
           }
 
           if (cmd.startsWith('skill-remove ')) {
             const skillName = cmd.slice('skill-remove '.length).trim();
             if (!skillName) {
-              // removed;
+              
               screen.appendScroll(LAIN_COLORS.warning('\nUsage: /skill-remove <name>\n'));
-              // removed;
+              
               return;
             }
             const result = await deleteSkill(skillName);
-            // removed;
+            
               if (result) {
                 screen.appendScroll(LAIN_COLORS.success(`\n[OK] Skill removed: ${skillName}\n`));
               } else {
                 screen.appendScroll(LAIN_COLORS.warning(`\n[WARN] Skill not found: ${skillName}\n`));
               }
-            // removed;
+            
             return;
           }
 
@@ -441,24 +441,24 @@ program
             const rest = cmd.slice('skill-edit '.length);
             const firstSpace = rest.indexOf(' ');
             if (firstSpace === -1) {
-              // removed;
+              
               screen.appendScroll(LAIN_COLORS.warning('\nUsage: /skill-edit <name> <promptTemplate>\n'));
-              // removed;
+              
               return;
             }
             const skillName = rest.slice(0, firstSpace);
             const promptTemplate = rest.slice(firstSpace + 1) || '{input}';
             const existing = getSkill(skillName, process.cwd());
             if (!existing) {
-              // removed;
+              
               screen.appendScroll(LAIN_COLORS.warning(`\n[WARN] Skill not found: ${skillName}\n`));
-              // removed;
+              
               return;
             }
             await saveSkill(skillName, { ...existing, promptTemplate });
-            // removed;
+            
             screen.appendScroll(LAIN_COLORS.success(`\n[OK] Skill updated: ${skillName}\n`));
-            // removed;
+            
             return;
           }
 
@@ -468,7 +468,7 @@ program
             const skill = getSkill(skillInput.skillName, process.cwd());
             if (skill) {
               const prompt = buildSkillPrompt(skill, skillInput.args);
-              // removed;
+              
               screen.appendScroll(LAIN_COLORS.muted(`\n[${skill.name}] ${skill.description}\n`));
               isProcessing = true;
               state.setProcessing(true);
@@ -483,7 +483,7 @@ program
               saveSession(process.cwd(), agent.getMessages());
               await processQueue(agent);
               displayStatusLine();  // 只在完成时显示一次
-              // removed;
+              
               return;
             }
           }
@@ -518,17 +518,17 @@ program
           }
           screen.appendScroll(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
         }
+        // 输出完成，恢复光标到输入框
+        screen.restoreCursor();
         isProcessing = false;
         state.setProcessing(false);
         saveSession(process.cwd(), agent.getMessages());
         await processQueue(agent);
-        // 重绘输入框
-        // removed;
       };
 
       // 帮助信息
       const showHelp = () => {
-        // removed;
+        
         screen.appendScroll(LAIN_COLORS.primary.bold('\nCommands:\n'));
         screen.appendScroll(LAIN_COLORS.muted('  quit/exit   Exit\n'));
         screen.appendScroll(LAIN_COLORS.muted('  help        Show help\n'));
@@ -556,7 +556,7 @@ program
         const queue = getInputQueue();
         if (!queue.hasPending()) return;
 
-        // removed;
+        
         screen.appendScroll(LAIN_COLORS.muted(`\n[QUEUE] Processing ${queue.getStatus().pending} inputs...\n`));
         const mergedInput = queue.mergePending();
 
@@ -584,7 +584,7 @@ program
     } catch (error: any) {
       if (!state.isConnectionErrorShown()) {
         if (tuiHandler) {
-          // removed;
+          
           screen.appendScroll(LAIN_COLORS.error(`\nError: ${error.message}\n`));
         } else {
           console.log(LAIN_COLORS.error(`Error: ${error.message}`));
