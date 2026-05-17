@@ -58,6 +58,22 @@ export class InputBox {
     process.stdout.write(`${ESC}[${this.scrollBottom};1H`);
   }
 
+  // 计算字符串的显示宽度（中文=2，英文=1）
+  private getStringWidth(str: string): number {
+    let width = 0;
+    for (const char of str) {
+      // 中文和全角字符宽度为2
+      const code = char.charCodeAt(0);
+      if (code > 0x7F) {
+        // CJK字符、全角字符等宽度为2
+        width += 2;
+      } else {
+        width += 1;
+      }
+    }
+    return width;
+  }
+
   // 渲染固定区域（状态栏、分隔线、输入框）
   renderFixedArea(): void {
     // 清除状态栏
@@ -70,17 +86,31 @@ export class InputBox {
     // 输入区
     process.stdout.write(`${ESC}[${this.inputRow};1H${ESC}[2K`);
     const fullContent = this.buffer[this.cursorRow] || '';
-    const maxDisplay = this.terminalWidth - 3;  // 减去 "> " 的宽度
-    const displayContent = fullContent.slice(-maxDisplay);  // 显示末尾部分
+    const maxDisplayWidth = this.terminalWidth - 3;  // 减去 "> " 的宽度
+
+    // 从末尾截取，保证显示宽度不超限
+    let displayContent = '';
+    let displayWidth = 0;
+    for (let i = fullContent.length - 1; i >= 0 && displayWidth < maxDisplayWidth; i--) {
+      const charWidth = this.getStringWidth(fullContent[i]);
+      if (displayWidth + charWidth <= maxDisplayWidth) {
+        displayContent = fullContent[i] + displayContent;
+        displayWidth += charWidth;
+      } else {
+        break;
+      }
+    }
+
     process.stdout.write(LAIN_COLORS.primary('> ') + displayContent);
 
-    // 光标位置：在显示内容的末尾
-    // 如果内容被截断，光标在最右边
-    const cursorColInDisplay = Math.min(this.cursorCol, maxDisplay);
-    // 如果光标在截断部分之前，计算相对位置
-    const actualCursorCol = fullContent.length > maxDisplay
-      ? maxDisplay  // 内容被截断，光标在末尾
-      : this.cursorCol;  // 内容未截断，光标在原位置
+    // 光标位置：计算光标前内容的显示宽度
+    const contentBeforeCursor = fullContent.slice(0, this.cursorCol);
+    const cursorDisplayWidth = this.getStringWidth(contentBeforeCursor);
+
+    // 如果内容被截断（光标在截断部分），光标在显示末尾
+    const actualCursorCol = fullContent.length > displayContent.length
+      ? displayWidth  // 内容被截断，光标在末尾
+      : cursorDisplayWidth;  // 内容未截断，光标在原位置
 
     process.stdout.write(`${ESC}[${this.inputRow};${actualCursorCol + 3}H`);
   }
