@@ -112,11 +112,14 @@ export function setupAgentEvents(
 
   agent.on('permission_request', async (data: any) => {
     // 暂停 readline 和 raw mode，让 prompts 正常工作
+    // 同时需要暂停 stdin 监听器（在 index.ts 中注册），避免拦截输入
     if (rl) {
       rl.pause();
       if (process.stdin.isTTY) {
         process.stdin.setRawMode(false);
       }
+      // 通知 RuntimeState 进入 permission 模式，stdin 监听器会检查此状态
+      state.setPermissionDialogActive(true);
       // 清除当前输入行显示
       process.stdout.write('\x1b[2K\x1b[1G');
     }
@@ -137,8 +140,10 @@ export function setupAgentEvents(
       // prompts 可能因为中断抛出异常，默认拒绝
       approved = false;
     } finally {
-      // 确保总是恢复 readline 和 raw mode
+      // 确保总是恢复状态
       if (rl) {
+        // 先退出 permission 模式，再恢复 rawMode
+        state.setPermissionDialogActive(false);
         if (process.stdin.isTTY) {
           process.stdin.setRawMode(true);
         }

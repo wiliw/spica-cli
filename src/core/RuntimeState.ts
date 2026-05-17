@@ -9,6 +9,7 @@ interface RuntimeState {
   bypassMode: boolean;
   connectionErrorShown: boolean;
   streamingOutput: boolean;
+  permissionDialogActive: boolean;  // 权限对话框激活时，stdin监听器应跳过处理
 }
 
 class RuntimeStateManager {
@@ -19,6 +20,7 @@ class RuntimeStateManager {
     bypassMode: false,
     connectionErrorShown: false,
     streamingOutput: false,
+    permissionDialogActive: false,
   };
 
   // Agent
@@ -79,6 +81,15 @@ class RuntimeStateManager {
     return this.state.streamingOutput;
   }
 
+  // Permission Dialog Active
+  setPermissionDialogActive(active: boolean): void {
+    this.state.permissionDialogActive = active;
+  }
+
+  isPermissionDialogActive(): boolean {
+    return this.state.permissionDialogActive;
+  }
+
   // Interrupt
   interrupt(): void {
     if (this.state.agent) {
@@ -95,6 +106,7 @@ class RuntimeStateManager {
       bypassMode: false,
       connectionErrorShown: false,
       streamingOutput: false,
+      permissionDialogActive: false,
     };
   }
 }

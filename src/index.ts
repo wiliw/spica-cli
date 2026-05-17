@@ -129,6 +129,11 @@ program
 
       // stdin data 监听 - 检测粘贴序列和ESC（在 readline 之前注册）
       process.stdin.on('data', (chunk: Buffer) => {
+        // 如果权限对话框激活，跳过所有处理，让 prompts 正常接收输入
+        if (state.isPermissionDialogActive()) {
+          return;
+        }
+
         const str = chunk.toString('utf8');
 
         // 检测ESC键（用于中断）
