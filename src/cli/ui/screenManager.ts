@@ -1,5 +1,5 @@
-// Screen Manager - 虚拟屏幕管理，定时刷新避免冲突
-// 所有输入输出都更新内部状态，定时器统一刷新到终端
+// Screen Manager - 简化版
+// 流式输出期间不刷新输入框，结束后统一刷新
 
 import { LAIN_COLORS } from './colors';
 import fs from 'fs';
@@ -7,7 +7,6 @@ import fs from 'fs';
 const ESC = '\x1b';
 
 export interface ScreenState {
-  scrollContent: string[];
   inputBuffer: string[];
   cursorRow: number;
   cursorCol: number;
@@ -22,13 +21,12 @@ export interface ScreenState {
   completer: ((line: string) => string[]) | null;
   shownCompletionList: boolean;
   lastCompletionLine: string;
+  inScrollArea: boolean;  // 光标是否在滚动区域
 }
 
 export class ScreenManager {
   state: ScreenState;
-  refreshInterval: NodeJS.Timeout | null = null;
-  lastRefreshTime: number = 0;
-  needsRefresh: boolean = false;
+  refreshTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     this.state = this.initState();
@@ -40,7 +38,6 @@ export class ScreenManager {
     const maxInputRows = 3;
 
     return {
-      scrollContent: [],
       inputBuffer: [''],
       cursorRow: 0,
       cursorCol: 0,
@@ -55,68 +52,106 @@ export class ScreenManager {
       completer: null,
       shownCompletionList: false,
       lastCompletionLine: '',
+      inScrollArea: true,  // 默认光标在滚动区域
     };
   }
 
-  // 启动屏幕管理
   start(): void {
     this.updateSize();
     // 设置滚动区域
     fs.writeSync(1, `${ESC}[1;${this.state.scrollBottom}r`);
     // 清屏
     fs.writeSync(1, `${ESC}[2J${ESC}[1;1H`);
-    // 启动定时刷新（每30ms）
-    this.refreshInterval = setInterval(() => this.tickRefresh(), 30);
+    // 刷新固定区域
+    this.refreshFixedArea();
+    // 启动定时刷新（每 100ms）
+    this.refreshTimer = setInterval(() => this.tickRefresh(), 100);
   }
 
-  // 结束
   end(): void {
-    if (this.refreshInterval) {
-      clearInterval(this.refreshInterval);
-      this.refreshInterval = null;
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer);
+      this.refreshTimer = null;
     }
     fs.writeSync(1, `${ESC}[r${ESC}[2J${ESC}[1;1H`);
   }
 
-  // 定时刷新
+  // 定时刷新（只刷新输入框，不刷新状态栏和分隔线）
   tickRefresh(): void {
-    if (!this.needsRefresh) return;
-    this.needsRefresh = false;
-    this.doRefresh();
+    if (this.state.inScrollArea) {
+      // 光标在滚动区域，刷新输入框后恢复光标
+      this.refreshInputOnly();
+    }
   }
 
-  // 强制立即刷新（用于关键操作如 Enter）
-  forceRefresh(): void {
-    this.doRefresh();
+  // 只刷新输入框（快速刷新，不影响滚动输出）
+  refreshInputOnly(): void {
+    const st = this.state;
+    const maxLineWidth = st.terminalWidth - 2;
+    const displayLines: string[] = [];
+
+    // 计算显示行
+    for (const bufLine of st.inputBuffer) {
+      let remaining = bufLine;
+      while (remaining.length > 0) {
+        let lineContent = '';
+        let lineWidth = 0;
+        let charCount = 0;
+        for (const char of remaining) {
+          const cw = this.getCharWidth(char);
+          if (lineWidth + cw > maxLineWidth) break;
+          lineContent += char;
+          lineWidth += cw;
+          charCount++;
+        }
+        displayLines.push(lineContent);
+        remaining = remaining.slice(charCount);
+      }
+    }
+
+    // 刷新输入区
+    let output = '';
+    for (let i = 0; i < st.maxInputRows; i++) {
+      output += `${ESC}[${st.inputStartRow + i};1H${ESC}[2K`;
+    }
+    const startIdx = Math.max(0, displayLines.length - st.maxInputRows);
+    for (let i = 0; i < st.maxInputRows && startIdx + i < displayLines.length; i++) {
+      output += `${ESC}[${st.inputStartRow + i};1H`;
+      output += displayLines[startIdx + i];
+    }
+
+    // 恢复光标到滚动区域底部
+    output += `${ESC}[${st.scrollBottom};1H`;
+
+    fs.writeSync(1, output);
   }
 
-  // 实际刷新屏幕
-  doRefresh(): void {
+  // 滚动输出
+  appendScroll(text: string): void {
+    // 如果光标不在滚动区域，先定位到 scrollBottom
+    if (!this.state.inScrollArea) {
+      fs.writeSync(1, `${ESC}[${this.state.scrollBottom};1H`);
+      this.state.inScrollArea = true;
+    }
+    fs.writeSync(1, text);
+  }
+
+  // 刷新固定区域（状态栏、分隔线、输入框）
+  refreshFixedArea(): void {
     const st = this.state;
     let output = '';
 
-    // 1. 刷新滚动区域新内容
-    if (st.scrollContent.length > 0) {
-      // 先定位到滚动区域底部（确保在滚动区域内）
-      output += `${ESC}[${st.scrollBottom};1H`;
-      // 输出内容（滚动区域会自动向上滚动）
-      for (const line of st.scrollContent) {
-        output += line;
-      }
-      st.scrollContent = [];  // 清空已输出内容
-    }
-
-    // 2. 刷新状态栏
+    // 状态栏
     if (st.statusText) {
       output += `${ESC}[${st.statusRow};1H${ESC}[2K`;
       output += st.statusText;
     }
 
-    // 3. 刷新分隔线
+    // 分隔线
     output += `${ESC}[${st.separatorRow};1H${ESC}[2K`;
     output += LAIN_COLORS.muted('─'.repeat(st.terminalWidth));
 
-    // 4. 刷新输入框（多行，自动换行显示）
+    // 输入框（计算显示行）
     const maxLineWidth = st.terminalWidth - 2;
     const displayLines: string[] = [];
 
@@ -150,8 +185,7 @@ export class ScreenManager {
       output += displayLines[startIdx + i];
     }
 
-    // 5. 定位光标到输入位置
-    // 计算光标在哪个显示行
+    // 光标定位到输入位置
     let displayLinesBeforeCursorRow = 0;
     for (let r = 0; r < st.cursorRow; r++) {
       let remaining = st.inputBuffer[r] || '';
@@ -176,30 +210,24 @@ export class ScreenManager {
     const cursorColInRow = cursorColWidth % maxLineWidth;
 
     const cursorDisplayRow = Math.min(displayLinesBeforeCursorRow + cursorDisplayRowOffset, st.maxInputRows - 1);
-    const cursorDisplayCol = cursorColInRow + 1;  // +1 因为列从1开始
+    const cursorDisplayCol = cursorColInRow + 1;
 
     output += `${ESC}[${st.inputStartRow + cursorDisplayRow};${cursorDisplayCol}H`;
 
-    // 同步写入
     fs.writeSync(1, output);
+
+    // 刷新后光标在输入框
+    this.state.inScrollArea = false;
   }
 
-  // 添加滚动输出内容
-  appendScroll(text: string): void {
-    this.state.scrollContent.push(text);
-    this.needsRefresh = true;
-  }
-
-  // 设置状态栏
   setStatus(text: string): void {
     this.state.statusText = text;
-    this.needsRefresh = true;
+    this.refreshFixedArea();
   }
 
-  // 处理用户输入
   handleInput(data: string): boolean {
     if (data === '\r') {
-      return true;  // Enter 发送
+      return true;
     }
 
     if (data === '\x7f' || data === '\b') {
@@ -222,7 +250,6 @@ export class ScreenManager {
       return false;
     }
 
-    // 包含换行则多行插入
     if (data.includes('\n')) {
       const lines = data.split('\n');
       for (let i = 0; i < lines.length; i++) {
@@ -232,6 +259,7 @@ export class ScreenManager {
     } else {
       this.insert(data);
     }
+    // 不立即刷新，定时器会处理
     return false;
   }
 
@@ -254,7 +282,7 @@ export class ScreenManager {
     } else if (seq === `${ESC}[3~`) {
       this.delete();
     }
-    this.needsRefresh = true;
+    // 不立即刷新
   }
 
   handleTab(): void {
@@ -268,8 +296,9 @@ export class ScreenManager {
       st.shownCompletionList = false;
     } else if (hits.length > 1) {
       if (!st.shownCompletionList || currentLine !== st.lastCompletionLine) {
-        // 显示补全列表（作为滚动输出）
-        this.appendScroll('\n' + hits.map(h => `${h}  `).join('') + '\n');
+        // Tab 补全列表显示在滚动区域（立即输出）
+        fs.writeSync(1, `${ESC}[${st.scrollBottom};1H`);
+        fs.writeSync(1, '\n' + hits.map(h => `${h}  `).join('') + '\n');
         st.shownCompletionList = true;
         st.lastCompletionLine = currentLine;
       } else {
@@ -299,7 +328,6 @@ export class ScreenManager {
     const line = st.inputBuffer[st.cursorRow];
     st.inputBuffer[st.cursorRow] = line.slice(0, st.cursorCol) + text + line.slice(st.cursorCol);
     st.cursorCol += text.length;
-    this.needsRefresh = true;
   }
 
   newLine(): void {
@@ -311,7 +339,6 @@ export class ScreenManager {
     st.inputBuffer.splice(st.cursorRow + 1, 0, after);
     st.cursorRow++;
     st.cursorCol = 0;
-    this.needsRefresh = true;
   }
 
   backspace(): void {
@@ -328,7 +355,6 @@ export class ScreenManager {
       st.cursorRow--;
       st.cursorCol = prev.length;
     }
-    this.needsRefresh = true;
   }
 
   delete(): void {
@@ -341,7 +367,6 @@ export class ScreenManager {
       st.inputBuffer[st.cursorRow] = line + next;
       st.inputBuffer.splice(st.cursorRow + 1, 1);
     }
-    this.needsRefresh = true;
   }
 
   getContent(): string {
@@ -352,7 +377,6 @@ export class ScreenManager {
     this.state.inputBuffer = [''];
     this.state.cursorRow = 0;
     this.state.cursorCol = 0;
-    this.needsRefresh = true;
   }
 
   setCompleter(fn: (line: string) => string[]): void {

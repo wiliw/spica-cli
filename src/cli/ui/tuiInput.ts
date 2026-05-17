@@ -60,7 +60,6 @@ export class TUIInputHandler {
     if (shouldSend) {
       const content = this.screen.getContent();
       this.screen.clear();
-      this.screen.forceRefresh();  // 立即刷新显示清除后的输入框
       return { content, shouldProcess: true, shouldExit: false, isInterrupt: false };
     }
 
