@@ -95,14 +95,17 @@ export class ScreenManager {
     const st = this.state;
     let output = '';
 
-    // 1. 刷新滚动区域新内容
+    // 1. 刷新滚动区域新内容（不定位，让它自然滚动）
     if (st.scrollContent.length > 0) {
-      output += `${ESC}[${st.scrollBottom};1H`;
+      // 直接追加到当前位置（滚动区域会自动滚动）
       for (const line of st.scrollContent) {
         output += line;
       }
       st.scrollContent = [];  // 清空已输出内容
     }
+
+    // 保存当前光标位置（用于恢复）
+    output += `${ESC}[s`;  // Save cursor
 
     // 2. 刷新状态栏
     if (st.statusText) {
@@ -123,14 +126,16 @@ export class ScreenManager {
       while (remaining.length > 0) {
         let lineContent = '';
         let lineWidth = 0;
+        let charCount = 0;
         for (const char of remaining) {
           const cw = this.getCharWidth(char);
           if (lineWidth + cw > maxLineWidth) break;
           lineContent += char;
           lineWidth += cw;
+          charCount++;
         }
         displayLines.push(lineContent);
-        remaining = remaining.slice(lineContent.length);
+        remaining = remaining.slice(charCount);
       }
     }
 
@@ -147,11 +152,34 @@ export class ScreenManager {
     }
 
     // 5. 定位光标到输入位置
+    // 计算光标在哪个显示行
+    let displayLinesBeforeCursorRow = 0;
+    for (let r = 0; r < st.cursorRow; r++) {
+      let remaining = st.inputBuffer[r] || '';
+      while (remaining.length > 0) {
+        let lineWidth = 0;
+        let charCount = 0;
+        for (const char of remaining) {
+          const cw = this.getCharWidth(char);
+          if (lineWidth + cw > maxLineWidth) break;
+          lineWidth += cw;
+          charCount++;
+        }
+        displayLinesBeforeCursorRow++;
+        remaining = remaining.slice(charCount);
+      }
+    }
+
     const cursorLine = st.inputBuffer[st.cursorRow] || '';
     const beforeCursor = cursorLine.slice(0, st.cursorCol);
-    const cursorColDisplay = this.getStringWidth(beforeCursor) + 1;
-    const cursorRowDisplay = Math.min(st.cursorRow, st.maxInputRows - 1);
-    output += `${ESC}[${st.inputStartRow + cursorRowDisplay};${cursorColDisplay}H`;
+    const cursorColWidth = this.getStringWidth(beforeCursor);
+    const cursorDisplayRowOffset = Math.floor(cursorColWidth / maxLineWidth);
+    const cursorColInRow = cursorColWidth % maxLineWidth;
+
+    const cursorDisplayRow = Math.min(displayLinesBeforeCursorRow + cursorDisplayRowOffset, st.maxInputRows - 1);
+    const cursorDisplayCol = cursorColInRow + 1;  // +1 因为列从1开始
+
+    output += `${ESC}[${st.inputStartRow + cursorDisplayRow};${cursorDisplayCol}H`;
 
     // 同步写入
     fs.writeSync(1, output);
