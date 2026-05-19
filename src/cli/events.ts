@@ -3,8 +3,10 @@ import { getScreenManager } from './ui/screenManager';
 import { LAIN_COLORS, format } from './ui/colors';
 import prompts from 'prompts';
 import { getRuntimeState } from '../core/RuntimeState';
+import { stopHeartbeat } from '../core/Heartbeat';
 
 const screen = getScreenManager();
+const state = getRuntimeState();
 
 function formatArgs(args: Record<string, any>): string {
   if (!args || Object.keys(args).length === 0) return '';
@@ -30,7 +32,6 @@ export function setupAgentEvents(
   interactive: boolean = false,
   model?: string
 ): void {
-  const state = getRuntimeState();
   let lastWasReasoning = false;
 
   agent.on('connection_error', (data: any) => {
@@ -39,8 +40,13 @@ export function setupAgentEvents(
   });
 
   agent.on('stream', (data: any) => {
+    // 收到流式响应，停止心跳
+    stopHeartbeat();
+
+    // 设置流式状态（防止输入刷新干扰输出）
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
+      screen.setStreaming(true);
     }
     if (lastWasReasoning) {
       screen.appendScroll('\n');
@@ -50,15 +56,19 @@ export function setupAgentEvents(
   });
 
   agent.on('reasoning', (data: any) => {
+    // 设置流式状态
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
+      screen.setStreaming(true);
     }
     screen.appendScroll(LAIN_COLORS.reasoning(data.content));
     lastWasReasoning = true;
   });
 
   agent.on('tool_call', (data: any) => {
+    // 工具调用开始，结束流式状态
     state.setStreamingOutput(false);
+    screen.setStreaming(false);
     if (lastWasReasoning) {
       screen.appendScroll('\n');
       lastWasReasoning = false;
@@ -69,6 +79,7 @@ export function setupAgentEvents(
 
   agent.on('tool_result', (data: any) => {
     state.setStreamingOutput(false);
+    screen.setStreaming(false);
     const icon = data.success ? LAIN_COLORS.success('[OK]') : LAIN_COLORS.error('[ERR]');
     const output = data.output || data.error || '';
 
@@ -80,8 +91,9 @@ export function setupAgentEvents(
     } else {
       screen.appendScroll(`${icon} ${data.name}\n`);
     }
-    // 输出完成，恢复光标到输入框
+    // 输出完成，恢复光标到输入框并刷新显示（显示累积的用户输入）
     screen.restoreCursor();
+    screen.refreshInput();
   });
 
   agent.on('permission_request', async (data: any) => {
@@ -174,6 +186,10 @@ export function setupAgentEvents(
   });
 
   agent.on('context_compressed', (data: any) => {
-    screen.appendScroll(LAIN_COLORS.secondary(`\n[COMPRESS] ${data.before} -> ${data.after} messages\n`));
+    const tokensInfo = data.tokensBefore && data.tokensAfter
+      ? ` (${Math.floor(data.tokensBefore/1000)}k -> ${Math.floor(data.tokensAfter/1000)}k tokens)`
+      : '';
+    screen.appendScroll(LAIN_COLORS.secondary(`\n[COMPRESS] ${data.before} -> ${data.after} messages${tokensInfo}\n`));
+    screen.restoreCursor();
   });
 }
