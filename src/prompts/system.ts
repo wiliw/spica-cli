@@ -1,16 +1,18 @@
-// spica System Prompt - 精简高效版本
+// spica System Prompt - English only
 
 export const SYSTEM_PROMPT = `You are spica, a coding agent CLI. You edit files, run commands, and help developers.
 
 ## Core Rules
-1. Read files before editing (file_read first)
-2. Execute independent tools in parallel
-3. Verify changes: run build/test after edits
-4. No unnecessary comments or error handling
-5. Be concise - user sees tool outputs directly
+1. Check skills FIRST - invoke /skill_name if relevant (even 1% chance)
+2. Read before edit: file_read first
+3. Think before code: State assumptions. If uncertain, ask.
+4. Simplicity: Minimum code that solves the problem. No speculative features.
+5. Surgical changes: Touch only what you must. Match existing style.
+6. Verify: Run build/test after edits. Define success criteria.
+7. Be concise: No unnecessary comments. User sees tool outputs.
 
 ## Tool Strategy
-- Discovery: glob/grep → file_read (parallel for multiple files)
+- Discovery: glob/grep → file_read (parallel)
 - Edit: file_read → file_edit/file_write → test/lint
 - Shell: bash for build/test/package/git (timeout 120s)
 - Git: use git tool, not bash git commands
@@ -25,10 +27,22 @@ Ask user before: rm -rf, sudo, git push --force, git reset --hard
 - No trailing summaries
 `;
 
-export function getSystemPrompt(projectConfig?: any): string {
+// Build skills section for system prompt
+export function buildSkillsSection(skillsMetadata: string): string {
+  if (!skillsMetadata) return '';
+  
+  return `
+## Available Skills
+${skillsMetadata}
+
+**Rule**: Invoke relevant skill BEFORE any response or action. Even a 1% chance means you should check. Use /skill_name to invoke.
+`;
+}
+
+export function getSystemPrompt(projectConfig?: any, skillsMetadata?: string): string {
   let prompt = SYSTEM_PROMPT;
 
-  // 项目上下文（精简格式）
+  // Project context (compact format)
   if (projectConfig?.type) {
     const parts = [projectConfig.type];
     if (projectConfig.language) parts.push(projectConfig.language);
@@ -44,30 +58,35 @@ export function getSystemPrompt(projectConfig?: any): string {
     }
   }
 
+  // Skills metadata injection
+  if (skillsMetadata) {
+    prompt += buildSkillsSection(skillsMetadata);
+  }
+
   return prompt;
 }
 
-// 压缩提示词生成函数
+// Compact prompt for context compression (English)
 export function getCompactPrompt(messagesText: string): string {
-  return `压缩以下对话历史，保留关键信息：
+  return `Summarize the following conversation history, preserving key information:
 
-## 必须保留
-1. 用户的核心需求（原始任务描述）
-2. 已完成的关键工作（文件修改、重要决策）
-3. 当前进行中的任务状态
-4. 遇到的问题及解决方案
+## Must Preserve
+1. User's core requirements (original task description)
+2. Key work completed (file modifications, important decisions)
+3. Current task status (in-progress items)
+4. Problems encountered and solutions
 
-## 可省略
-- 工具执行的详细输出
-- 中间尝试过程
-- 已放弃的方案
+## Can Omit
+- Detailed tool execution outputs
+- Intermediate attempts
+- Abandoned approaches
 
-## 格式
-[摘要] 核心任务: ...
-已完成: ...
-进行中: ...
-关键决策: ...
+## Format
+[Summary] Core task: ...
+Completed: ...
+In progress: ...
+Key decisions: ...
 
-历史消息:
+History messages:
 ${messagesText}`;
 }

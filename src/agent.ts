@@ -2,7 +2,7 @@ import { LLMClient } from './llm/LLMClient';
 import { TokenCounter } from './llm/TokenCounter';
 import { executeTool, getAllToolDefinitions, setWorkspace, getWorkspace } from './tools/index';
 import { initMCP, shutdownMCP } from './mcp/client';
-import { initSkills } from './skills/index';
+import { initSkills, listSkills } from './skills/index';
 import { getProviderConfig } from './utils/config';
 import { getSystemPrompt, getCompactPrompt } from './prompts/system';
 import { loadProjectConfig as loadAgentsConfig, autoDetectProject, createAgentsMd } from './utils/projectConfig';
@@ -33,6 +33,10 @@ export interface ProjectConfig {
 
 export class SpicaAgent extends EventEmitter {
   private llm: LLMClient | null = null;
+
+  getLLM(): LLMClient | null {
+    return this.llm;
+  }
   private interruptFlag = false;
   private workspacePath: string;
   private projectConfig: ProjectConfig = {};
@@ -245,7 +249,11 @@ async init() {
     
     await this.loadProjectConfig();
     
-    this.llm.setSystemPrompt(getSystemPrompt(this.projectConfig));
+    // Build skills metadata for system prompt
+    const skills = listSkills(this.workspacePath);
+    const skillsMetadata = skills.map(s => `- ${s.name}: ${s.description}`).join('\n');
+    
+    this.llm.setSystemPrompt(getSystemPrompt(this.projectConfig, skillsMetadata));
     
     this.llm.on('chunk', (chunk: string) => {
       this.emit('stream', { chunk });
@@ -322,15 +330,22 @@ async init() {
 
     // 从provider获取上下文窗口大小
     const provider = this.llm.getProvider();
-    tokenCounter.setContextWindow(provider.getContextWindow());
+    const contextWindow = provider.getContextWindow();
+    tokenCounter.setContextWindow(contextWindow);
 
     const usedTokens = tokenCounter.estimateMessages(existingMessages);
-    const remainingTokens = tokenCounter.getRemainingTokens(existingMessages);
-    const threshold = Math.floor(provider.getContextWindow() * 0.15);  // 15%阈值
+    const usagePercent = Math.floor(usedTokens / contextWindow * 100);
+    const triggerThreshold = Math.floor(contextWindow * 0.8);  // 触发阈值：80%
 
-    // 当剩余token少于阈值时自动压缩（使用统一的 compact 方法）
-    if (remainingTokens < threshold) {
-      console.log(LAIN_COLORS.muted(`[COMPRESS] ${usedTokens} tokens used, ${remainingTokens} remaining, compressing...`));
+    // 当使用超过触发阈值时自动压缩
+    if (usedTokens > triggerThreshold) {
+      this.emit('context_compressed', {
+        before: existingMessages.length,
+        after: 0,
+        tokensBefore: usedTokens,
+        tokensAfter: 0,
+        message: `Context too large (${usagePercent}%), compressing...`
+      });
       await this.compact();
     }
 
@@ -593,45 +608,60 @@ async init() {
   // 公开方法：手动压缩历史（使用 LLM 生成摘要）
   public async compact(): Promise<void> {
     if (!this.llm) return;
+    const provider = this.llm.getProvider();
+    const targetTokens = Math.floor(provider.getContextWindow() * 0.4);  // 目标：40%以下
+    await this.compactToTarget(targetTokens);
+  }
+
+  // 压缩到指定目标tokens以下
+  private async compactToTarget(targetTokens: number): Promise<void> {
+    if (!this.llm) return;
     const allMessages = this.llm.getMessages();
     const tokenCounter = new TokenCounter();
     const provider = this.llm.getProvider();
     tokenCounter.setContextWindow(provider.getContextWindow());
 
     const usedTokens = tokenCounter.estimateMessages(allMessages);
-    const maxTokens = Math.floor(provider.getContextWindow() * 0.6);  // 目标：60%以下
 
-    // 如果 tokens 已经足够低，不需要压缩
-    if (usedTokens < maxTokens && allMessages.length <= 20) {
+    // 如果 tokens 已经低于目标，不需要压缩
+    if (usedTokens < targetTokens) {
       this.emit('context_compressed', { before: allMessages.length, after: allMessages.length, tokensBefore: usedTokens, tokensAfter: usedTokens });
       return;
     }
 
-    // 保留最近 10 条消息完整（减少到10条）
-    const recentMessages = allMessages.slice(-10);
-    const oldMessages = allMessages.slice(0, -10);
+    // 根据超量程度决定保留消息数量
+    const ratio = usedTokens / targetTokens;
+    let keepCount = ratio > 2 ? 3 : ratio > 1.5 ? 5 : 8;
+    keepCount = Math.min(keepCount, Math.floor(allMessages.length * 0.3));  // 最多保留30%
 
-    // 对 recentMessages 中的超长内容进行截断（每条消息最多 2000 chars）
+    const recentMessages = allMessages.slice(-keepCount);
+    const oldMessages = allMessages.slice(0, -keepCount);
+
+    // 对 recentMessages 中的超长内容进行截断（每条消息最多 1500 chars）
     const truncatedRecent = recentMessages.map(m => ({
       ...m,
-      content: (m.content || '').length > 2000
-        ? (m.content || '').slice(0, 2000) + '...[截断]'
+      content: (m.content || '').length > 1500
+        ? (m.content || '').slice(0, 1500) + '...[truncated]'
         : m.content,
     }));
 
-    // 用 LLM 生成摘要
-    const summary = await this.generateSummary(oldMessages);
+    // 用 LLM 生成摘要（如果还有旧消息）
+    if (oldMessages.length > 0) {
+      const summary = await this.generateSummary(oldMessages);
+      const compressed = [summary, ...truncatedRecent];
+      this.llm.setMessages(compressed);
 
-    const compressed = [summary, ...truncatedRecent];
-    this.llm.setMessages(compressed);
-
-    // 检查压缩后的 tokens，如果仍然超限，继续压缩
-    const newTokens = tokenCounter.estimateMessages(compressed);
-    if (newTokens > maxTokens && compressed.length > 5) {
-      // 再次压缩，只保留最近 5 条
-      const finalMessages = compressed.slice(-5);
-      const finalSummary = await this.generateSummary(compressed.slice(0, -5));
-      this.llm.setMessages([finalSummary, ...finalMessages]);
+      // 检查压缩后的 tokens，如果仍然超限，继续压缩
+      const newTokens = tokenCounter.estimateMessages(compressed);
+      if (newTokens > targetTokens && compressed.length > 3) {
+        // 再次压缩，只保留最近 2 条 + 摘要
+        const finalMessages = compressed.slice(-2);
+        const secondSummary = await this.generateSummary(compressed.slice(0, -2));
+        this.llm.setMessages([secondSummary, ...finalMessages]);
+      }
+    } else {
+      // 没有旧消息，只截断
+      this.llm.setMessages(truncatedRecent);
     }
 
     this.emit('context_compressed', {
@@ -642,17 +672,17 @@ async init() {
     });
   }
 
-  // 用 LLM 生成历史摘要
+  // Generate history summary using LLM
   private async generateSummary(messages: ChatMessage[]): Promise<ChatMessage> {
-    // 构建消息文本（智能截断）
+    // Build messages text (smart truncation)
     const messagesText = messages.map(m => {
       const role = m.role === 'user' ? 'User' : m.role === 'assistant' ? 'AI' : 'System';
       let content = m.content || '';
       
-      // 保留工具调用信息
+      // Preserve tool call info
       if (m.toolCalls && m.toolCalls.length > 0) {
         const toolInfo = m.toolCalls.map(tc => {
-          // 保留关键参数（路径、命令等）
+          // Preserve key args (path, command, etc.)
           const args = tc.arguments || {};
           const keyArgs = args.path || args.command || args.files || '';
           return `${tc.name}${keyArgs ? `(${keyArgs})` : ''}`;
@@ -660,7 +690,7 @@ async init() {
         content = `[Tools: ${toolInfo}] ${content.slice(0, 50)}`;
       }
       
-      // 智能截断：保留开头和结尾
+      // Smart truncation: preserve start and end
       if (content.length > 150) {
         return `${role}: ${content.slice(0, 80)}...${content.slice(-40)}`;
       }
@@ -673,10 +703,10 @@ async init() {
       const response = await this.llm.generateDirect(prompt);
       return {
         role: 'assistant',
-        content: `[历史摘要] ${response.content || '早期对话已压缩'}`,
+        content: `[History Summary] ${response.content || 'Early conversation compressed'}`,
       };
     } catch {
-      // 失败时保留用户消息的主题
+      // Fallback: preserve user message topics
       const userTopics = messages
         .filter(m => m.role === 'user')
         .map(m => (m.content || '').slice(0, 60))
@@ -684,7 +714,7 @@ async init() {
         .join(' → ');
       return {
         role: 'assistant',
-        content: `[历史摘要] 任务链: ${userTopics}`,
+        content: `[History Summary] Task chain: ${userTopics}`,
       };
     }
   }
