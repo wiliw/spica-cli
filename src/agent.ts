@@ -435,7 +435,7 @@ async init() {
           }
 
           // 文件编辑成功时发送diff预览
-          if (result.success && (tc.name === 'file_write' || tc.name === 'file_edit') && result.diff) {
+          if (result.success && (tc.name === 'file_write' || tc.name === 'file_edit' || tc.name === 'file_multi_edit') && result.diff) {
             this.emit('diff_preview', {
               filePath: tcArgs.path || tcArgs.file_path,
               diff: result.diff,

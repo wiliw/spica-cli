@@ -104,6 +104,13 @@ export function setupAgentEvents(
     screen.refreshInput();
   });
 
+  // Diff预览（文件编辑时显示详细diff）
+  agent.on('diff_preview', (data: any) => {
+    screen.appendScroll(LAIN_COLORS.file(`\n[DIFF] ${data.filePath}\n`));
+    screen.appendScroll(data.diff + '\n');
+    screen.restoreCursor();
+  });
+
   agent.on('permission_request', async (data: any) => {
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(false);
