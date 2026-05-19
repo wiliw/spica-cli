@@ -4,11 +4,10 @@ import { executeTool, getAllToolDefinitions, setWorkspace, getWorkspace } from '
 import { initMCP, shutdownMCP } from './mcp/client';
 import { initSkills } from './skills/index';
 import { getProviderConfig } from './utils/config';
-import { getSystemPrompt } from './prompts/system';
+import { getSystemPrompt, getCompactPrompt } from './prompts/system';
 import { loadProjectConfig as loadAgentsConfig, autoDetectProject, createAgentsMd } from './utils/projectConfig';
 import { loadProjectState, saveProjectState, updateProjectTodos, loadProjectContext, saveProjectContext, ensureProjectDir } from './storage/projectState';
 import { runPreHooks, runPostHooks } from './hooks';
-import { createCheckpoint, analyzeError, getRecoveryStrategy, restoreCheckpoint, getLastCheckpoint } from './core/errorRecovery';
 import { LAIN_COLORS } from './cli/ui/colors';
 import { EventEmitter } from 'events';
 import fs from 'fs-extra';
@@ -567,7 +566,6 @@ async init() {
   }
 
   private generateErrorSuggestion(toolName: string, error: string, args: any): string {
-    const lastCp = getLastCheckpoint();
     const suggestions: Record<string, (e: string, a: any) => string> = {
       file_read: (e, a) =>
         e.includes('ENOENT') ? `文件不存在: ${a.path}. 建议: 检查路径或使用glob查找`
@@ -587,11 +585,6 @@ async init() {
 
     let baseSuggestion = suggestions[toolName]?.(error, args) || `工具 ${toolName} 失败. 建议: 检查参数`;
 
-    // 如果有checkpoint，添加回滚选项
-    if (lastCp && (toolName === 'file_write' || toolName === 'file_edit' || toolName === 'bash')) {
-      baseSuggestion += `. 如需回滚，可恢复到checkpoint`;
-    }
-
     return baseSuggestion;
   }
 
@@ -599,62 +592,97 @@ async init() {
   public async compact(): Promise<void> {
     if (!this.llm) return;
     const allMessages = this.llm.getMessages();
+    const tokenCounter = new TokenCounter();
+    const provider = this.llm.getProvider();
+    tokenCounter.setContextWindow(provider.getContextWindow());
 
-    if (allMessages.length <= 20) {
-      this.emit('context_compressed', { before: allMessages.length, after: allMessages.length });
+    const usedTokens = tokenCounter.estimateMessages(allMessages);
+    const maxTokens = Math.floor(provider.getContextWindow() * 0.6);  // 目标：60%以下
+
+    // 如果 tokens 已经足够低，不需要压缩
+    if (usedTokens < maxTokens && allMessages.length <= 20) {
+      this.emit('context_compressed', { before: allMessages.length, after: allMessages.length, tokensBefore: usedTokens, tokensAfter: usedTokens });
       return;
     }
 
-    // 保留最近 15 条消息完整
-    const recentMessages = allMessages.slice(-15);
-    const oldMessages = allMessages.slice(0, -15);
+    // 保留最近 10 条消息完整（减少到10条）
+    const recentMessages = allMessages.slice(-10);
+    const oldMessages = allMessages.slice(0, -10);
+
+    // 对 recentMessages 中的超长内容进行截断（每条消息最多 2000 chars）
+    const truncatedRecent = recentMessages.map(m => ({
+      ...m,
+      content: (m.content || '').length > 2000
+        ? (m.content || '').slice(0, 2000) + '...[截断]'
+        : m.content,
+    }));
 
     // 用 LLM 生成摘要
     const summary = await this.generateSummary(oldMessages);
 
-    const compressed = [summary, ...recentMessages];
+    const compressed = [summary, ...truncatedRecent];
     this.llm.setMessages(compressed);
 
-    this.emit('context_compressed', { before: allMessages.length, after: compressed.length });
+    // 检查压缩后的 tokens，如果仍然超限，继续压缩
+    const newTokens = tokenCounter.estimateMessages(compressed);
+    if (newTokens > maxTokens && compressed.length > 5) {
+      // 再次压缩，只保留最近 5 条
+      const finalMessages = compressed.slice(-5);
+      const finalSummary = await this.generateSummary(compressed.slice(0, -5));
+      this.llm.setMessages([finalSummary, ...finalMessages]);
+    }
+
+    this.emit('context_compressed', {
+      before: allMessages.length,
+      after: this.llm.getMessages().length,
+      tokensBefore: usedTokens,
+      tokensAfter: tokenCounter.estimateMessages(this.llm.getMessages()),
+    });
   }
 
   // 用 LLM 生成历史摘要
   private async generateSummary(messages: ChatMessage[]): Promise<ChatMessage> {
-    // 构建摘要 prompt
-    const prompt = `请总结以下对话历史的关键内容，包括：
-1. 用户的主要需求/任务
-2. 已完成的重要工作（文件修改、工具执行结果）
-3. 重要的决策或结论
-4. 遇到的问题和解决方案
+    // 构建消息文本（智能截断）
+    const messagesText = messages.map(m => {
+      const role = m.role === 'user' ? 'User' : m.role === 'assistant' ? 'AI' : 'System';
+      let content = m.content || '';
+      
+      // 保留工具调用信息
+      if (m.toolCalls && m.toolCalls.length > 0) {
+        const toolInfo = m.toolCalls.map(tc => {
+          // 保留关键参数（路径、命令等）
+          const args = tc.arguments || {};
+          const keyArgs = args.path || args.command || args.files || '';
+          return `${tc.name}${keyArgs ? `(${keyArgs})` : ''}`;
+        }).join(', ');
+        content = `[Tools: ${toolInfo}] ${content.slice(0, 50)}`;
+      }
+      
+      // 智能截断：保留开头和结尾
+      if (content.length > 150) {
+        return `${role}: ${content.slice(0, 80)}...${content.slice(-40)}`;
+      }
+      return `${role}: ${content}`;
+    }).join('\n');
 
-用简洁的中文总结（不超过 200 字）：
-
-${messages.map(m => {
-  const role = m.role === 'user' ? '用户' : m.role === 'assistant' ? 'AI' : '系统';
-  let content = m.content || '';
-  // 工具调用信息
-  if (m.toolCalls) {
-    content += ` [工具: ${m.toolCalls.map(tc => tc.name).join(', ')}]`;
-  }
-  return `${role}: ${content.slice(0, 100)}`;
-}).join('\n')}`;
+    const prompt = getCompactPrompt(messagesText);
 
     try {
-      // 临时创建一个不带历史的请求
       const response = await this.llm.generateDirect(prompt);
       return {
         role: 'assistant',
         content: `[历史摘要] ${response.content || '早期对话已压缩'}`,
       };
     } catch {
-      // 如果 LLM 调用失败，使用简单摘要
+      // 失败时保留用户消息的主题
       const userTopics = messages
         .filter(m => m.role === 'user')
-        .map(m => (m.content || '').slice(0, 50))
-        .join(' | ');
+        .map(m => (m.content || '').slice(0, 60))
+        .slice(0, 5)
+        .join(' → ');
       return {
         role: 'assistant',
-        content: `[历史摘要] ${userTopics.slice(0, 200)}`,
+        content: `[历史摘要] 任务链: ${userTopics}`,
       };
     }
   }

@@ -1,12 +1,12 @@
 import fs from 'fs-extra';
 import { execa } from 'execa';
+import * as pty from 'node-pty';
 import simpleGit from 'simple-git';
-import { resolve, isAbsolute, dirname, join } from 'path';
+import { resolve as pathResolve, isAbsolute, dirname, join } from 'path';
 import fastGlob from 'fast-glob';
 import { SpicaAgent } from '../agent';
 import { SubAgentTask, getSubAgentConfig, isToolAllowed, summarizeResult } from './subAgent';
 import { computeDiff, formatDiff, generateEditDiff } from '../cli/ui/diff';
-import { restoreCheckpoint, getLastCheckpoint, setCheckpointWorkspace } from '../core/errorRecovery';
 import { getMCPManager } from '../mcp/client';
 
 // WORKSPACE 可以通过 setWorkspace 函数更新
@@ -15,7 +15,6 @@ let WORKSPACE = process.cwd();
 // 设置工作目录
 export function setWorkspace(path: string): void {
   WORKSPACE = path;
-  setCheckpointWorkspace(path);  // 同步到errorRecovery
 }
 
 // 获取当前工作目录
@@ -196,12 +195,22 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'bash',
-    description: 'Run shell command. For build/test/package ops.',
+    description: 'Run shell command. For build/test/package ops. Use interactive=true for TUI apps that need real PTY with input/output. Use tty=true for one-shot TTY execution. Use detached=true to run in background. Use action=status/kill to manage detached sessions.',
     parameters: {
       type: 'object' as const,
       properties: {
-        command: { type: 'string', description: 'Command' },
-        timeout: { type: 'number', description: 'Timeout (default 120)' },
+        command: { type: 'string', description: 'Command to execute' },
+        timeout: { type: 'number', description: 'Timeout in seconds (default 120)' },
+        tty: { type: 'boolean', description: 'Provide TTY environment (one-shot, no input)' },
+        detached: { type: 'boolean', description: 'Run in background (tmux/screen), user can attach' },
+        interactive: { type: 'boolean', description: 'Enable real PTY interaction (AI can input/output)' },
+        inputs: { type: 'array', items: { type: 'string' }, description: 'Input sequence to send (for interactive mode). Use \x04 for Ctrl+D' },
+        expect: { type: 'array', items: { type: 'object' }, description: 'Wait for output pattern then input: [{ wait: "pattern" or "^regex$", input: "text" }] - use ^ for regex match' },
+        maxOutputLength: { type: 'number', description: 'Max output length in chars (default 50000, prevents memory overflow)' },
+        action: { type: 'string', enum: ['status', 'kill'], description: 'Action for detached session management' },
+        session: { type: 'string', description: 'Session ID for status/kill actions' },
+        inputFile: { type: 'string', description: 'Read inputs from file (for large inputs)' },
+        outputFile: { type: 'string', description: 'Write output to file (for large outputs)' },
       },
       required: ['command'],
     },
@@ -240,15 +249,6 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
       properties: {
         path: { type: 'string', description: 'New path (optional)' },
       },
-      required: [],
-    },
-  },
-  {
-    name: 'checkpoint_restore',
-    description: 'Restore git checkpoint.',
-    parameters: {
-      type: 'object' as const,
-      properties: {},
       required: [],
     },
   },
@@ -414,27 +414,14 @@ export async function executeTool(
     switch (name) {
       case 'workspace':
         if (safeArgs.path) {
-          const newPath = resolve(safeArgs.path);
+          const newPath = pathResolve(safeArgs.path);
           if (!await fs.pathExists(newPath)) {
             return { success: false, error: `Path does not exist: ${newPath}` };
           }
           WORKSPACE = newPath;
-          setCheckpointWorkspace(newPath);  // 同步到errorRecovery
           return { success: true, output: `Workspace: ${WORKSPACE}` };
         }
         return { success: true, output: `Workspace: ${WORKSPACE}` };
-
-      case 'checkpoint_restore': {
-        const lastCp = await getLastCheckpoint(WORKSPACE);
-        if (!lastCp) {
-          return { success: false, error: 'No checkpoint available to restore' };
-        }
-        const result = await restoreCheckpoint(lastCp.id);
-        return {
-          success: result.success,
-          output: result.success ? `Restored to checkpoint: ${lastCp.id.slice(0, 7)}` : result.message,
-        };
-      }
 
       case 'file_read': {
         const readPath = resolvePath(safeArgs.path);
@@ -601,21 +588,132 @@ export async function executeTool(
           return { success: false, error: 'Command is required' };
         }
         const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
+        const useTTY = safeArgs.tty === true;
+        const detached = safeArgs.detached === true;
+        const interactive = safeArgs.interactive === true;
+        let inputs = (safeArgs.inputs as string[]) || [];
+        const expect = (safeArgs.expect as Array<{ wait: string; input: string }>) || [];
+        const maxOutputLength = (safeArgs.maxOutputLength as number) || 50000;
+        const action = safeArgs.action as string;
+        const session = safeArgs.session as string;
+        const inputFile = safeArgs.inputFile as string;
+        const outputFile = safeArgs.outputFile as string;
+
         try {
-          const bashResult = await execa(command, {
+          // Read inputs from file if provided
+          if (inputFile) {
+            const inputPath = pathResolve(WORKSPACE, inputFile);
+            if (!fs.existsSync(inputPath)) {
+              return { success: false, error: `Input file not found: ${inputFile}` };
+            }
+            const fileContent = await fs.readFile(inputPath, 'utf-8');
+            // Split by lines, each line is one input
+            inputs = fileContent.split('\n').filter(line => line.length > 0);
+          }
+
+          // Detached session management actions
+          if (action === 'status') {
+            // Check session status
+            const listResult = await execa('tmux list-sessions -F "#{session_name}: #{session_attached}" 2>/dev/null || screen -ls 2>/dev/null', {
+              shell: true,
+              timeout: 5000,
+              reject: false,
+            });
+            const output = listResult.stdout || listResult.stderr || 'No active sessions';
+            return { success: true, output };
+          }
+
+          if (action === 'kill' && session) {
+            // Kill specific session
+            const killResult = await execa(`tmux kill-session -t ${session} 2>/dev/null || screen -S ${session} -X quit 2>/dev/null`, {
+              shell: true,
+              timeout: 5000,
+              reject: false,
+            });
+            return { success: true, output: `Session ${session} killed` };
+          }
+          // 交互式 PTY 模式：AI 可以输入/输出
+          if (interactive) {
+            return await runInteractivePty(command, WORKSPACE, timeout, inputs, expect, maxOutputLength, outputFile, eventCallback);
+          }
+
+          // 分离模式：使用 tmux 运行（用户可 attach 查看）
+          if (detached) {
+            const sessionId = `spica_${Date.now()}`;
+            const escapedCommand = command.replace(/'/g, "'\\''");
+
+            // 检测 tmux 是否可用
+            const actualCommand = `tmux new-session -d -s ${sessionId} '${escapedCommand}' 2>/dev/null || screen -dmS ${sessionId} ${escapedCommand} 2>/dev/null || (${escapedCommand} &)`;
+
+            const bashResult = await execa(actualCommand, {
+              shell: true,
+              cwd: WORKSPACE,
+              timeout: 5000,  // 启动命令本身很快
+              reject: false,
+            });
+
+            return {
+              success: true,
+              output: `Started in detached mode.\nSession: ${sessionId}\n\nTo view:\n  tmux attach -t ${sessionId}\n  # or: screen -r ${sessionId}\n\nTo kill:\n  tmux kill-session -t ${sessionId}\n  # or: screen -S ${sessionId} -X quit`,
+            };
+          }
+
+          let actualCommand = command;
+
+          if (useTTY) {
+            // 检测最佳 TTY 模拟方案
+            const platform = process.platform;
+
+            if (platform === 'linux' || platform === 'darwin') {
+              // 使用 script 模拟 TTY
+              const escapedCommand = command.replace(/"/g, '\\"').replace(/\$/g, '\\$');
+              actualCommand = `script -q -c "${escapedCommand}" /dev/null 2>&1`;
+            }
+          }
+
+          const bashResult = await execa(actualCommand, {
             shell: true,
             cwd: WORKSPACE,
             timeout: timeout,
             reject: false,
           });
+          // 检查是否超时
+          if (bashResult.timedOut) {
+            return {
+              success: false,
+              error: `Timeout after ${timeout / 1000}s\nOutput:\n${bashResult.stdout || bashResult.stderr || ''}`,
+            };
+          }
           // 合并stdout和stderr显示完整输出
-          const output = (bashResult.stdout + '\n' + bashResult.stderr).trim();
+          const fullOutput = (bashResult.stdout + '\n' + bashResult.stderr).trim();
+          // 截断超长输出（防止内存溢出）
+          const truncateOutput = (text: string, maxLen: number): string => {
+            if (text.length <= maxLen) return text;
+            return text.slice(0, maxLen) + `\n... [truncated, total ${text.length} chars]`;
+          };
+          const output = truncateOutput(fullOutput, maxOutputLength);
+
+          // Write output to file if provided
+          if (outputFile) {
+            const outputPath = pathResolve(WORKSPACE, outputFile);
+            await fs.writeFile(outputPath, fullOutput, 'utf-8');
+            return {
+              success: bashResult.exitCode === 0,
+              output: `Output written to ${outputFile} (${fullOutput.length} chars)`,
+              error: bashResult.exitCode !== 0 ? output : undefined,
+            };
+          }
+
           return {
             success: bashResult.exitCode === 0,
             output: bashResult.exitCode === 0 ? output : undefined,
             error: bashResult.exitCode !== 0 ? output : undefined,
           };
         } catch (bashError: any) {
+          // 捕获超时错误
+          if (bashError.message?.includes('timed out') || bashError.name === 'TimedOutError') {
+            return { success: false, error: `Timeout after ${timeout / 1000}s` };
+          }
           return { success: false, error: bashError.message };
         }
       }
@@ -690,15 +788,48 @@ export async function executeTool(
 
       case 'web_search': {
         const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(safeArgs.query)}`;
-        const searchResult = await execa(`curl -s "${searchUrl}"`, { shell: true, timeout: (safeArgs.timeout || 15) * 1000 });
+        const timeoutMs = (safeArgs.timeout || 15) * 1000;
+
+        // 尝试使用代理环境变量
+        const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.https_proxy;
+        const curlProxy = proxyUrl ? `--proxy "${proxyUrl}"` : '';
+
+        const searchResult = await execa(`curl -sL ${curlProxy} "${searchUrl}"`, {
+          shell: true,
+          timeout: timeoutMs,
+          reject: false,
+        });
+
+        if (searchResult.stdout.length === 0 && searchResult.stderr) {
+          return {
+            success: false,
+            error: `Search failed: ${searchResult.stderr}. Try setting HTTPS_PROXY environment variable.`
+          };
+        }
+
         return { success: true, output: searchResult.stdout.substring(0, 5000) };
       }
 
       case 'web_fetch': {
-        const fetchResult = await execa(`curl -sL "${safeArgs.url}"`, { 
-          shell: true, 
-          timeout: (safeArgs.timeout || 15) * 1000,
+        const timeoutMs = (safeArgs.timeout || 15) * 1000;
+
+        // 尝试使用代理环境变量
+        const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.https_proxy;
+        const curlProxy = proxyUrl ? `--proxy "${proxyUrl}"` : '';
+
+        const fetchResult = await execa(`curl -sL ${curlProxy} "${safeArgs.url}"`, {
+          shell: true,
+          timeout: timeoutMs,
+          reject: false,
         });
+
+        if (fetchResult.stdout.length === 0 && fetchResult.stderr) {
+          return {
+            success: false,
+            error: `Fetch failed: ${fetchResult.stderr}. Try setting HTTPS_PROXY environment variable.`
+          };
+        }
+
         return { success: true, output: fetchResult.stdout.substring(0, 10000) };
       }
 
@@ -967,7 +1098,7 @@ export async function executeTool(
 }
 
 function resolvePath(path: string): string {
-  return isAbsolute(path) ? path : resolve(WORKSPACE, path);
+  return isAbsolute(path) ? path : pathResolve(WORKSPACE, path);
 }
 
 async function detectProjectType(workspace: string): Promise<string> {
@@ -980,4 +1111,130 @@ async function detectProjectType(workspace: string): Promise<string> {
   if (await fs.pathExists(join(workspace, 'requirements.txt'))) return 'python';
   if (await fs.pathExists(join(workspace, 'Cargo.toml'))) return 'rust';
   return 'unknown';
+}
+
+// 交互式 PTY 执行（支持 AI 输入/输出）
+async function runInteractivePty(
+  command: string,
+  cwd: string,
+  timeout: number,
+  inputs: string[],
+  expect: Array<{ wait: string; input: string }>,
+  maxOutputLength: number,
+  outputFile?: string,
+  eventCallback?: (event: string, data: any) => void
+): Promise<ToolResult> {
+  return new Promise((resolve) => {
+    // 创建 PTY（通过 shell 执行，支持 cd、&& 等语法）
+    const ptyProcess = pty.spawn('/bin/bash', ['-c', command], {
+      name: 'xterm-color',
+      cols: 80,
+      rows: 30,
+      cwd: cwd,
+      env: process.env as { [key: string]: string },
+    });
+
+    let output = '';
+    let inputIndex = 0;
+    let expectIndex = 0;
+    let resolved = false;
+
+    // 监听输出（使用 onData）
+    ptyProcess.onData((data: string) => {
+      output += data;
+
+      // 发送事件给 UI（实时显示）
+      if (eventCallback) {
+        eventCallback('pty_output', { data });
+      }
+
+      // 检查 expect 匹配
+      if (expect.length > 0 && expectIndex < expect.length) {
+        const currentExpect = expect[expectIndex];
+        // 支持正则表达式匹配（如果 wait 以 ^ 开头）
+        const isRegex = currentExpect.wait.startsWith('^');
+        const matched = isRegex
+          ? new RegExp(currentExpect.wait).test(output)
+          : output.includes(currentExpect.wait);
+
+        if (matched) {
+          ptyProcess.write(currentExpect.input + '\n');
+          expectIndex++;
+        }
+      }
+    });
+
+    // 监听结束（使用 onExit）
+    ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
+      if (!resolved) {
+        resolved = true;
+        // 等待确保所有输出被捕获（嵌套 shell 需要更长延迟）
+        const delay = command.includes('bash') && command.includes('-c') ? 300 : 150;
+        setTimeout(async () => {
+          // 截断超长输出
+          const truncateOutput = (text: string, maxLen: number): string => {
+            if (text.length <= maxLen) return text;
+            return text.slice(0, maxLen) + `\n... [truncated, total ${text.length} chars]`;
+          };
+
+          // Write to file if outputFile provided
+          if (outputFile) {
+            const outputPath = pathResolve(cwd, outputFile);
+            await fs.writeFile(outputPath, output.trim(), 'utf-8');
+            resolve({
+              success: exitCode === 0,
+              output: `Output written to ${outputFile} (${output.length} chars)`,
+              error: exitCode !== 0 ? truncateOutput(output.trim(), maxOutputLength) : undefined,
+            });
+            return;
+          }
+
+          const finalOutput = truncateOutput(output.trim(), maxOutputLength);
+          resolve({
+            success: exitCode === 0,
+            output: exitCode === 0 ? finalOutput : undefined,
+            error: exitCode !== 0 ? finalOutput : undefined,
+          });
+        }, delay);
+      }
+    });
+
+    // 发送预定义输入（按时间间隔，优化延迟）
+    if (inputs.length > 0) {
+      // 根据输入数量动态调整间隔（大量输入时更快）
+      const inputDelay = inputs.length > 20 ? 50 : 200;  // ms
+
+      const sendInputs = () => {
+        if (inputIndex < inputs.length && !resolved) {
+          // 特殊处理：Ctrl+D 直接发送（不加换行）
+          const input = inputs[inputIndex];
+          if (input === '\x04') {
+            ptyProcess.write('\x04');
+          } else {
+            ptyProcess.write(input + '\n');
+          }
+          inputIndex++;
+          setTimeout(sendInputs, inputDelay);
+        }
+      };
+      // 根据命令复杂度决定初始延迟
+      const initialDelay = command.includes('cat') ? 500 : 1000;
+      setTimeout(sendInputs, initialDelay);
+    }
+
+    // 超时处理
+    setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        ptyProcess.write('\x03');  // 发送 Ctrl+C
+        // 等待一小段时间让进程清理
+        setTimeout(() => {
+          resolve({
+            success: false,
+            error: `Timeout after ${timeout / 1000}s\nOutput:\n${output.trim()}`,
+          });
+        }, 100);
+      }
+    }, timeout);
+  });
 }
