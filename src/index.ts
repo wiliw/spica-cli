@@ -387,6 +387,9 @@ program
 
           // Init - 让AI分析代码库并创建 AGENTS.md
           if (cmd === 'init' || cmd.startsWith('init ')) {
+            // 提取用户额外指令
+            const userArgs = cmd.startsWith('init ') ? cmd.slice(5).trim() : '';
+
             const initPrompt = `I am using the init skill to analyze the codebase and create AGENTS.md.
 
 <HARD-GATE>
@@ -466,6 +469,7 @@ List verified available commands:
 | "Guess commands" | Must verify commands exist and are usable |
 | "Write lengthy architecture docs" | Keep it concise, AI agents need quick understanding |
 
+${userArgs ? `\n## Additional Instructions\n${userArgs}\n` : ''}
 Start the analysis, execute step by step, then output the document.`;
 
             handleInput(initPrompt);
