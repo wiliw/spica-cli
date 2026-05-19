@@ -68,9 +68,14 @@ program
 program
   .option('-f, --fresh', 'Start fresh session (no history)')
   .option('-p, --provider <name>', 'Use specific provider')
-  .action(async (options: { fresh?: boolean; provider?: string }) => {
+  .option('--no-tui', 'Run in non-interactive mode (no TUI, simple output)')
+  .action(async (options: { fresh?: boolean; provider?: string; noTui?: boolean }) => {
     const config = await loadConfig();
     const providerName = options.provider || config.defaultProvider || 'openai';
+
+    // 检测是否支持交互式终端
+    const isInteractiveTerminal = process.stdin.isTTY && process.stdout.isTTY;
+    const useSimpleMode = options.noTui || !isInteractiveTerminal;
 
     let providerConfig;
     try {
@@ -95,6 +100,13 @@ program
 
     const agent = new SpicaAgent(providerName, process.cwd());
     state.setAgent(agent);
+
+    // 如果是非交互模式，使用简单输出
+    if (useSimpleMode) {
+      console.log(LAIN_COLORS.muted('[INFO] Running in non-interactive mode (no TUI)'));
+      await runSimpleMode(agent, options.fresh);
+      return;
+    }
 
     // 开始banner动画（并行）
     const bannerPromise = BG.banner();
@@ -366,34 +378,94 @@ program
 
           // 压缩上下文
           if (cmd === 'compact') {
-            const before = agent.getMessages().length;
             await agent.compact();
-            const after = agent.getMessages().length;
-            
-            screen.appendScroll(LAIN_COLORS.secondary(`\n[COMPRESS] ${before} → ${after} messages\n`));
-            
+            // compact 内部已 emit context_compressed 事件，无需重复输出
+            screen.restoreCursor();
             return;
           }
 
           // Init - 让AI分析代码库并创建 AGENTS.md
           if (cmd === 'init' || cmd.startsWith('init ')) {
-            const args = cmd.split(' ').slice(1);
-            const force = args.includes('--force') || args.includes('-f');
+            const initPrompt = `I am using the init skill to analyze the codebase and create AGENTS.md.
 
-            const initPrompt = force
-              ? `分析这个代码库，理解项目结构、主要功能、开发命令、测试方式、代码风格等。然后完全重写 AGENTS.md 文件，包含：
-1. 项目类型和技术栈
-2. 主要入口和核心模块
-3. 开发、构建、测试命令
-4. 代码架构和设计模式
-5. 重要的开发注意事项
+<HARD-GATE>
+Before outputting any document, you must:
+1. Complete all analysis steps
+2. Understand the project's core architecture
+3. Verify all commands are actually available
+</HARD-GATE>
 
-请阅读关键文件（如 package.json、README、配置文件、入口文件）来深入理解项目。`
-              : `分析这个代码库，理解项目结构、主要功能、开发命令、测试方式等。然后创建或更新 AGENTS.md 文件。
+## Analysis Steps (must complete in order)
 
-如果 AGENTS.md 已存在，保持现有内容并补充新发现的信息。如果不存在，创建新文件。
+- [ ] **Step 1: Read project config**
+  - package.json / Cargo.toml / setup.py / pyproject.toml etc.
+  - Identify: language, framework, dependencies, script commands
 
-请阅读关键文件来深入理解项目，写出能帮助未来 AI agent 更好工作的文档。`;
+- [ ] **Step 2: Read existing documentation**
+  - README.md / CHANGELOG.md / docs/ directory
+  - Understand: project purpose, features, usage
+
+- [ ] **Step 3: View directory structure**
+  - List src/ lib/ app/ tests/ and other main directories
+  - Identify entry points: index.ts / main.py / app.js etc.
+
+- [ ] **Step 4: Check test and build configuration**
+  - Test framework, test commands, CI configuration
+  - Build/package configuration
+
+- [ ] **Step 5: Review core code**
+  - Implementation of main modules
+  - Data flow and architecture patterns
+
+## Document Structure
+
+If AGENTS.md exists, preserve valuable content and supplement updates. If not, create a new file.
+
+Must include the following sections:
+
+### Project Overview
+- Type: CLI tool / Web application / Library / Service
+- Purpose: One-sentence description of core functionality
+- Use case: Target users and usage scenarios
+
+### Tech Stack
+- Language and version requirements
+- Core frameworks/libraries (only key ones, max 5)
+- Runtime environment requirements
+
+### Project Structure
+Use a table to list key directories and files:
+| Directory/File | Purpose |
+|----------------|---------|
+| src/           | ...     |
+
+### Development Commands
+List verified available commands:
+- Dev: npm run dev
+- Build: npm run build
+- Test: npm test
+- Other key commands
+
+### Core Architecture
+- Main modules and responsibilities (max 3-4)
+- Data flow/processing flow (one sentence)
+- Key design patterns
+
+### Development Notes
+- Code style highlights
+- Common pitfalls (if found)
+- Modules requiring special attention
+
+## Anti-Pattern Warnings
+
+| Thought | Correct Approach |
+|---------|------------------|
+| "Just write a random overview" | Must be based on actual analysis, cite specific files |
+| "List all dependencies" | Only list core dependencies, don't copy entire package.json |
+| "Guess commands" | Must verify commands exist and are usable |
+| "Write lengthy architecture docs" | Keep it concise, AI agents need quick understanding |
+
+Start the analysis, execute step by step, then output the document.`;
 
             handleInput(initPrompt);
             return;
@@ -468,22 +540,26 @@ program
             const skill = getSkill(skillInput.skillName, process.cwd());
             if (skill) {
               const prompt = buildSkillPrompt(skill, skillInput.args);
-              
+
               screen.appendScroll(LAIN_COLORS.muted(`\n[${skill.name}] ${skill.description}\n`));
               isProcessing = true;
               state.setProcessing(true);
               try {
                 await agent.runLoop(prompt);
+                screen.setStreaming(false);
                 screen.appendScroll(LAIN_COLORS.success('\n[OK] Done\n'));
               } catch (error: any) {
+                screen.setStreaming(false);
                 screen.appendScroll(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
               }
+              screen.restoreCursor();
+              screen.refreshInput();
               isProcessing = false;
               state.setProcessing(false);
               saveSession(process.cwd(), agent.getMessages());
               await processQueue(agent);
               displayStatusLine();  // 只在完成时显示一次
-              
+
               return;
             }
           }
@@ -508,18 +584,22 @@ program
           await agent.runLoop(trimmed);
           if (state.isStreamingOutput()) {
             state.setStreamingOutput(false);
+            screen.setStreaming(false);
             screen.appendScroll('\n');
           }
           screen.appendScroll(LAIN_COLORS.success('\n[OK] Done\n'));
         } catch (error: any) {
           if (state.isStreamingOutput()) {
             state.setStreamingOutput(false);
+            screen.setStreaming(false);
             screen.appendScroll('\n');
           }
           screen.appendScroll(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
         }
-        // 输出完成，恢复光标到输入框
+        // 输出完成，恢复光标到输入框并刷新显示
+        screen.setStreaming(false);
         screen.restoreCursor();
+        screen.refreshInput();
         isProcessing = false;
         state.setProcessing(false);
         saveSession(process.cwd(), agent.getMessages());
@@ -556,24 +636,31 @@ program
         const queue = getInputQueue();
         if (!queue.hasPending()) return;
 
-        
+        // 先设置 isProcessing = true，防止在 mergePending() 期间新的输入触发新的 handleInput
+        isProcessing = true;
+        state.setProcessing(true);
+
         screen.appendScroll(LAIN_COLORS.muted(`\n[QUEUE] Processing ${queue.getStatus().pending} inputs...\n`));
         const mergedInput = queue.mergePending();
 
         if (mergedInput) {
           screen.appendScroll(LAIN_COLORS.muted(`\nCombined input:\n${mergedInput.slice(0, 100)}${mergedInput.length > 100 ? '...' : ''}\n`));
-          isProcessing = true;
-          state.setProcessing(true);
           try {
             await agent.runLoop(mergedInput);
+            screen.setStreaming(false);
             screen.appendScroll(LAIN_COLORS.success('\n[OK] Done\n'));
           } catch (error: any) {
+            screen.setStreaming(false);
             screen.appendScroll(LAIN_COLORS.error(`\n[ERR] Error: ${error.message}\n`));
           }
-          isProcessing = false;
-          state.setProcessing(false);
+          screen.restoreCursor();
+          screen.refreshInput();
           saveSession(process.cwd(), agent.getMessages());
         }
+
+        // 处理完成后设置为 false
+        isProcessing = false;
+        state.setProcessing(false);
       };
 
       // 保持进程运行
@@ -944,5 +1031,132 @@ program
         console.log(LAIN_COLORS.muted('Examples: filesystem, postgres, slack, custom APIs'));
     }
   });
+
+// 非交互模式运行函数
+async function runSimpleMode(agent: SpicaAgent, fresh?: boolean): Promise<void> {
+  try {
+    await agent.init();
+
+    // 设置简单的事件处理（无 TUI）
+    agent.on('stream', (data: any) => {
+      process.stdout.write(data.chunk);
+    });
+
+    agent.on('reasoning', (data: any) => {
+      process.stdout.write(LAIN_COLORS.reasoning(data.content));
+    });
+
+    agent.on('tool_call', (data: any) => {
+      console.log(LAIN_COLORS.tool(`\n[TOOL] ${data.name}`));
+    });
+
+    agent.on('tool_result', (data: any) => {
+      const icon = data.success ? LAIN_COLORS.success('[OK]') : LAIN_COLORS.error('[ERR]');
+      console.log(`${icon} ${data.name}`);
+      if (data.error) {
+        console.log(LAIN_COLORS.error(`  Error: ${data.error.slice(0, 100)}`));
+      }
+    });
+
+    agent.on('message', (data: any) => {
+      if (data.role === 'assistant') {
+        console.log(); // 新行
+      }
+    });
+
+    agent.on('context_compressed', (data: any) => {
+      console.log(LAIN_COLORS.secondary(`\n[COMPRESS] ${data.before} -> ${data.after} messages`));
+    });
+
+    agent.on('connection_error', (data: any) => {
+      console.log(LAIN_COLORS.error(`\nConnection Error: ${data.type}`));
+      console.log(LAIN_COLORS.muted(data.hint));
+    });
+
+    const providerConfig = state.getProviderConfig();
+    const model = providerConfig?.model || 'unknown';
+    console.log(LAIN_COLORS.success(`[OK] Connected to ${model}`));
+    console.log(LAIN_COLORS.muted('\nNon-interactive mode: type your request and press Enter'));
+    console.log(LAIN_COLORS.muted('Press Ctrl+C to exit, Ctrl+D to interrupt'));
+
+    // 清空历史（如果指定）
+    if (fresh) {
+      agent.setMessages([]);
+      console.log(LAIN_COLORS.muted('[INFO] Session cleared'));
+    }
+
+    // 简单的 readline 模式
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      prompt: '> ',
+    });
+
+    rl.prompt();
+
+    rl.on('line', async (input: string) => {
+      const trimmed = input.trim();
+      if (!trimmed) {
+        rl.prompt();
+        return;
+      }
+
+      // 处理特殊命令
+      if (trimmed === 'quit' || trimmed === 'exit') {
+        rl.close();
+        return;
+      }
+
+      if (trimmed === 'help') {
+        console.log('Commands: quit, exit, help, /clear, /compact, /history, /status');
+        rl.prompt();
+        return;
+      }
+
+      if (trimmed.startsWith('/')) {
+        const cmd = trimmed.slice(1).toLowerCase();
+        if (cmd === 'clear') {
+          agent.setMessages([]);
+          console.log(LAIN_COLORS.muted('[OK] Session cleared'));
+        } else if (cmd === 'compact') {
+          await agent.compact();
+        } else if (cmd === 'history') {
+          const messages = agent.getMessages();
+          console.log(LAIN_COLORS.muted(`\n[History] ${messages.length} messages`));
+        } else if (cmd === 'status') {
+          const messages = agent.getMessages();
+          console.log(LAIN_COLORS.primary(`\n[Status]`));
+          console.log(`  Messages: ${messages.length}`);
+          console.log(`  Mode: ${state.isBypassMode() ? 'bypass' : 'strict'}`);
+        } else {
+          console.log(LAIN_COLORS.warning(`Unknown command: ${trimmed}`));
+        }
+        rl.prompt();
+        return;
+      }
+
+      // 执行请求
+      try {
+        console.log(LAIN_COLORS.muted('\n[PROCESSING]...'));
+        const response = await agent.runLoop(trimmed);
+        console.log(LAIN_COLORS.success('\n[OK] Done'));
+      } catch (error: any) {
+        console.log(LAIN_COLORS.error(`\n[ERR] ${error.message}`));
+      }
+
+      rl.prompt();
+    });
+
+    rl.on('close', () => {
+      console.log(LAIN_COLORS.muted('\n[EXIT] Goodbye!'));
+      saveSession(process.cwd(), agent.getMessages());
+      process.exit(0);
+    });
+
+  } catch (error: any) {
+    console.log(LAIN_COLORS.error(`Error: ${error.message}`));
+    process.exit(1);
+  }
+}
 
 program.parse();
