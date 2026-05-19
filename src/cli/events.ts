@@ -64,6 +64,9 @@ export function setupAgentEvents(
   });
 
   agent.on('reasoning', (data: any) => {
+    // 收到推理内容，停止心跳
+    stopHeartbeat();
+
     // 设置流式状态
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
@@ -74,7 +77,8 @@ export function setupAgentEvents(
   });
 
   agent.on('tool_call', (data: any) => {
-    // 工具调用开始，结束流式状态
+    // 工具调用开始，停止心跳并结束流式状态
+    stopHeartbeat();
     state.setStreamingOutput(false);
     screen.setStreaming(false);
     if (lastWasReasoning) {
