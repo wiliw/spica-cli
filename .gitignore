@@ -1,1 +1,3 @@
 .spica/
+node_modules/
+test-compress.txt
