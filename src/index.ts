@@ -545,20 +545,15 @@ Start the analysis, execute step by step, then output the document.`;
               screen.appendScroll(LAIN_COLORS.muted(`\n[${skill.name}] ${skill.description}\n`));
               isProcessing = true;
               state.setProcessing(true);
-              // 启动心跳
-              createHeartbeat((msg) => screen.appendScroll(LAIN_COLORS.muted(msg)), { interval: 3000, message: '.' });
-              startHeartbeat();
               try {
                 await agent.runLoop(prompt);
-                stopHeartbeat();
                 screen.setStreaming(false);
                 screen.appendScroll(LAIN_COLORS.success('\n[OK] Done\n'));
               } catch (error: any) {
-                stopHeartbeat();
+                stopHeartbeat();  // 错误时停止心跳
                 screen.setStreaming(false);
                 screen.appendScroll(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
               }
-              clearHeartbeat();
               screen.restoreCursor();
               screen.refreshInput();
               isProcessing = false;
@@ -584,14 +579,11 @@ Start the analysis, execute step by step, then output the document.`;
         isProcessing = true;
         state.setProcessing(true);
 
-        // 显示处理状态并启动心跳
+        // 显示处理状态（心跳由 waiting_for_llm 事件自动启动）
         screen.appendScroll(LAIN_COLORS.muted('Processing... (ESC ESC to interrupt)\n'));
-        createHeartbeat((msg) => screen.appendScroll(LAIN_COLORS.muted(msg)), { interval: 3000, message: '.' });
-        startHeartbeat();
 
         try {
           await agent.runLoop(trimmed);
-          stopHeartbeat();  // 停止心跳
           if (state.isStreamingOutput()) {
             state.setStreamingOutput(false);
             screen.setStreaming(false);
@@ -599,7 +591,7 @@ Start the analysis, execute step by step, then output the document.`;
           }
           screen.appendScroll(LAIN_COLORS.success('\n[OK] Done\n'));
         } catch (error: any) {
-          stopHeartbeat();  // 停止心跳
+          stopHeartbeat();  // 错误时停止心跳
           if (state.isStreamingOutput()) {
             state.setStreamingOutput(false);
             screen.setStreaming(false);
@@ -607,7 +599,6 @@ Start the analysis, execute step by step, then output the document.`;
           }
           screen.appendScroll(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
         }
-        clearHeartbeat();  // 清理心跳
         // 输出完成，恢复光标到输入框并刷新显示
         screen.setStreaming(false);
         screen.restoreCursor();
@@ -657,20 +648,15 @@ Start the analysis, execute step by step, then output the document.`;
 
         if (mergedInput) {
           screen.appendScroll(LAIN_COLORS.muted(`\nCombined input:\n${mergedInput.slice(0, 100)}${mergedInput.length > 100 ? '...' : ''}\n`));
-          // 启动心跳
-          createHeartbeat((msg) => screen.appendScroll(LAIN_COLORS.muted(msg)), { interval: 3000, message: '.' });
-          startHeartbeat();
           try {
             await agent.runLoop(mergedInput);
-            stopHeartbeat();
             screen.setStreaming(false);
             screen.appendScroll(LAIN_COLORS.success('\n[OK] Done\n'));
           } catch (error: any) {
-            stopHeartbeat();
+            stopHeartbeat();  // 错误时停止心跳
             screen.setStreaming(false);
             screen.appendScroll(LAIN_COLORS.error(`\n[ERR] Error: ${error.message}\n`));
           }
-          clearHeartbeat();
           screen.restoreCursor();
           screen.refreshInput();
           saveSession(process.cwd(), agent.getMessages());
@@ -1055,6 +1041,14 @@ async function runSimpleMode(agent: SpicaAgent, fresh?: boolean): Promise<void> 
   try {
     await agent.init();
 
+    // 创建心跳实例（用于等待 LLM 响应期间）
+    createHeartbeat((msg) => process.stdout.write(LAIN_COLORS.muted(msg)), { interval: 3000, message: '.' });
+
+    // 每次等待 LLM 响应时启动心跳
+    agent.on('waiting_for_llm', () => {
+      startHeartbeat();
+    });
+
     // 设置简单的事件处理（无 TUI）
     agent.on('stream', (data: any) => {
       stopHeartbeat();  // 收到流式响应，停止心跳
@@ -1157,17 +1151,12 @@ async function runSimpleMode(agent: SpicaAgent, fresh?: boolean): Promise<void> 
       // 执行请求
       try {
         console.log(LAIN_COLORS.muted('\n[PROCESSING]...'));
-        // 启动心跳
-        createHeartbeat((msg) => process.stdout.write(LAIN_COLORS.muted(msg)), { interval: 3000, message: '.' });
-        startHeartbeat();
         const response = await agent.runLoop(trimmed);
-        stopHeartbeat();
         console.log(LAIN_COLORS.success('\n[OK] Done'));
       } catch (error: any) {
-        stopHeartbeat();
+        stopHeartbeat();  // 错误时停止心跳
         console.log(LAIN_COLORS.error(`\n[ERR] ${error.message}`));
       }
-      clearHeartbeat();
 
       rl.prompt();
     });

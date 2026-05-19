@@ -342,6 +342,7 @@ async init() {
     this.emit('message', { role: 'user', content: prompt });
 
     const toolDefinitions = getAllToolDefinitions();
+    this.emit('waiting_for_llm');  // 通知外部启动心跳
     let response = await this.llm.generate(prompt + (projectContext ? `\n${projectContext}` : ''), toolDefinitions);
 
     let iterations = 0;
@@ -469,6 +470,7 @@ async init() {
 
         // 所有工具完成后，一次性发送所有结果给LLM继续生成
         if (toolResults.length > 0) {
+          this.emit('waiting_for_llm');  // 通知外部启动心跳
           response = await this.llm.continueWithAllToolResults(
             toolResults.map(t => ({ name: t.name, result: t.result })),
             toolDefinitions

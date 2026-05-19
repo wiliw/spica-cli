@@ -3,7 +3,7 @@ import { getScreenManager } from './ui/screenManager';
 import { LAIN_COLORS, format } from './ui/colors';
 import prompts from 'prompts';
 import { getRuntimeState } from '../core/RuntimeState';
-import { stopHeartbeat } from '../core/Heartbeat';
+import { startHeartbeat, stopHeartbeat, createHeartbeat } from '../core/Heartbeat';
 
 const screen = getScreenManager();
 const state = getRuntimeState();
@@ -34,9 +34,17 @@ export function setupAgentEvents(
 ): void {
   let lastWasReasoning = false;
 
+  // 创建心跳实例（用于等待 LLM 响应期间）
+  createHeartbeat((msg) => screen.appendScroll(LAIN_COLORS.muted(msg)), { interval: 3000, message: '.' });
+
   agent.on('connection_error', (data: any) => {
     state.setConnectionErrorShown(true);
     screen.appendScroll(LAIN_COLORS.error(`\n[ERR] ${data.type}: ${data.hint}\n`));
+  });
+
+  // 每次等待 LLM 响应时启动心跳
+  agent.on('waiting_for_llm', () => {
+    startHeartbeat();
   });
 
   agent.on('stream', (data: any) => {
