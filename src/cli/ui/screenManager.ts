@@ -8,12 +8,15 @@ export interface ScreenState {
   cursorCol: number;
   terminalHeight: number;
   terminalWidth: number;
-  inputRow: number;
+  inputLines: number;
+  statusRow: number;
   scrollBottom: number;
+  statusText: string;       // 存储状态栏内容
   completer: ((line: string) => string[]) | null;
   shownCompletionList: boolean;
   lastCompletionLine: string;
-  cursorInScrollArea: boolean;  // 光标是否在滚动区域
+  cursorInScrollArea: boolean;
+  isStreaming: boolean;
 }
 
 export class ScreenManager {
@@ -22,64 +25,157 @@ export class ScreenManager {
   constructor() {
     const height = process.stdout.rows || 24;
     const width = process.stdout.columns || 80;
-    // 滚动区域：行1 到 height-2（保留最后1行给输入框）
-    const scrollBottom = height - 2;
-    const inputRow = height - 1;  // 输入框在最后一行
 
     this.state = {
       inputBuffer: [''],
       cursorCol: 0,
       terminalHeight: height,
       terminalWidth: width,
-      inputRow: inputRow,
-      scrollBottom: scrollBottom,
+      inputLines: 1,
+      statusRow: height - 2,
+      scrollBottom: height - 3,
+      statusText: '',
       completer: null,
       shownCompletionList: false,
       lastCompletionLine: '',
       cursorInScrollArea: false,
+      isStreaming: false,
     };
   }
 
+  // 计算输入内容需要的行数
+  private calcInputLines(): number {
+    const content = '> ' + this.state.inputBuffer[0];
+    const width = this.state.terminalWidth;
+    // 计算显示宽度（考虑 CJK）
+    let displayWidth = 0;
+    for (const char of content) {
+      displayWidth += char.charCodeAt(0) > 0x7F ? 2 : 1;
+    }
+    return Math.max(1, Math.ceil(displayWidth / width));
+  }
+
+  // 更新布局（输入行数变化时）
+  private updateLayout(): void {
+    const newLines = this.calcInputLines();
+    if (newLines !== this.state.inputLines) {
+      const oldStatusRow = this.state.statusRow;
+      this.state.inputLines = newLines;
+      this.state.statusRow = this.state.terminalHeight - newLines - 1;
+      this.state.scrollBottom = this.state.statusRow - 1;
+
+      // 清除旧状态栏位置（如果被输入框覆盖）
+      if (oldStatusRow > this.state.statusRow) {
+        for (let row = this.state.statusRow + 1; row <= oldStatusRow; row++) {
+          fs.writeSync(1, `${ESC}[${row};1H${ESC}[2K`);
+        }
+      }
+
+      // 重新设置滚动区域
+      fs.writeSync(1, `${ESC}[1;${this.state.scrollBottom}r`);
+      
+      // 重绘状态栏在新位置
+      this.drawStatus();
+    }
+  }
+
+  setStreaming(streaming: boolean): void {
+    this.state.isStreaming = streaming;
+  }
+
   start(): void {
-    // 设置滚动区域：1 到 scrollBottom
     fs.writeSync(1, `${ESC}[1;${this.state.scrollBottom}r`);
-    // 清屏
     fs.writeSync(1, `${ESC}[2J${ESC}[1;1H`);
+    this.drawStatus();
     this.refreshInput();
+    this.restoreCursor();
   }
 
   end(): void {
     fs.writeSync(1, `${ESC}[r${ESC}[2J${ESC}[1;1H`);
   }
 
-  // 输出到滚动区域
   appendScroll(text: string): void {
-    // 如果光标不在滚动区域，先定位到滚动区域底部并隐藏光标
     if (!this.state.cursorInScrollArea) {
-      fs.writeSync(1, `${ESC}[?25l`);  // 隐藏光标
+      fs.writeSync(1, `${ESC}[?25l`);
       fs.writeSync(1, `${ESC}[${this.state.scrollBottom};1H`);
       this.state.cursorInScrollArea = true;
     }
-    // 直接追加内容（滚动区域会自然滚动）
     fs.writeSync(1, text);
   }
 
-  // 恢复光标到输入框
+  // 刷新状态栏（清除并重绘）
+  refreshStatus(): void {
+    this.drawStatus();
+  }
+
+  // 绘制状态栏
+  private drawStatus(): void {
+    fs.writeSync(1, `${ESC}[?25l`);
+    fs.writeSync(1, `${ESC}[${this.state.statusRow};1H${ESC}[2K`);
+    if (this.state.statusText) {
+      fs.writeSync(1, this.state.statusText);
+    }
+  }
+
+  // 格式化输入内容（高亮 /command）
+  private formatInputContent(content: string): string {
+    if (content.startsWith('/')) {
+      // 找到命令结束位置（空格或结尾）
+      const spaceIdx = content.indexOf(' ');
+      const cmdEnd = spaceIdx > 0 ? spaceIdx : content.length;
+      const cmd = content.slice(0, cmdEnd);
+      const rest = content.slice(cmdEnd);
+      // 使用 magenta 高亮命令部分
+      return `\x1b[35m${cmd}\x1b[0m${rest}`;
+    }
+    return content;
+  }
+
+  // 刷新输入框（清除所有输入行，重绘）
+  refreshInput(): void {
+    this.updateLayout();
+    fs.writeSync(1, `${ESC}[?25l`);
+
+    // 清除所有输入行（从 statusRow+1 到 terminalHeight）
+    for (let row = this.state.statusRow + 1; row <= this.state.terminalHeight; row++) {
+      fs.writeSync(1, `${ESC}[${row};1H${ESC}[2K`);
+    }
+
+    // 在输入区域第一行显示内容
+    const inputStartRow = this.state.statusRow + 1;
+    fs.writeSync(1, `${ESC}[${inputStartRow};1H`);
+    const formattedContent = this.formatInputContent(this.state.inputBuffer[0]);
+    fs.writeSync(1, '> ' + formattedContent);
+  }
+
   restoreCursor(): void {
-    const col = this.getDisplayCol(this.state.inputBuffer[0], this.state.cursorCol) + 3; // +3 for "> "
-    fs.writeSync(1, `${ESC}[${this.state.inputRow};${col}H`);
-    fs.writeSync(1, `${ESC}[?25h`);  // 显示光标
+    // 计算光标在输入区域的行和列（基于原始内容，不含 ANSI 码）
+    const rawContent = this.state.inputBuffer[0].slice(0, this.state.cursorCol);
+    const content = '> ' + rawContent;
+    let displayWidth = 0;
+    for (const char of content) {
+      displayWidth += char.charCodeAt(0) > 0x7F ? 2 : 1;
+    }
+
+    const width = this.state.terminalWidth;
+    const inputRow = this.state.statusRow + 1 + Math.floor(displayWidth / width);
+    const inputCol = (displayWidth % width) + 1;
+
+    fs.writeSync(1, `${ESC}[${inputRow};${inputCol}H`);
+    fs.writeSync(1, `${ESC}[?25h`);
     this.state.cursorInScrollArea = false;
   }
 
-  // 刷新输入框显示
-  refreshInput(): void {
-    // 清除输入行
-    fs.writeSync(1, `${ESC}[${this.state.inputRow};1H${ESC}[2K`);
-    // 显示输入内容
-    fs.writeSync(1, '> ' + this.state.inputBuffer[0]);
-    // 光标定位
+  refreshInputAndKeepCursor(): void {
+    this.refreshInput();
     this.restoreCursor();
+
+    if (this.state.isStreaming) {
+      fs.writeSync(1, `${ESC}[${this.state.scrollBottom};1H`);
+      fs.writeSync(1, `${ESC}[?25l`);
+      this.state.cursorInScrollArea = true;
+    }
   }
 
   getDisplayCol(line: string, col: number): number {
@@ -91,13 +187,19 @@ export class ScreenManager {
   }
 
   handleInput(data: string): boolean {
-    if (data === '\r') return true;
+    if (data === '\r' || data === '\n') return true;
     if (data === '\x7f' || data === '\b') {
       if (this.state.cursorCol > 0) {
         const line = this.state.inputBuffer[0];
         this.state.inputBuffer[0] = line.slice(0, this.state.cursorCol - 1) + line.slice(this.state.cursorCol);
         this.state.cursorCol--;
-        this.refreshInput();
+        // 流式期间用特殊处理，非流式期间直接刷新
+        if (this.state.isStreaming) {
+          this.refreshInputAndKeepCursor();
+        } else {
+          this.refreshInput();
+          this.restoreCursor();
+        }
       }
       return false;
     }
@@ -117,7 +219,13 @@ export class ScreenManager {
     const line = this.state.inputBuffer[0];
     this.state.inputBuffer[0] = line.slice(0, this.state.cursorCol) + data + line.slice(this.state.cursorCol);
     this.state.cursorCol += data.length;
-    this.refreshInput();
+    // 流式期间用特殊处理，非流式期间直接刷新
+    if (this.state.isStreaming) {
+      this.refreshInputAndKeepCursor();
+    } else {
+      this.refreshInput();
+      this.restoreCursor();
+    }
     return false;
   }
 
@@ -132,7 +240,13 @@ export class ScreenManager {
         this.state.inputBuffer[0] = line.slice(0, this.state.cursorCol) + line.slice(this.state.cursorCol + 1);
       }
     }
-    this.refreshInput();
+    // 流式期间用特殊处理，非流式期间直接刷新
+    if (this.state.isStreaming) {
+      this.refreshInputAndKeepCursor();
+    } else {
+      this.refreshInput();
+      this.restoreCursor();
+    }
   }
 
   handleTab(): void {
@@ -143,8 +257,10 @@ export class ScreenManager {
       this.state.inputBuffer[0] = hits[0];
       this.state.cursorCol = hits[0].length;
       this.refreshInput();
+      this.restoreCursor();
     } else if (hits.length > 1) {
       this.appendScroll('\n' + hits.join('  ') + '\n');
+      this.restoreCursor();
     }
   }
 
@@ -153,6 +269,7 @@ export class ScreenManager {
     this.state.inputBuffer[0] += content;
     this.state.cursorCol += content.length;
     this.refreshInput();
+    this.restoreCursor();
   }
 
   getContent(): string {
@@ -162,7 +279,13 @@ export class ScreenManager {
   clear(): void {
     this.state.inputBuffer[0] = '';
     this.state.cursorCol = 0;
+    this.state.inputLines = 1;
+    this.state.statusRow = this.state.terminalHeight - 2;
+    this.state.scrollBottom = this.state.terminalHeight - 3;
+    fs.writeSync(1, `${ESC}[1;${this.state.scrollBottom}r`);
+    this.drawStatus();
     this.refreshInput();
+    this.restoreCursor();
   }
 
   setCompleter(fn: (line: string) => string[]): void {
@@ -170,9 +293,8 @@ export class ScreenManager {
   }
 
   setStatus(text: string): void {
-    // 状态栏在 height-1 行
-    fs.writeSync(1, `${ESC}[${this.state.terminalHeight - 1};1H${ESC}[2K`);
-    fs.writeSync(1, text);
+    this.state.statusText = text;
+    this.drawStatus();
     this.restoreCursor();
   }
 }

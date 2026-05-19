@@ -94,6 +94,149 @@ spica mcp disconnect               # 断开所有连接
 
 ---
 
+## Bash 工具高级模式
+
+### TTY 模式
+
+为需要终端环境的应用提供 TTY：
+
+```json
+{
+  "name": "bash",
+  "arguments": {
+    "command": "npm run dev",
+    "tty": true
+  }
+}
+```
+
+适用：Ink 框架、TUI 应用、需要 raw mode 的 CLI
+
+### 分离模式
+
+后台运行，用户可 attach 查看：
+
+```json
+{
+  "name": "bash",
+  "arguments": {
+    "command": "npm run dev",
+    "detached": true
+  }
+}
+```
+
+输出：
+```
+Session: spica_1234567890
+
+To view:
+  tmux attach -t spica_1234567890
+```
+
+### 交互式 PTY 模式
+
+AI 可以实时输入/输出，自动完成交互测试：
+
+```json
+{
+  "name": "bash",
+  "arguments": {
+    "command": "npm run dev",
+    "interactive": true,
+    "inputs": ["hello", "exit"]
+  }
+}
+```
+
+或使用 expect 模式（等待输出匹配后输入）：
+
+```json
+{
+  "name": "bash",
+  "arguments": {
+    "command": "npm run dev",
+    "interactive": true,
+    "expect": [
+      { "wait": "Enter name:", "input": "test" },
+      { "wait": "Continue?", "input": "y" }
+    ]
+  }
+}
+```
+
+**正则匹配**：`wait` 以 `^` 开头则使用正则匹配：
+
+```json
+{
+  "expect": [
+    { "wait": "^.*\\$", "input": "ls" }  // 匹配任意提示符
+  ]
+}
+```
+
+**适用场景**：
+- TUI 应用自动化测试
+- 需要用户输入的交互式 CLI
+- Ink 框架应用调试
+
+### 文件输入/输出
+
+对于大量输入或输出，使用文件避免内存问题：
+
+```json
+{
+  "name": "bash",
+  "arguments": {
+    "command": "cat",
+    "interactive": true,
+    "inputFile": "inputs.txt",
+    "outputFile": "outputs.txt"
+  }
+}
+```
+
+- `inputFile`: 从文件读取输入（每行一个输入）
+- `outputFile`: 将输出写入文件（避免返回大量数据）
+
+**适用场景**：
+- 大量输入数据（如批量测试）
+- 输出过长需要保存到文件
+- 日志记录
+
+### 输出截断
+
+防止大量输出导致内存溢出：
+
+```json
+{
+  "name": "bash",
+  "arguments": {
+    "command": "cat large.log",
+    "maxOutputLength": 100000
+  }
+}
+```
+
+默认截断长度 50000 字符。超长输出显示：
+```
+... [truncated, total 123456 chars]
+```
+
+### 会话管理
+
+管理已启动的分离会话：
+
+```bash
+# 查看所有会话状态
+bash action=status
+
+# 杀死特定会话
+bash action=kill session=spica_1234567890
+```
+
+---
+
 ## 交互指令
 
 ### 非 `/` 命令
@@ -133,9 +276,34 @@ spica mcp disconnect               # 断开所有连接
 | 指令 | 说明 |
 |------|------|
 | `/skills` | 列出已安装 skills |
+| `/init` | 分析代码库并创建/更新 AGENTS.md |
 | `/skill_name [args]` | 调用指定 skill |
 
 **提示：输入 `/` 后按 TAB 自动补全**
+
+### `/init` 指令详解
+
+分析代码库并创建/更新 AGENTS.md，帮助 AI 更好理解项目。
+
+**执行步骤：**
+1. 读取项目配置（package.json、tsconfig.json 等）
+2. 读取现有文档（README、CHANGELOG 等）
+3. 查看目录结构和入口点
+4. 检查测试和构建配置
+5. 分析核心代码架构
+
+**输出内容：**
+- 项目概述（类型、功能、使用场景）
+- 技术栈（语言、核心框架）
+- 项目结构（目录表格）
+- 开发命令（已验证可用）
+- 核心架构（模块职责）
+- 开发注意事项
+
+**使用：**
+```bash
+/init    # 分析并创建/更新 AGENTS.md
+```
 
 ---
 
@@ -431,8 +599,9 @@ spica --fresh   # 启动时清空
 
 - **自动加载**：启动时自动加载 `.spica/session.json`
 - **自动保存**：每次 AI 处理完自动保存
-- **手动压缩**：`/compact` 压缩上下文（超过 15 条自动压缩）
-- **压缩动画**：压缩时显示动画和进度（`[COMPRESS] 30 → 15 messages`）
+- **智能压缩**：基于 token 数量自动压缩（目标 <60% 上下文窗口）
+- **压缩策略**：保留最近 10 条消息，LLM 生成早期对话摘要
+- **压缩动画**：压缩时显示进度（`[COMPRESS] 17 -> 11 messages (373k -> 120k tokens)`）
 
 ### Q: 如何切换模型？
 
