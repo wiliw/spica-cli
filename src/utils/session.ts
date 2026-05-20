@@ -4,6 +4,10 @@ import fs from 'fs-extra';
 import { join } from 'path';
 import type { ChatMessage } from '../llm/providers/BaseProvider';
 
+// Session size limits (prevent huge session files that cause API timeouts)
+const MAX_SESSION_MESSAGES = 50;  // 最多保存50条消息
+const MAX_MESSAGE_LENGTH = 2000;  // 每条消息最多2000字符
+
 export interface SessionState {
   workspacePath: string;
   messages: ChatMessage[];
@@ -25,15 +29,32 @@ export function loadSession(workspacePath: string): SessionState | null {
   return null;
 }
 
+// Truncate messages before saving to prevent huge session files
+function truncateMessages(messages: ChatMessage[]): ChatMessage[] {
+  // Keep only recent messages (prevent session from growing indefinitely)
+  const recent = messages.slice(-MAX_SESSION_MESSAGES);
+
+  // Truncate each message's content
+  return recent.map(m => ({
+    ...m,
+    content: (m.content || '').length > MAX_MESSAGE_LENGTH
+      ? (m.content || '').slice(0, MAX_MESSAGE_LENGTH) + '...[truncated]'
+      : m.content,
+  }));
+}
+
 export function saveSession(workspacePath: string, messages: ChatMessage[]): void {
   const spicaDir = join(workspacePath, '.spica');
 
   try {
     fs.ensureDirSync(spicaDir);
 
+    // Truncate before saving
+    const truncated = truncateMessages(messages);
+
     const session: SessionState = {
       workspacePath,
-      messages,
+      messages: truncated,
       lastActivity: new Date().toISOString(),
     };
 
