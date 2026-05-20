@@ -335,7 +335,7 @@ async init() {
 
     const usedTokens = tokenCounter.estimateMessages(existingMessages);
     const usagePercent = Math.floor(usedTokens / contextWindow * 100);
-    const triggerThreshold = Math.floor(contextWindow * 0.8);  // 触发阈值：80%
+    const triggerThreshold = Math.floor(contextWindow * 0.7);  // 触发阈值：70%（现代设计，更早触发避免过满）
 
     // 当使用超过触发阈值时自动压缩
     if (usedTokens > triggerThreshold) {
@@ -358,7 +358,18 @@ async init() {
 
     const toolDefinitions = getAllToolDefinitions();
     this.emit('waiting_for_llm');  // 通知外部启动心跳
-    let response = await this.llm.generate(prompt + (projectContext ? `\n${projectContext}` : ''), toolDefinitions);
+
+    let response;
+    try {
+      response = await this.llm.generate(prompt + (projectContext ? `\n${projectContext}` : ''), toolDefinitions);
+    } catch (llmError: any) {
+      this.emit('error_suggestion', {
+        tool: 'llm_generate',
+        error: llmError.message,
+        suggestion: '网络或API临时错误。请检查网络连接，稍后重试。'
+      });
+      return `LLM请求失败: ${llmError.message}\n建议: 检查API配置和网络连接，然后重试。`;
+    }
 
     let iterations = 0;
 
@@ -486,10 +497,22 @@ async init() {
         // 所有工具完成后，一次性发送所有结果给LLM继续生成
         if (toolResults.length > 0) {
           this.emit('waiting_for_llm');  // 通知外部启动心跳
-          response = await this.llm.continueWithAllToolResults(
-            toolResults.map(t => ({ name: t.name, result: t.result })),
-            toolDefinitions
-          );
+          try {
+            response = await this.llm.continueWithAllToolResults(
+              toolResults.map(t => ({ name: t.name, result: t.result })),
+              toolDefinitions
+            );
+          } catch (llmError: any) {
+            // LLM调用失败（网络问题、API错误等），不要崩溃整个会话
+            this.emit('error_suggestion', {
+              tool: 'llm_continue',
+              error: llmError.message,
+              suggestion: '网络或API临时错误，工具执行结果已保存。可尝试继续对话或重新发送请求。'
+            });
+            // 返回已执行的工具结果摘要，让用户知道发生了什么
+            const resultsSummary = toolResults.map(t => `${t.name}: ${t.result.slice(0, 100)}`).join('\n');
+            return `工具执行完成，但LLM响应中断。\n错误: ${llmError.message}\n已执行的操作:\n${resultsSummary}\n建议: 可以继续对话，之前的操作结果已保留。`;
+          }
         }
       } else {
         break;
@@ -609,7 +632,7 @@ async init() {
   public async compact(): Promise<void> {
     if (!this.llm) return;
     const provider = this.llm.getProvider();
-    const targetTokens = Math.floor(provider.getContextWindow() * 0.4);  // 目标：40%以下
+    const targetTokens = Math.floor(provider.getContextWindow() * 0.3);  // 目标：30%（现代设计，留足够缓冲避免再次触发）
     await this.compactToTarget(targetTokens);
   }
 
@@ -631,19 +654,39 @@ async init() {
 
     // 根据超量程度决定保留消息数量
     const ratio = usedTokens / targetTokens;
-    let keepCount = ratio > 2 ? 3 : ratio > 1.5 ? 5 : 8;
-    keepCount = Math.min(keepCount, Math.floor(allMessages.length * 0.3));  // 最多保留30%
+    let keepCount = ratio > 2 ? 5 : ratio > 1.5 ? 8 : 12;
+    // 确保最小保留 5 条，最大保留不超过 15 条，且不超过总数的 25%
+    // 测试证明 min=3 max=8 过于激进，会丢失太多上下文
+    keepCount = Math.max(5, Math.min(keepCount, 15, Math.floor(allMessages.length * 0.25)));
 
     const recentMessages = allMessages.slice(-keepCount);
     const oldMessages = allMessages.slice(0, -keepCount);
 
-    // 对 recentMessages 中的超长内容进行截断（每条消息最多 1500 chars）
-    const truncatedRecent = recentMessages.map(m => ({
-      ...m,
-      content: (m.content || '').length > 1500
+    // 对 recentMessages 中的超长内容进行截断
+    const truncatedRecent = recentMessages.map(m => {
+      // 截断 content（最多 1500 chars）
+      const truncatedContent = (m.content || '').length > 1500
         ? (m.content || '').slice(0, 1500) + '...[truncated]'
-        : m.content,
-    }));
+        : m.content;
+
+      // 截断 toolCalls（最多保留 4 个，保留更多操作上下文）
+      let truncatedToolCalls = m.toolCalls;
+      if (m.toolCalls && m.toolCalls.length > 4) {
+        truncatedToolCalls = m.toolCalls.slice(0, 4);
+        // 标记被截断
+        truncatedToolCalls.push({
+          id: 'truncated',
+          name: '...[truncated]',
+          arguments: {}
+        });
+      }
+
+      return {
+        ...m,
+        content: truncatedContent,
+        toolCalls: truncatedToolCalls,
+      };
+    });
 
     // 用 LLM 生成摘要（如果还有旧消息）
     if (oldMessages.length > 0) {
