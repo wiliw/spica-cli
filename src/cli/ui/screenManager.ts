@@ -207,12 +207,13 @@ export class ScreenManager {
       this.handleTab();
       return false;
     }
-    if (data.startsWith(ESC)) {
-      this.handleAnsi(data);
-      return false;
-    }
+    // 粘贴必须在 ESC 检查之前，因为粘贴数据也以 ESC 开头
     if (data.includes(`${ESC}[200~`)) {
       this.handlePaste(data);
+      return false;
+    }
+    if (data.startsWith(ESC)) {
+      this.handleAnsi(data);
       return false;
     }
     // 插入字符

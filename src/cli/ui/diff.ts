@@ -17,8 +17,9 @@ export interface DiffLine {
 
 // 计算简单diff（优化算法）
 export function computeDiff(oldContent: string, newContent: string): DiffLine[] {
-  const oldLines = oldContent.split('\n');
-  const newLines = newContent.split('\n');
+  // 处理空内容：空字符串 split('\n') 返回 ['']，需要过滤
+  const oldLines = oldContent === '' ? [] : oldContent.split('\n');
+  const newLines = newContent === '' ? [] : newContent.split('\n');
   const diff: DiffLine[] = [];
 
   const maxLen = Math.max(oldLines.length, newLines.length);

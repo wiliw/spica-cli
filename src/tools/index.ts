@@ -459,7 +459,9 @@ export async function executeTool(
             diff = formatDiff(diffLines, 3);
           }
         } catch {
-          diff = `Created new file: ${safeArgs.content.split('\n').length} lines`;
+          // 新文件：生成全新增的diff
+          const diffLines = computeDiff('', safeArgs.content);
+          diff = formatDiff(diffLines, 2);
         }
 
         await fs.writeFile(writePath, safeArgs.content, 'utf-8');

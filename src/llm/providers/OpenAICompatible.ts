@@ -38,7 +38,7 @@ const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   'claude-3-haiku': 200000,
   'claude-3-5-sonnet': 200000,
   'glm-4': 128000,
-  'glm-5': 200000,  // 智谱 GLM-5 实际支持 200k（API限制202745）
+  'glm-5': 190000,  // 智谱 GLM-5 API限制202745，保守设置留余量
 };
 
 // 解析错误并返回友好提示

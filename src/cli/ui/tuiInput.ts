@@ -25,12 +25,8 @@ export class TUIInputHandler {
     }
 
     if (data === '\x03') {
-      this.interruptCount++;
-      if (this.interruptCount >= 3) {
-        return { content: '', shouldProcess: false, shouldExit: true, isInterrupt: false };
-      }
-      setTimeout(() => this.interruptCount = 0, 1000);
-      return { content: '', shouldProcess: false, shouldExit: false, isInterrupt: false };
+      // Ctrl+C 在 TUI 模式下也触发中断
+      return { content: '', shouldProcess: false, shouldExit: false, isInterrupt: true };
     }
 
     if (data === ESC) {

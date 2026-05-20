@@ -30,7 +30,7 @@ export class Heartbeat {
       this.count++;
       if (this.count > this.config.maxCount!) {
         // 超过最大次数，输出超时提示并停止
-        this.output('\n[TIMEOUT] Response taking too long, press Ctrl+C to interrupt\n');
+        this.output('\n[TIMEOUT] Response taking too long, press ESC ESC to interrupt\n');
         this.stop();
         return;
       }

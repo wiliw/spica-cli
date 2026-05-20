@@ -23,6 +23,7 @@ import { displayStatusLine } from './cli/status';
 import { getRuntimeState, resetRuntimeState } from './core/RuntimeState';
 import { createHeartbeat, startHeartbeat, stopHeartbeat, clearHeartbeat } from './core/Heartbeat';
 import { getScreenManager } from './cli/ui/screenManager';
+import { TokenCounter } from './llm/TokenCounter';
 import * as readline from 'readline';
 import prompts from 'prompts';
 import fs from 'fs-extra';
@@ -34,14 +35,16 @@ const state = getRuntimeState();
 const screen = getScreenManager();
 const ESC = '\x1b';
 
-// Ctrl+C中断处理
+// Ctrl+C中断处理（SIGINT - 在非 raw mode 或特殊情况下触发）
 let interruptCount = 0;
 let interruptTimeout: NodeJS.Timeout | null = null;
+let tuiStarted = false;  // 标记 TUI 是否已启动
 
 process.on('SIGINT', () => {
   // 连续Ctrl+C强制退出
   interruptCount++;
   if (interruptCount >= 3) {
+    if (tuiStarted) screen.end();
     console.log(LAIN_COLORS.error('\n[FORCE EXIT]'));
     process.exit(0);
   }
@@ -54,8 +57,18 @@ process.on('SIGINT', () => {
 
   if (state.getAgent()) {
     state.getAgent().interrupt();
-    console.log(LAIN_COLORS.warning('\n[INTERRUPTED] Ctrl+C again to exit'));
+    state.setProcessing(false);
+    stopHeartbeat();
+    if (tuiStarted) {
+      screen.appendScroll(LAIN_COLORS.warning('\n[INTERRUPTED] Ctrl+C again to exit\n'));
+      screen.setStreaming(false);
+      screen.restoreCursor();
+      screen.refreshInput();
+    } else {
+      console.log(LAIN_COLORS.warning('\n[INTERRUPTED] Ctrl+C again to exit'));
+    }
   } else {
+    if (tuiStarted) screen.end();
     process.exit(0);
   }
 });
@@ -128,6 +141,7 @@ program
       // TUI 输入处理（设置滚动区域）
       tuiHandler = new TUIInputHandler();
       tuiHandler.start();
+      tuiStarted = true;  // 标记 TUI 已启动
 
       // 自动加载历史
       if (!options.fresh) {
@@ -181,9 +195,12 @@ program
             state.getAgent().interrupt();
             isProcessing = false;
             state.setProcessing(false);
-            
+            stopHeartbeat();  // 停止心跳
+
             screen.appendScroll(LAIN_COLORS.warning('\n[INTERRUPTED]\n'));
-            
+            screen.setStreaming(false);
+            screen.restoreCursor();
+            screen.refreshInput();
           }
           return;
         }
@@ -318,13 +335,24 @@ program
             const msgs = agent.getMessages().length;
             const queue = getInputQueue();
             const queueStatus = queue.getStatus();
-            
+
+            // Token 计数
+            const tokenCounter = new TokenCounter();
+            const provider = agent.getLLM()?.getProvider();
+            if (provider) {
+              tokenCounter.setContextWindow(provider.getContextWindow());
+            }
+            const usedTokens = tokenCounter.estimateMessages(agent.getMessages());
+            const contextWindow = provider?.getContextWindow() || 128000;
+            const usagePercent = usedTokens / contextWindow * 100;
+
             screen.appendScroll(LAIN_COLORS.primary.bold('\nStatus:\n'));
             screen.appendScroll(`  Mode: ${bypass ? 'BYPASS' : 'STRICT'}\n`);
             screen.appendScroll(`  Messages: ${msgs}\n`);
+            screen.appendScroll(`  Tokens: ${usedTokens} (${usagePercent.toFixed(1)}% of ${Math.floor(contextWindow/1000)}k)\n`);
             screen.appendScroll(`  Queue: ${queueStatus.pending} pending\n`);
             screen.appendScroll(`  Workspace: ${agent.getWorkspacePath()}\n\n`);
-            
+
             return;
           }
 

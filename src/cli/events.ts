@@ -205,10 +205,11 @@ export function setupAgentEvents(
   });
 
   agent.on('context_compressed', (data: any) => {
+    const formatTokens = (t: number) => t >= 1000 ? `${Math.floor(t/1000)}k` : `${t}`;
     const tokensInfo = data.tokensBefore && data.tokensAfter
-      ? ` (${Math.floor(data.tokensBefore/1000)}k -> ${Math.floor(data.tokensAfter/1000)}k tokens)`
+      ? ` (${formatTokens(data.tokensBefore)} -> ${formatTokens(data.tokensAfter)} tokens)`
       : '';
-    screen.appendScroll(LAIN_COLORS.secondary(`\n[COMPRESS] ${data.before} -> ${data.after} messages${tokensInfo}\n`));
+    screen.appendScroll(LAIN_COLORS.secondary(`\n[COMPRESS] ${data.message || `${data.before} -> ${data.after} messages`}${tokensInfo}\n`));
     screen.restoreCursor();
   });
 }
