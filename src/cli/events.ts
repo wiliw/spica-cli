@@ -42,7 +42,7 @@ export function setupAgentEvents(
     screen.appendScroll(LAIN_COLORS.error(`\n[ERR] ${data.type}: ${data.hint}\n`));
   });
 
-  // 每次等待 LLM 响应时启动心跳
+  // 每次等待 LLM 响应时只启动心跳，不显示提示（提示由 index.ts 在调用 runLoop 前显示）
   agent.on('waiting_for_llm', () => {
     startHeartbeat();
   });
@@ -86,8 +86,9 @@ export function setupAgentEvents(
       lastWasReasoning = false;
     }
     const argsStr = formatArgs(data.arguments);
-    screen.appendScroll(LAIN_COLORS.tool(`\n-> ${data.name}${argsStr ? ` ${argsStr}` : ''}\n`));
-    
+    // 显示 tool name，让用户知道正在执行什么
+    screen.appendScroll(LAIN_COLORS.tool(`-> ${data.name}${argsStr ? ` ${argsStr}` : ''}\n`));
+
     // 启动工具执行心跳（显示工具正在执行）
     startHeartbeat();
   });
@@ -111,7 +112,11 @@ export function setupAgentEvents(
       }
     }
 
-    if (data.diff) {
+    // 文件编辑工具的diff已在diff_preview事件中显示，这里只显示状态
+    const fileEditTools = ['file_write', 'file_edit', 'file_multi_edit'];
+    if (fileEditTools.includes(data.name) && data.diff) {
+      screen.appendScroll(`${icon} ${data.name}\n`);
+    } else if (data.diff) {
       screen.appendScroll(`${icon} ${data.name}\n${data.diff}\n`);
     } else if (output) {
       // For tools that return structured output (todo_write, etc.), show full output

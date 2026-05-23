@@ -250,19 +250,12 @@ program
           return;
         }
 
-        // 如果正在处理，设置 pendingInput 让 agent 在工具间隙检测
+        // 如果正在处理，使用队列累积输入
         if (isProcessing && !trimmed.startsWith('/')) {
-          const agent = state.getAgent();
-          if (agent) {
-            agent.setPendingInput(trimmed);
-            screen.appendScroll(LAIN_COLORS.muted(`[PENDING] Input queued for next tool gap\n`));
-          } else {
-            // fallback 到 queue
-            const queue = getInputQueue();
-            queue.add(trimmed);
-            const status = queue.getStatus();
-            screen.appendScroll(LAIN_COLORS.muted(`[QUEUE] Added (${status.pending} pending)\n`));
-          }
+          const queue = getInputQueue();
+          queue.add(trimmed);
+          const status = queue.getStatus();
+          screen.appendScroll(LAIN_COLORS.muted(`[QUEUE] Added (${status.pending} pending)\n`));
           return;
         }
 
@@ -689,18 +682,6 @@ Start the analysis, execute step by step, then output the document.`;
             state.setStreamingOutput(false);
             screen.setStreaming(false);
             screen.appendScroll('\n');
-          }
-
-          // 检查是否因 pendingInput 而返回
-          if (result && result.startsWith('New input detected')) {
-            const pendingInput = agent.getPendingInput();
-            if (pendingInput) {
-              agent.setPendingInput(null);  // 清除 pendingInput
-              screen.appendScroll(LAIN_COLORS.warning(`\n[SWITCH] Processing new input...\n`));
-              screen.appendScroll(LAIN_COLORS.primary(`\n> ${pendingInput}\n`));
-              // 重新启动 runLoop 处理新输入
-              await agent.runLoop(pendingInput);
-            }
           }
 
           screen.appendScroll(LAIN_COLORS.success('\n[OK] Done\n'));

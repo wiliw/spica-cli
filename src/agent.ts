@@ -9,6 +9,7 @@ import { loadProjectConfig as loadAgentsConfig, autoDetectProject, createAgentsM
 import { loadProjectState, saveProjectState, updateProjectTodos, loadProjectContext, saveProjectContext, ensureProjectDir } from './storage/projectState';
 import { runPreHooks, runPostHooks } from './hooks';
 import { LAIN_COLORS } from './cli/ui/colors';
+import { getInputQueue } from './cli/ui/queue';
 import { EventEmitter } from 'events';
 import fs from 'fs-extra';
 import * as path from 'path';
@@ -550,11 +551,16 @@ async init() {
     while (!response.finished && iterations < maxIterations && !this.interruptFlag) {
       iterations++;
 
-      // 检查是否有待处理的新输入（在工具执行间隙插入新指令）
-      if (this.pendingInput) {
-        this.emit('pending_input_detected', { input: this.pendingInput });
-        // 中断当前流程，返回让用户的新输入被处理
-        return `New input detected during tool execution: ${this.pendingInput.slice(0, 50)}...`;
+      // 检查是否有待处理的新输入（在工具执行间隙检查队列）
+      const queue = getInputQueue();
+      if (queue.hasPending()) {
+        const mergedInput = queue.mergePending();
+        this.emit('pending_input_detected', { input: mergedInput });
+        // 把合并后的输入追加到对话中，继续处理
+        this.llm.addUserMessage(mergedInput);
+        // 重新生成响应，继续当前任务（不再发出 waiting_for_llm，避免重复提示）
+        response = await this.llm.generate(this.llm.getMessages(), this.tools, this.systemPrompt);
+        continue;  // 继续循环处理新的响应
       }
 
       if (this.interruptFlag) {

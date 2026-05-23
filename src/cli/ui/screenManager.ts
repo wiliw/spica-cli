@@ -165,9 +165,10 @@ export class ScreenManager {
     }
 
     const width = this.state.terminalWidth;
-    // 正确计算行和列（基于显示宽度）
-    const inputRow = this.state.statusRow + 1 + Math.floor((displayWidth - 1) / width);
-    const inputCol = ((displayWidth - 1) % width) + 1;
+    // 光标在 displayWidth 位置之后，即 displayWidth + 1
+    // 行和列基于光标位置计算
+    const inputRow = this.state.statusRow + 1 + Math.floor(displayWidth / width);
+    const inputCol = (displayWidth % width) + 1;
 
     fs.writeSync(1, `${ESC}[${inputRow};${inputCol}H`);
     fs.writeSync(1, `${ESC}[?25h`);
