@@ -320,7 +320,7 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'todo_write',
-    description: 'Write task todos.',
+    description: 'Write or update task todos. Use to create task list at start, or update status during work.',
     parameters: {
       type: 'object' as const,
       properties: {
@@ -337,6 +337,15 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
         },
       },
       required: ['todos'],
+    },
+  },
+  {
+    name: 'todo_read',
+    description: 'Read current persisted tasks from .spica/tasks.json. Use to check existing tasks before adding new ones.',
+    parameters: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
     },
   },
   {
@@ -1166,6 +1175,33 @@ export async function executeTool(
           default:
             return { success: false, error: `Unknown gh action: ${action}` };
         }
+      }
+
+      case 'todo_read': {
+        const { loadPersistedTasks, getTaskStats } = await import('../storage/taskPersistence');
+        const tasks = loadPersistedTasks(WORKSPACE);
+        const stats = getTaskStats(WORKSPACE);
+
+        if (tasks.length === 0) {
+          return { success: true, output: 'No persisted tasks found. Use todo_write to create tasks.' };
+        }
+
+        const statusLabels: Record<string, string> = {
+          'completed': '[DONE]',
+          'in_progress': '[ACTV]',
+          'pending': '[PEND]',
+        };
+
+        const lines = [`\nPersisted Tasks (${stats.completed}/${stats.total} done)`];
+        lines.push('---------------------------------');
+        tasks.forEach((t: any, i: number) => {
+          const label = statusLabels[t.status] || '[PEND]';
+          lines.push(`${label} ${i+1}. ${t.subject}`);
+        });
+        lines.push('---------------------------------');
+        lines.push('Use todo_write to update or add new tasks.');
+
+        return { success: true, output: lines.join('\n') };
       }
 
       case 'todo_write': {
