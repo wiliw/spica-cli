@@ -114,8 +114,16 @@ export function setupAgentEvents(
     if (data.diff) {
       screen.appendScroll(`${icon} ${data.name}\n${data.diff}\n`);
     } else if (output) {
-      const firstLine = output.split('\n')[0].slice(0, 80);
-      screen.appendScroll(`${icon} ${data.name}: ${firstLine}${firstLine.length >= 80 ? '...' : ''}\n`);
+      // For tools that return structured output (todo_write, etc.), show full output
+      const multiLineTools = ['todo_write', 'status', 'history', 'skills'];
+      if (multiLineTools.includes(data.name) || output.includes('\n')) {
+        // Show full output for multi-line results
+        screen.appendScroll(`${icon} ${data.name}${output.startsWith('\n') ? '' : ': '}${output}\n`);
+      } else {
+        // Single line: truncate to 80 chars
+        const firstLine = output.split('\n')[0].slice(0, 80);
+        screen.appendScroll(`${icon} ${data.name}: ${firstLine}${firstLine.length >= 80 ? '...' : ''}\n`);
+      }
     } else {
       screen.appendScroll(`${icon} ${data.name}\n`);
     }
