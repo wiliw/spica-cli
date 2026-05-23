@@ -268,11 +268,11 @@ export async function loadEffectiveSettings(workspacePath: string): Promise<Sett
   if (projectHooks) {
     effectiveHooks = {
       PreToolUse: [
-        ...(effectiveHooks.PreToolUse || []),
+        ...(effectiveHooks?.PreToolUse || []),
         ...(projectHooks.PreToolUse || []),
       ],
       PostToolUse: [
-        ...(effectiveHooks.PostToolUse || []),
+        ...(effectiveHooks?.PostToolUse || []),
         ...(projectHooks.PostToolUse || []),
       ],
     };

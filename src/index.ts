@@ -56,7 +56,7 @@ process.on('SIGINT', () => {
   }, 1000);
 
   if (state.getAgent()) {
-    state.getAgent().interrupt();
+    state.getAgent()!.interrupt();
     state.setProcessing(false);
     stopHeartbeat();
     if (tuiStarted) {
@@ -187,12 +187,12 @@ program
 
       // stdin 监听 - 使用 TUIInputHandler
       process.stdin.on('data', (chunk: Buffer) => {
-        const result = tuiHandler.handleStdin(chunk.toString('utf8'), state.isPermissionDialogActive());
+        const result = tuiHandler!.handleStdin(chunk.toString('utf8'), state.isPermissionDialogActive());
 
         // ESC ESC 中断
         if (result.isInterrupt) {
           if (state.getAgent()) {
-            state.getAgent().interrupt();
+            state.getAgent()!.interrupt();
             isProcessing = false;
             state.setProcessing(false);
             stopHeartbeat();  // 停止心跳
@@ -210,7 +210,7 @@ program
           shouldExit = true;
           // 禁用 Bracketed Paste Mode
           screen.appendScroll(`${ESC}[?2004l`);
-          tuiHandler.end();
+          tuiHandler!.end();
           screen.appendScroll(LAIN_COLORS.error('\n[FORCE EXIT]'));
           process.exit(0);
           return;
@@ -235,11 +235,11 @@ program
         if (trimmed === 'quit' || trimmed === 'exit') {
           shouldExit = true;
           if (isProcessing && state.getAgent()) {
-            state.getAgent().interrupt();
+            state.getAgent()!.interrupt();
           }
           // 禁用 Bracketed Paste Mode
           screen.appendScroll(`${ESC}[?2004l`);
-          tuiHandler.end();
+          tuiHandler!.end();
           const messages = agent.getMessages();
           saveSession(process.cwd(), messages);
           await shutdownMCP();
@@ -1030,7 +1030,7 @@ program
         const { loadGlobalSettings, saveGlobalSettings, GLOBAL_SETTINGS_FILE } = await import('./utils/settings');
         const currentSettings = await loadGlobalSettings();
 
-        if (currentSettings.mcp?.servers?.length > 0) {
+        if ((currentSettings.mcp?.servers?.length ?? 0) > 0) {
           console.log(LAIN_COLORS.warning(`MCP servers already configured in settings.json`));
           console.log(LAIN_COLORS.muted('Edit ~/.spica/settings.json to modify'));
         } else {

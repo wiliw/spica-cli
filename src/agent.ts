@@ -507,7 +507,7 @@ async init() {
     let response;
     try {
       response = await this.callLLMWithRetry(
-        () => this.llm.generate(prompt + (projectContext ? `\n${projectContext}` : ''), toolDefinitions),
+        () => this.llm!.generate(prompt + (projectContext ? `\n${projectContext}` : ''), toolDefinitions),
         'llm_generate'
       );
     } catch (llmError: any) {
@@ -654,8 +654,8 @@ async init() {
 
               this.emit('error_suggestion', {
                 toolName: tc.name,
-                error: result.error,
-                suggestion: this.generateErrorSuggestion(tc.name, result.error, tcArgs),
+                error: result.error || 'Unknown error',
+                suggestion: this.generateErrorSuggestion(tc.name, result.error || '', tcArgs),
               });
             }
 
@@ -711,13 +711,14 @@ async init() {
         }
 
         // 关键错误检查：如果检测到关键错误，停止生成并报告
-        if (criticalErrorDetected) {
+        const criticalError = criticalErrorDetected as { tool: string; error: string; suggestion: string } | null;
+        if (criticalError) {
           this.emit('agent_stopped_on_error', {
-            tool: criticalErrorDetected.tool,
-            error: criticalErrorDetected.error,
-            suggestion: criticalErrorDetected.suggestion,
+            tool: criticalError.tool,
+            error: criticalError.error,
+            suggestion: criticalError.suggestion,
           });
-          return `[STOPPED] Agent stopped due to critical error in ${criticalErrorDetected.tool}.\nError: ${criticalErrorDetected.error}\nSuggestion: ${criticalErrorDetected.suggestion}\nPlease fix the issue and retry.`;
+          return `[STOPPED] Agent stopped due to critical error in ${criticalError.tool}.\nError: ${criticalError.error}\nSuggestion: ${criticalError.suggestion}\nPlease fix the issue and retry.`;
         }
 
         // 所有工具完成后，一次性发送所有结果给LLM继续生成
@@ -725,7 +726,7 @@ async init() {
           this.emit('waiting_for_llm');  // 通知外部启动心跳
           try {
             response = await this.callLLMWithRetry(
-              () => this.llm.continueWithAllToolResults(
+              () => this.llm!.continueWithAllToolResults(
                 toolResults.map(t => ({ name: t.name, result: t.result })),
                 toolDefinitions
               ),
@@ -972,7 +973,7 @@ async init() {
     const prompt = getCompactPrompt(messagesText);
 
     try {
-      const response = await this.llm.generateDirect(prompt);
+      const response = await this.llm!.generateDirect(prompt);
       return {
         role: 'assistant',
         content: `[History Summary] ${response.content || 'Early conversation compressed'}`,

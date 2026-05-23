@@ -129,7 +129,7 @@ function parseSkillMarkdown(name: string, content: string): SkillDefinition | nu
 
 // 获取skill定义
 export function getSkill(name: string, workspacePath?: string): SkillDefinition | null {
-  return loadSkills(workspacePath).get(name);
+  return loadSkills(workspacePath).get(name) || null;
 }
 
 // 检查输入是否是skill调用

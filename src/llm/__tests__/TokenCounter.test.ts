@@ -91,7 +91,7 @@ describe('TokenCounter', () => {
     // Create large messages that exceed context (100k window)
     // Each message: 100 chars = 25 tokens + overhead 5 = 30 tokens
     // Need ~3400 messages to exceed 100k
-    const largeMessages = [];
+    const largeMessages: { role: string; content: string }[] = [];
     for (let i = 0; i < 3500; i++) {
       largeMessages.push({ role: 'user', content: 'A'.repeat(100) });
     }
@@ -109,11 +109,11 @@ describe('TokenCounter', () => {
     expect(remaining).toBeGreaterThan(90000);
 
     // Create messages that nearly fill context
-    const largeMessages = [];
+    const largeMessages2: { role: string; content: string }[] = [];
     for (let i = 0; i < 500; i++) {
-      largeMessages.push({ role: 'user', content: 'A'.repeat(400) }); // ~100 tokens each
+      largeMessages2.push({ role: 'user', content: 'A'.repeat(400) }); // ~100 tokens each
     }
-    const largeRemaining = counter.getRemainingTokens(largeMessages, 4096);
+    const largeRemaining = counter.getRemainingTokens(largeMessages2, 4096);
     expect(largeRemaining).toBeLessThan(50000);
   });
 });

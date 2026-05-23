@@ -68,7 +68,7 @@ export class MCPManager extends EventEmitter {
       transport = new StdioClientTransport({
         command: config.command,
         args: config.args || [],
-        env: { ...process.env, ...config.env },
+        env: { ...process.env, ...config.env } as Record<string, string>,
         stderr: 'pipe',  // 捕获stderr
       });
 
