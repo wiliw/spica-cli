@@ -1175,6 +1175,18 @@ export async function executeTool(
         const inProgress = todos.filter((t: any) => t.status === 'in_progress').length;
         const pending = todos.filter((t: any) => t.status === 'pending').length;
 
+        // Persist todos to .spica/tasks.json
+        const { savePersistedTasks } = await import('../storage/taskPersistence');
+        const persistedTasks = todos.map((t: any, i: number) => ({
+          id: `task_${i + 1}`,
+          subject: t.content,
+          description: t.content,
+          status: t.status,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }));
+        savePersistedTasks(WORKSPACE, persistedTasks);
+
         const statusLabels: Record<string, string> = {
           'completed': '[done]',
           'in_progress': '[active]',
@@ -1182,6 +1194,7 @@ export async function executeTool(
         };
 
         const lines = [`Progress: ${completed}/${total} done, ${inProgress} active, ${pending} pending`];
+        lines.push('(Tasks saved to .spica/tasks.json for session recovery)');
         todos.forEach((t: any, i: number) => {
           const label = statusLabels[t.status] || '[pending]';
           lines.push(`  ${i+1}. ${label} ${t.content}`);
