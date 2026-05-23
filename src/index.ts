@@ -315,9 +315,70 @@ program
           if (cmd === 'clear' || cmd === 'reset') {
             agent.setMessages([]);
             clearInputQueue();
-            
+
             screen.appendScroll(LAIN_COLORS.muted('\n[OK] Session cleared\n'));
-            
+
+            return;
+          }
+
+          // 会话管理
+          if (cmd === 'sessions' || cmd === 's') {
+            const { listSessions } = await import('./utils/session');
+            const { getTaskStats } = await import('./storage/taskPersistence');
+            const sessions = listSessions(process.cwd());
+            const taskStats = getTaskStats(process.cwd());
+            const currentMsgs = agent.getMessages().length;
+
+            screen.appendScroll(LAIN_COLORS.primary.bold('\nSessions:\n'));
+            screen.appendScroll(`  Current: ${currentMsgs} messages\n`);
+            screen.appendScroll(`  Archived: ${sessions.length} sessions\n`);
+            screen.appendScroll(`  Tasks: ${taskStats.total} (${taskStats.completed} done, ${taskStats.in_progress} active)\n`);
+
+            if (sessions.length > 0) {
+              screen.appendScroll(LAIN_COLORS.muted('\n  Recent sessions:\n'));
+              sessions.slice(0, 5).forEach((s, i) => {
+                const date = new Date(s.lastActivity).toLocaleDateString();
+                screen.appendScroll(LAIN_COLORS.muted(`    ${i + 1}. ${s.name} (${s.messageCount} msgs, ${date})\n`));
+              });
+              if (sessions.length > 5) {
+                screen.appendScroll(LAIN_COLORS.muted(`    ... and ${sessions.length - 5} more\n`));
+              }
+            }
+
+            screen.appendScroll(LAIN_COLORS.muted('\n  Commands: /switch <id>, /rename <name>, /delete <id>\n'));
+            screen.appendScroll('\n');
+
+            return;
+          }
+
+          if (cmd.startsWith('switch ')) {
+            const sessionId = cmd.slice(7).trim();
+            const { switchSession } = await import('./utils/session');
+
+            if (switchSession(process.cwd(), sessionId)) {
+              screen.appendScroll(LAIN_COLORS.success(`\n[OK] Switched to session ${sessionId}\n`));
+              screen.appendScroll(LAIN_COLORS.muted('Session loaded. Continue conversation.\n'));
+            } else {
+              screen.appendScroll(LAIN_COLORS.error(`\n[ERR] Session ${sessionId} not found\n`));
+              screen.appendScroll(LAIN_COLORS.muted('Use /sessions to list available sessions.\n'));
+            }
+
+            return;
+          }
+
+          if (cmd.startsWith('rename ')) {
+            const args = cmd.slice(7).trim();
+            const parts = args.split(' ');
+            const sessionId = parts[0];
+            const newName = parts.slice(1).join(' ') || 'Unnamed';
+            const { renameSession } = await import('./utils/session');
+
+            if (renameSession(process.cwd(), sessionId, newName)) {
+              screen.appendScroll(LAIN_COLORS.success(`\n[OK] Session renamed to: ${newName}\n`));
+            } else {
+              screen.appendScroll(LAIN_COLORS.error(`\n[ERR] Failed to rename session ${sessionId}\n`));
+            }
+
             return;
           }
 
