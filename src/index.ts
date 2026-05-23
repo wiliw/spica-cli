@@ -725,7 +725,7 @@ Start the analysis, execute step by step, then output the document.`;
 
       // 帮助信息
       const showHelp = () => {
-        
+
         screen.appendScroll(LAIN_COLORS.primary.bold('\nCommands:\n'));
         screen.appendScroll(LAIN_COLORS.muted('  quit/exit   Exit\n'));
         screen.appendScroll(LAIN_COLORS.muted('  help        Show help\n'));
@@ -734,6 +734,8 @@ Start the analysis, execute step by step, then output the document.`;
         screen.appendScroll(LAIN_COLORS.muted('  /clear      Clear session\n'));
         screen.appendScroll(LAIN_COLORS.muted('  /history    Show messages\n'));
         screen.appendScroll(LAIN_COLORS.muted('  /compact    Compress context\n'));
+        screen.appendScroll(LAIN_COLORS.muted('  /sessions   List archived sessions\n'));
+        screen.appendScroll(LAIN_COLORS.muted('  /switch <id> Switch to session\n'));
         screen.appendScroll('\n');
         screen.appendScroll(LAIN_COLORS.primary.bold('Queue:\n'));
         screen.appendScroll(LAIN_COLORS.muted('  /queue      Show queue\n'));
@@ -742,6 +744,7 @@ Start the analysis, execute step by step, then output the document.`;
         screen.appendScroll(LAIN_COLORS.primary.bold('Mode:\n'));
         screen.appendScroll(LAIN_COLORS.muted('  /bypass     Auto-approve\n'));
         screen.appendScroll(LAIN_COLORS.muted('  /strict     Ask permission\n'));
+        screen.appendScroll(LAIN_COLORS.muted('  /status     Show status\n'));
         screen.appendScroll('\n');
         screen.appendScroll(LAIN_COLORS.primary.bold('Skills:\n'));
         screen.appendScroll(LAIN_COLORS.muted('  /skills     List skills\n'));
