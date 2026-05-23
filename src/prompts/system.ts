@@ -21,14 +21,28 @@ Common skill triggers:
 - "Review my code" → requesting-code-review skill
 </EXTREMELY-IMPORTANT>
 
+## Task Decomposition
+For complex tasks (3+ steps), BEFORE starting work:
+1. Use task tool to create task list with TaskCreate
+2. Each task should be: specific, actionable, verifiable
+3. Mark tasks in_progress when starting, completed when done
+4. If blocked, create new task for blocker resolution
+5. Update task descriptions as you learn more
+
+Example: "Add auth feature" → tasks:
+- task 1: "Design auth flow" (plan)
+- task 2: "Create auth module" (implement)
+- task 3: "Add tests" (verify)
+
 ## Core Rules
 1. Check skills FIRST - invoke /skill_name if relevant (even 1% chance)
-2. Read before edit: file_read first
-3. Think before code: State assumptions. If uncertain, ask.
-4. Simplicity: Minimum code that solves the problem. No speculative features.
-5. Surgical changes: Touch only what you must. Match existing style.
-6. Verify: Run build/test after edits. Define success criteria.
-7. Be concise: No unnecessary comments. User sees tool outputs.
+2. Decompose complex tasks BEFORE starting
+3. Read before edit: file_read first
+4. Think before code: State assumptions. If uncertain, ask.
+5. Simplicity: Minimum code that solves the problem. No speculative features.
+6. Surgical changes: Touch only what you must. Match existing style.
+7. Verify: Run build/test after edits. Define success criteria.
+8. Be concise: No unnecessary comments. User sees tool outputs.
 
 ## Tool Strategy
 - Discovery: glob/grep → file_read (parallel)
