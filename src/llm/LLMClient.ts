@@ -203,7 +203,7 @@ export class LLMClient extends EventEmitter {
           const result = await this.functionCaller.Execute(tc);
 
           if (!result.success) {
-            console.error(`Tool ${tc.name} failed: ${result.error}`);
+            // Tool execution failed - error will be returned to caller
           }
 
           await this.rateLimiter.waitForAvailability();

@@ -6,13 +6,14 @@
 - **Use case**: Developers who want an AI assistant to read/write/edit files, run shell commands, manage git, interact with GitHub, search web, and execute coding tasks
 
 ## Tech Stack
-- **Language**: TypeScript (ES2022, ESM)
+- **Language**: TypeScript (ES2022, ESM modules)
 - **Runtime**: Node.js
 - **Core dependencies**:
   - `commander` - CLI framework
   - `openai` - OpenAI API client
   - `node-pty` - PTY for interactive shell commands
   - `@modelcontextprotocol/sdk` - MCP protocol support
+  - `execa` - Process execution
 - **Dev tools**: `tsx`, `vitest`, `typescript`
 
 ## Project Structure
@@ -21,25 +22,29 @@
 |----------------|---------|
 | `src/index.ts` | CLI entry point, command definitions, TUI setup |
 | `src/agent.ts` | Core SpicaAgent class, main orchestration |
-| `src/core/` | EventBus, StateManager, ErrorHandler, SessionManager |
-| `src/tools/` | 33+ tool implementations (file, bash, git, web, etc.) |
-| `src/llm/` | LLM client, providers, rate limiter, token counter |
-| `src/cli/` | CLI components (TUI, events, status, colors) |
+| `src/core/` | EventBus, StateManager, ErrorHandler, SessionManager, LogManager, ProcessMonitor, Heartbeat, RuntimeState |
+| `src/tools/index.ts` | 33+ tool implementations (file, bash, git, web, etc.) |
+| `src/tools/subAgent.ts` | Parallel subagent task execution |
+| `src/llm/` | LLM client, providers (OpenAI, Anthropic, Local), rate limiter, token counter |
+| `src/cli/` | CLI components (TUI, events, status, colors, commands) |
+| `src/cli/ui/` | TUI components (screenManager, colors, queue) |
 | `src/mcp/` | MCP (Model Context Protocol) client integration |
 | `src/skills/` | Skills system for custom command templates |
 | `src/hooks/` | Hooks system for tool call interception |
 | `src/storage/` | Session and project state persistence |
 | `src/prompts/` | System prompts for AI |
 | `src/utils/` | Config, session, settings utilities |
-| `src/builtin-skills/` | Built-in superpowers skills (14 skills) |
+| `src/builtin-skills/superpowers/` | 14 built-in superpowers skills |
+| `src/llm/providers/` | LLM provider implementations (OpenAI, Anthropic, Local, OpenAICompatible) |
 | `bin/spica` | CLI executable wrapper |
-| `test/` | Test files (manual tests) |
+| `test/` | Manual test files |
+| `docs/` | Documentation (MANUAL.md, CONFIGURATION.md, etc.) |
 
 ## Development Commands
 - **Dev**: `npm run dev` or `tsx src/index.ts`
 - **Build**: `npm run build:cli`
 - **Test**: `npm test` (vitest watch mode)
-- **Test run**: `npm run test:run` (single run)
+- **Test run**: `npm run test:run` (single run) - **157 tests passing**
 - **Type check**: `npx tsc --noEmit`
 
 ## Core Architecture
@@ -65,12 +70,14 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
 - No comments unless explicitly requested
 - Prefer concise, readable code
 - Use TypeScript with `strict: false` (noImplicitAny: false)
+- ESM modules with ES2022 target
 
 ### Key Files to Understand
 - `src/index.ts` - All CLI commands and TUI setup (~1150 lines)
 - `src/tools/index.ts` - All tool implementations (~1260 lines)
 - `src/agent.ts` - Core agent logic with permission handling
 - `src/cli/ui/screenManager.ts` - TUI with dynamic layout
+- `src/prompts/system.ts` - System prompt with skill invocation rules
 
 ### Common Patterns
 - Tools return `{ success: boolean, output?: string, error?: string }`
@@ -79,25 +86,12 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
 - AbortController for interruptible operations
 
 ### Testing
-- Tests in `src/core/__tests__/` (6 test files, 64 tests)
+- Tests in `src/**/__tests__/` (16 test files, 157 tests)
 - Run `npm run test:run` for single execution
 - All tests passing ✓
 
-## Current Status
+## Built-in Skills (14 superpowers)
 
-### Recent Changes (uncommitted)
-- AGENTS.md expanded with detailed architecture
-- CLAUDE.md updated with bash tool modes, skills list
-- docs/MANUAL.md added bash advanced modes documentation
-- Added `node-pty` dependency for interactive PTY support
-- Improved TUI (screenManager.ts) with dynamic input area
-- Fixed GLM-5 context window (200k)
-
-### Pending Work
-- Skills auto-invocation mechanism (system prompt needs skills metadata injection)
-- Web search improvement (DuckDuckGo HTML parsing or Tavily API)
-
-### Built-in Skills (14 superpowers)
 | Skill | Trigger |
 |-------|---------|
 | `brainstorming` | Before any creative work |
@@ -105,11 +99,39 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
 | `test-driven-development` | Before writing implementation |
 | `systematic-debugging` | Any bug or test failure |
 | `subagent-driven-development` | Executing plans with parallel tasks |
+| `dispatching-parallel-agents` | 2+ independent tasks without shared state |
+| `executing-plans` | Executing implementation plans with checkpoints |
+| `finishing-a-development-branch` | Work complete, deciding integration approach |
+| `receiving-code-review` | Before implementing review feedback |
+| `requesting-code-review` | Before merging to verify work |
+| `using-git-worktrees` | Starting feature work needing isolation |
 | `using-superpowers` | At session start (bootstrap) |
+| `verification-before-completion` | Before claiming work is complete |
+| `writing-skills` | Creating/editing skills |
 
-### Model Support
+## Model Support
+
 | Provider | Context Window |
 |----------|----------------|
-| GPT-4o | 128k |
-| Claude-3 | 200k |
+| OpenAI (GPT-4o) | 128k |
+| Anthropic (Claude-3) | 200k |
 | GLM-5 | 200k |
+| Local models | Varies |
+
+## Current Status
+
+### Completed
+- ✅ Core architecture (80+ files)
+- ✅ 33+ tools (file, bash, git, GitHub, web, etc.)
+- ✅ Skills system with 14 built-in superpowers
+- ✅ MCP protocol support
+- ✅ Hooks system for security/logging
+- ✅ Multi-provider support (OpenAI, Anthropic, Together, Groq, Local)
+- ✅ Session persistence and compression
+- ✅ TUI with scroll regions and status bar
+- ✅ 157 tests passing
+
+### Known Issues
+- TUI not fully polished (per CURRENT-STATUS.md)
+- Skills auto-invocation needs system prompt metadata injection
+- Web search could be improved (DuckDuckGo HTML parsing or Tavily API)

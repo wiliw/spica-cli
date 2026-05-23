@@ -579,6 +579,7 @@ Start the analysis, execute step by step, then output the document.`;
               state.setProcessing(true);
               try {
                 await agent.runLoop(prompt);
+                stopHeartbeat();  // 成功完成后停止心跳
                 screen.setStreaming(false);
                 screen.appendScroll(LAIN_COLORS.success('\n[OK] Done\n'));
               } catch (error: any) {
@@ -616,6 +617,7 @@ Start the analysis, execute step by step, then output the document.`;
 
         try {
           await agent.runLoop(trimmed);
+          stopHeartbeat();  // 成功完成后停止心跳（防止超时提示）
           if (state.isStreamingOutput()) {
             state.setStreamingOutput(false);
             screen.setStreaming(false);
@@ -682,6 +684,7 @@ Start the analysis, execute step by step, then output the document.`;
           screen.appendScroll(LAIN_COLORS.muted(`\nCombined input:\n${mergedInput.slice(0, 100)}${mergedInput.length > 100 ? '...' : ''}\n`));
           try {
             await agent.runLoop(mergedInput);
+            stopHeartbeat();  // 成功完成后停止心跳
             screen.setStreaming(false);
             screen.appendScroll(LAIN_COLORS.success('\n[OK] Done\n'));
           } catch (error: any) {
@@ -1184,6 +1187,7 @@ async function runSimpleMode(agent: SpicaAgent, fresh?: boolean): Promise<void> 
       try {
         console.log(LAIN_COLORS.muted('\n[PROCESSING]...'));
         const response = await agent.runLoop(trimmed);
+        stopHeartbeat();  // 成功完成后停止心跳
         console.log(LAIN_COLORS.success('\n[OK] Done'));
       } catch (error: any) {
         stopHeartbeat();  // 错误时停止心跳

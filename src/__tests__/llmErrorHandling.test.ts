@@ -1,5 +1,5 @@
 // LLM error handling tests
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SpicaAgent } from '../agent';
 import type { ChatMessage } from '../llm/providers/BaseProvider';
 
@@ -19,6 +19,7 @@ describe('LLM Error Handling', () => {
   let testMessages: ChatMessage[];
 
   beforeEach(() => {
+    vi.useFakeTimers();  // 使用假计时器加速重试延迟
     agent = new SpicaAgent('test', '/tmp/spica-test-error');
 
     testMessages = [];
@@ -36,11 +37,24 @@ describe('LLM Error Handling', () => {
     Object.defineProperty(agent, 'llm', { value: mockLLM, writable: true });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();  // 恢复真实计时器
+  });
+
   describe('Initial generate failure', () => {
     it('should handle LLM generate failure gracefully', async () => {
+      // 每次 generate 都失败（模拟持续的网络问题）
       mockLLM.generate = vi.fn().mockRejectedValue(new Error('OpenAI API error: Connection error'));
 
-      const result = await agent.runLoop('test prompt');
+      // 启动 runLoop 并推进计时器以加速重试
+      const resultPromise = agent.runLoop('test prompt');
+
+      // 推进所有重试延迟（10次重试，每次最多60秒）
+      for (let i = 0; i < 11; i++) {
+        await vi.advanceTimersByTimeAsync(60000);
+      }
+
+      const result = await resultPromise;
 
       expect(result).toContain('LLM请求失败');
       expect(result).toContain('Connection error');
@@ -52,7 +66,14 @@ describe('LLM Error Handling', () => {
       const errorListener = vi.fn();
       agent.on('error_suggestion', errorListener);
 
-      await agent.runLoop('test prompt');
+      const resultPromise = agent.runLoop('test prompt');
+
+      // 推进所有重试延迟
+      for (let i = 0; i < 11; i++) {
+        await vi.advanceTimersByTimeAsync(60000);
+      }
+
+      await resultPromise;
 
       expect(errorListener).toHaveBeenCalled();
       expect(errorListener.mock.calls[0][0].error).toContain('API timeout');
@@ -67,10 +88,17 @@ describe('LLM Error Handling', () => {
         finished: false
       });
 
-      // Continue fails
+      // Continue 每次都失败
       mockLLM.continueWithAllToolResults = vi.fn().mockRejectedValue(new Error('Network interrupted'));
 
-      const result = await agent.runLoop('read a file');
+      const resultPromise = agent.runLoop('read a file');
+
+      // 推进所有重试延迟
+      for (let i = 0; i < 11; i++) {
+        await vi.advanceTimersByTimeAsync(60000);
+      }
+
+      const result = await resultPromise;
 
       expect(result).toContain('工具执行完成');
       expect(result).toContain('Network interrupted');
@@ -87,7 +115,14 @@ describe('LLM Error Handling', () => {
       const errorListener = vi.fn();
       agent.on('error_suggestion', errorListener);
 
-      await agent.runLoop('run a command');
+      const resultPromise = agent.runLoop('run a command');
+
+      // 推进所有重试延迟
+      for (let i = 0; i < 11; i++) {
+        await vi.advanceTimersByTimeAsync(60000);
+      }
+
+      await resultPromise;
 
       expect(errorListener).toHaveBeenCalled();
     });
@@ -95,9 +130,17 @@ describe('LLM Error Handling', () => {
 
   describe('Network resilience', () => {
     it('should not crash on transient network errors', async () => {
-      mockLLM.generate = vi.fn().mockRejectedValueOnce(new Error('ECONNRESET'));
+      // 每次 generate 都失败（模拟持续的网络问题）
+      mockLLM.generate = vi.fn().mockRejectedValue(new Error('ECONNRESET'));
 
-      const result = await agent.runLoop('test');
+      const resultPromise = agent.runLoop('test');
+
+      // 推进所有重试延迟
+      for (let i = 0; i < 11; i++) {
+        await vi.advanceTimersByTimeAsync(60000);
+      }
+
+      const result = await resultPromise;
 
       expect(result).toContain('LLM请求失败');
       // Agent handles gracefully, doesn't crash

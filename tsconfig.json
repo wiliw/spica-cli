@@ -15,7 +15,8 @@
     "declarationMap": true,
     "sourceMap": true,
     "jsx": "react",
-    "noImplicitAny": false
+    "noImplicitAny": false,
+    "types": ["vitest/globals"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "test"]

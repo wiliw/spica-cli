@@ -3,6 +3,7 @@ import { saveSession, loadSession } from '../utils/session';
 import { TokenCounter } from '../llm/TokenCounter';
 import { computeDiff, formatDiff } from '../cli/ui/diff';
 import fs from 'fs-extra';
+import type { ChatMessage } from '../llm/providers/BaseProvider';
 
 describe('Edge Cases', () => {
   describe('Session Edge Cases', () => {
@@ -22,7 +23,7 @@ describe('Edge Cases', () => {
     });
 
     it('should handle messages with empty content', () => {
-      const messages = [
+      const messages: ChatMessage[] = [
         { role: 'user', content: '' },
         { role: 'assistant', content: '', toolCalls: [] },
         { role: 'tool', content: '', toolCallId: 'tc-1' }
@@ -33,7 +34,7 @@ describe('Edge Cases', () => {
     });
 
     it('should handle messages with only toolCalls (no content)', () => {
-      const messages = [
+      const messages: ChatMessage[] = [
         {
           role: 'assistant',
           content: '',
@@ -47,7 +48,7 @@ describe('Edge Cases', () => {
     });
 
     it('should handle unicode and special characters', () => {
-      const messages = [
+      const messages: ChatMessage[] = [
         { role: 'user', content: '你好世界 🎉 \n\t\r\\特殊字符' },
         { role: 'assistant', content: '回复: <script>alert("xss")</script>' }
       ];
@@ -59,7 +60,7 @@ describe('Edge Cases', () => {
 
     it('should handle very long tool call arguments', () => {
       const longArgs = { content: 'A'.repeat(10000), path: '/very/long/path/...' };
-      const messages = [
+      const messages: ChatMessage[] = [
         {
           role: 'assistant',
           content: '',
@@ -86,14 +87,14 @@ describe('Edge Cases', () => {
     });
 
     it('should handle very long single message', () => {
-      const msg = { role: 'user', content: 'A'.repeat(50000) };
+      const msg = { role: 'user' as const, content: 'A'.repeat(50000) };
       const tokens = counter.estimateMessage(msg);
       expect(tokens).toBeGreaterThan(10000);
     });
 
     it('should handle message with many tool calls', () => {
       const msg = {
-        role: 'assistant',
+        role: 'assistant' as const,
         content: '',
         toolCalls: Array(50).fill(null).map((_, i) => ({
           id: `tc-${i}`,
@@ -106,7 +107,7 @@ describe('Edge Cases', () => {
     });
 
     it('should handle messages array with mixed types', () => {
-      const messages = [
+      const messages: ChatMessage[] = [
         { role: 'system', content: 'System prompt' },
         { role: 'user', content: 'User message' },
         { role: 'assistant', content: '', toolCalls: [{ id: 'tc-1', name: 'bash', arguments: {} }] },

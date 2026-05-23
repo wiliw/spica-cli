@@ -36,7 +36,7 @@ export function loadProjectState(workspacePath: string): ProjectState | null {
       return JSON.parse(data);
     }
   } catch (error) {
-    console.error('Failed to load project state:', error);
+    // Failed to load project state - returning null is expected behavior
   }
   return null;
 }
@@ -48,7 +48,7 @@ export function saveProjectState(workspacePath: string, state: ProjectState): vo
     state.lastActivity = new Date().toISOString();
     fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
   } catch (error) {
-    console.error('Failed to save project state:', error);
+    // Failed to save project state - non-critical error
   }
 }
 
@@ -101,7 +101,7 @@ export function loadProjectContext(workspacePath: string): any[] {
       return messages;
     }
   } catch (error) {
-    console.error('Failed to load project context:', error);
+    // Failed to load project context - returning empty array is expected
   }
   return [];
 }
@@ -113,6 +113,6 @@ export function saveProjectContext(workspacePath: string, messages: any[]): void
     const trimmed = messages.slice(-MAX_CONTEXT_MESSAGES);
     fs.writeFileSync(contextPath, JSON.stringify(trimmed, null, 2));
   } catch (error) {
-    console.error('Failed to save project context:', error);
+    // Failed to save project context - non-critical error
   }
 }

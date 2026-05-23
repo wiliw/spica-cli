@@ -52,6 +52,9 @@ export class SpicaAgent extends EventEmitter {
   private permissionResolve: ((approved: boolean) => void) | null = null;
   private bypassPermissions = false;  // 跳过权限请求模式
 
+  // 工具级 AbortController（用于中断单个工具）
+  private toolAbortControllers: Map<string, AbortController> = new Map();
+
   constructor(providerName?: string, workspacePath?: string) {
     super();
     this._providerName = providerName;
@@ -71,6 +74,12 @@ export class SpicaAgent extends EventEmitter {
     if (this.llm) {
       this.llm.interrupt();
     }
+    // 中断所有正在执行的工具
+    this.toolAbortControllers.forEach((controller, toolName) => {
+      controller.abort();
+      this.emit('tool_aborted', { tool: toolName });
+    });
+    this.toolAbortControllers.clear();
     // 拒绝所有待处理的权限请求
     this.permissionQueue.forEach(p => p.resolve(false));
     this.permissionQueue = [];
@@ -179,6 +188,26 @@ export class SpicaAgent extends EventEmitter {
     return this.permissionPending;
   }
 
+  // 中断单个工具（不中断整个 runLoop）
+  abortTool(toolName: string): void {
+    const controller = this.toolAbortControllers.get(toolName);
+    if (controller) {
+      controller.abort();
+      this.toolAbortControllers.delete(toolName);
+      this.emit('tool_aborted', { tool: toolName });
+    }
+  }
+
+  // 注册工具 AbortController
+  registerToolAbortController(toolName: string, controller: AbortController): void {
+    this.toolAbortControllers.set(toolName, controller);
+  }
+
+  // 清除工具 AbortController
+  clearToolAbortController(toolName: string): void {
+    this.toolAbortControllers.delete(toolName);
+  }
+
   // 设置bypass模式
   setBypassPermissions(enabled: boolean): void {
     this.bypassPermissions = enabled;
@@ -187,6 +216,122 @@ export class SpicaAgent extends EventEmitter {
 
   get isBypassPermissions(): boolean {
     return this.bypassPermissions;
+  }
+
+// 判断错误是否可重试
+  private isRetryableError(error: any): boolean {
+    const message = error.message || '';
+    const code = String(error.code || error.status || '');
+
+    // 不可重试的错误
+    const nonRetryablePatterns = [
+      '401',  // 认证失败
+      '403',  // 权限不足
+      '404',  // 资源不存在
+      'invalid', 'unauthorized', 'permission',
+    ];
+
+    for (const pattern of nonRetryablePatterns) {
+      if (message.includes(pattern) || code === pattern) {
+        return false;
+      }
+    }
+
+    // 可重试的错误：网络问题、超时、速率限制、服务器错误
+    const retryablePatterns = [
+      'ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'ECONNRESET',
+      '429', '500', '502', '503',
+      'timeout', 'network', 'connection', 'rate limit',
+    ];
+
+    for (const pattern of retryablePatterns) {
+      if (message.toLowerCase().includes(pattern.toLowerCase()) || code === pattern) {
+        return true;
+      }
+    }
+
+    // 默认：未知错误也重试（网络波动等临时问题）
+    return true;
+  }
+
+  // 判断工具错误是否是"关键错误"（应该停止整个生成循环）
+  private isCriticalToolError(toolName: string, result: { success: boolean; error?: string; output?: string }): boolean {
+    if (result.success) return false;
+
+    const error = result.error || '';
+
+    // 关键错误类型：应该停止生成并让用户处理
+    const criticalPatterns = [
+      '401', 'Unauthorized', 'invalid API key', 'authentication',
+      '403', 'Forbidden', 'permission denied',
+      'ECONNREFUSED', 'ENOTFOUND', 'network error', 'no network',
+      'aborted by user',
+      'API连接失败',
+    ];
+
+    for (const pattern of criticalPatterns) {
+      if (error.toLowerCase().includes(pattern.toLowerCase())) {
+        return true;
+      }
+    }
+
+    // Web工具的特殊处理：如果代理/网络失败，停止
+    if (toolName === 'web_search' || toolName === 'web_fetch') {
+      if (error.includes('HTTPS_PROXY') || error.includes('No results') || error.includes('No content')) {
+        // 如果提示设置代理，说明网络环境有问题
+        if (error.includes('HTTPS_PROXY') || error.includes('failed')) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  // 带重试的 LLM 调用（参考 Claude Code 等 coding agent 的重试策略）
+  private async callLLMWithRetry<T>(
+    operation: () => Promise<T>,
+    operationName: string,
+    maxRetries: number = 10
+  ): Promise<T> {
+    let lastError: any;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error: any) {
+        lastError = error;
+
+        // 最后一次尝试不再重试
+        if (attempt === maxRetries) {
+          break;
+        }
+
+        // 检查是否可重试（认证等错误直接抛出）
+        if (!this.isRetryableError(error)) {
+          this.emit('error_suggestion', {
+            tool: operationName,
+            error: error.message,
+            suggestion: `错误不可重试，需要用户处理: ${error.message}`
+          });
+          throw error;
+        }
+
+        // 指数退避：1s, 2s, 4s, 8s, 16s, 32s, 60s...（最大60秒）
+        const delay = Math.min(1000 * Math.pow(2, attempt), 60000);
+        this.emit('retry_attempt', {
+          operation: operationName,
+          attempt: attempt + 1,
+          maxRetries,
+          delay,
+          error: error.message,
+        });
+
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    throw lastError;
   }
 
 async init() {
@@ -361,19 +506,33 @@ async init() {
 
     let response;
     try {
-      response = await this.llm.generate(prompt + (projectContext ? `\n${projectContext}` : ''), toolDefinitions);
+      response = await this.callLLMWithRetry(
+        () => this.llm.generate(prompt + (projectContext ? `\n${projectContext}` : ''), toolDefinitions),
+        'llm_generate'
+      );
     } catch (llmError: any) {
       this.emit('error_suggestion', {
         tool: 'llm_generate',
         error: llmError.message,
         suggestion: '网络或API临时错误。请检查网络连接，稍后重试。'
       });
-      return `LLM请求失败: ${llmError.message}\n建议: 检查API配置和网络连接，然后重试。`;
+      return `LLM请求失败（已重试10次）: ${llmError.message}\n建议: 检查API配置和网络连接，然后重试。`;
+    }
+
+    // 防御性检查：确保 response 存在
+    if (!response) {
+      this.emit('error_suggestion', {
+        tool: 'llm_generate',
+        error: 'LLM returned undefined',
+        suggestion: 'LLM返回异常，请重试'
+      });
+      return 'LLM返回异常，请重试';
     }
 
     let iterations = 0;
 
     const allToolResults: Array<{ name: string; id: string; result: string }> = [];
+    let criticalErrorDetected: { tool: string; error: string; suggestion: string } | null = null;
 
     while (!response.finished && iterations < maxIterations && !this.interruptFlag) {
       iterations++;
@@ -445,73 +604,143 @@ async init() {
           // 同步 workspace 到 tools 模块
           setWorkspace(this.workspacePath);
 
-          // 事件回调 - 用于转发子agent事件
+          // 创建工具级 AbortController（用于中断单个工具）
+          const toolAbortController = new AbortController();
+          this.registerToolAbortController(tc.name, toolAbortController);
+
+          // 传递 AbortSignal 给工具
+          tcArgs._abortSignal = toolAbortController.signal;
+
+          // 事件回调 - 用于转发子agent事件和处理卡住警告
           const eventCallback = (event: string, data: any) => {
             this.emit(event, data);
+
+            // 处理工具卡住警告：自动中断并尝试其他方案
+            if (event === 'tool_stuck_warning') {
+              // 自动中断卡住的工具（30秒后仍未完成）
+              // Agent 将收到错误结果并可以尝试其他方案
+              this.abortTool(tc.name);
+            }
           };
 
-          const result = await executeTool(tc.name, tcArgs, eventCallback);
+          try {
+            const result = await executeTool(tc.name, tcArgs, eventCallback);
 
-          if (!result.success) {
-            this.emit('error_suggestion', {
-              toolName: tc.name,
+            // 清除 AbortController
+            this.clearToolAbortController(tc.name);
+
+            if (!result.success) {
+              // 检查是否是被中断的
+              if (result.error?.includes('aborted') || result.error?.includes('interrupted')) {
+                this.emit('tool_result', {
+                  name: tc.name,
+                  success: false,
+                  error: `工具执行被中断（可能卡住）。建议尝试其他方案：使用 detached 模式、更短 timeout，或 interactive 模式。`,
+                });
+                return { name: tc.name, id: tc.id, result: `工具被中断，需要尝试其他方案`, isCritical: true };
+              }
+
+              // 检查是否是关键错误（应该停止整个生成）
+              if (this.isCriticalToolError(tc.name, result)) {
+                const suggestion = this.generateErrorSuggestion(tc.name, result.error || '', tcArgs);
+                criticalErrorDetected = { tool: tc.name, error: result.error || 'Unknown error', suggestion };
+                this.emit('tool_result', {
+                  name: tc.name,
+                  success: false,
+                  error: result.error,
+                });
+                return { name: tc.name, id: tc.id, result: `关键错误: ${result.error}`, isCritical: true };
+              }
+
+              this.emit('error_suggestion', {
+                toolName: tc.name,
+                error: result.error,
+                suggestion: this.generateErrorSuggestion(tc.name, result.error, tcArgs),
+              });
+            }
+
+            // 文件编辑成功时发送diff预览
+            if (result.success && (tc.name === 'file_write' || tc.name === 'file_edit' || tc.name === 'file_multi_edit') && result.diff) {
+              this.emit('diff_preview', {
+                filePath: tcArgs.path || tcArgs.file_path,
+                diff: result.diff,
+              });
+            }
+
+            this.emit('tool_result', {
+              name: tc.name,
+              success: result.success,
+              output: result.output,
               error: result.error,
-              suggestion: this.generateErrorSuggestion(tc.name, result.error, tcArgs),
-            });
-          }
-
-          // 文件编辑成功时发送diff预览
-          if (result.success && (tc.name === 'file_write' || tc.name === 'file_edit' || tc.name === 'file_multi_edit') && result.diff) {
-            this.emit('diff_preview', {
-              filePath: tcArgs.path || tcArgs.file_path,
               diff: result.diff,
             });
+
+            // PostToolUse hooks
+            const postHookMessage = runPostHooks(tc.name, tcArgs, result);
+            if (postHookMessage) {
+              this.emit('hook_log', { tool: tc.name, message: postHookMessage });
+            }
+
+            // workspace切换处理
+            if (tc.name === 'workspace' && result.success && tcArgs.path) {
+              await this.switchWorkspace(tcArgs.path);
+            }
+
+            return { name: tc.name, id: tc.id, result: result.output || result.error || '' };
+          } catch (toolError: any) {
+            // 清除 AbortController
+            this.clearToolAbortController(tc.name);
+
+            this.emit('tool_result', {
+              name: tc.name,
+              success: false,
+              error: toolError.message,
+            });
+            return { name: tc.name, id: tc.id, result: `工具执行错误: ${toolError.message}` };
           }
-
-          this.emit('tool_result', {
-            name: tc.name,
-            success: result.success,
-            output: result.output,
-            error: result.error,
-            diff: result.diff,
-          });
-
-          // PostToolUse hooks
-          const postHookMessage = runPostHooks(tc.name, tcArgs, result);
-          if (postHookMessage) {
-            this.emit('hook_log', { tool: tc.name, message: postHookMessage });
-          }
-
-          // workspace切换处理
-          if (tc.name === 'workspace' && result.success && tcArgs.path) {
-            await this.switchWorkspace(tcArgs.path);
-          }
-
-          return { name: tc.name, id: tc.id, result: result.output || result.error || '' };
         }));
 
         allToolResults.push(...toolResults);
 
-        if (this.interruptFlag) break;
+        // 中断检查：如果被中断，立即停止整个生成循环
+        if (this.interruptFlag) {
+          this.emit('agent_interrupted', {
+            toolResults: toolResults.map(t => ({ name: t.name, result: t.result.slice(0, 100) })),
+          });
+          return '[INTERRUPTED] Agent execution stopped by user (ESC ESC). You can retry or continue with a new request.';
+        }
+
+        // 关键错误检查：如果检测到关键错误，停止生成并报告
+        if (criticalErrorDetected) {
+          this.emit('agent_stopped_on_error', {
+            tool: criticalErrorDetected.tool,
+            error: criticalErrorDetected.error,
+            suggestion: criticalErrorDetected.suggestion,
+          });
+          return `[STOPPED] Agent stopped due to critical error in ${criticalErrorDetected.tool}.\nError: ${criticalErrorDetected.error}\nSuggestion: ${criticalErrorDetected.suggestion}\nPlease fix the issue and retry.`;
+        }
 
         // 所有工具完成后，一次性发送所有结果给LLM继续生成
         if (toolResults.length > 0) {
           this.emit('waiting_for_llm');  // 通知外部启动心跳
           try {
-            response = await this.llm.continueWithAllToolResults(
-              toolResults.map(t => ({ name: t.name, result: t.result })),
-              toolDefinitions
+            response = await this.callLLMWithRetry(
+              () => this.llm.continueWithAllToolResults(
+                toolResults.map(t => ({ name: t.name, result: t.result })),
+                toolDefinitions
+              ),
+              'llm_continue'
             );
           } catch (llmError: any) {
             // LLM调用失败（网络问题、API错误等），不要崩溃整个会话
             this.emit('error_suggestion', {
               tool: 'llm_continue',
               error: llmError.message,
-              suggestion: '网络或API临时错误，工具执行结果已保存。可尝试继续对话或重新发送请求。'
+              suggestion: '网络或API临时错误（已重试10次），工具执行结果已保存。可尝试继续对话或重新发送请求。'
             });
             // 返回已执行的工具结果摘要，让用户知道发生了什么
             const resultsSummary = toolResults.map(t => `${t.name}: ${t.result.slice(0, 100)}`).join('\n');
-            return `工具执行完成，但LLM响应中断。\n错误: ${llmError.message}\n已执行的操作:\n${resultsSummary}\n建议: 可以继续对话，之前的操作结果已保留。`;
+            return `工具执行完成，但LLM响应中断（已重试10次）。\n错误: ${llmError.message}\n已执行的操作:\n${resultsSummary}\n建议: 可以继续对话，之前的操作结果已保留。`;
           }
         }
       } else {

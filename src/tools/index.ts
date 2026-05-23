@@ -37,6 +37,7 @@ export interface ToolResult {
   output?: string;
   error?: string;
   diff?: string;
+  syntaxErrors?: string[];  // 语法错误列表（用于编辑工具后自动检查）
 }
 
 export const TOOLS_DEFINITIONS: ToolDefinition[] = [
@@ -55,7 +56,7 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'file_write',
-    description: 'Write/create file. Overwrites existing.',
+    description: 'Write/create file. Overwrites existing. Auto-checks syntax for code files (TS/JS/Python/Go/Rust/Shell). Returns syntaxErrors if issues found.',
     parameters: {
       type: 'object' as const,
       properties: {
@@ -67,7 +68,7 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'file_edit',
-    description: 'Edit file by exact text replacement. Read first.',
+    description: 'Edit file by exact text replacement. Read first. Auto-checks syntax after edit. Returns syntaxErrors if issues found.',
     parameters: {
       type: 'object' as const,
       properties: {
@@ -80,7 +81,7 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'file_multi_edit',
-    description: 'Edit file with multiple replacements at once. More efficient than multiple file_edit calls. Read file first.',
+    description: 'Edit file with multiple replacements at once. More efficient than multiple file_edit calls. Read file first. Auto-checks syntax after edit.',
     parameters: {
       type: 'object' as const,
       properties: {
@@ -362,7 +363,7 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'lint',
-    description: 'Run linter. Auto-detects.',
+    description: 'Run project-level linter/type checker. Auto-detects: TypeScript (tsc), ESLint, Go (golangci-lint), Python (pylint), Rust (clippy). Use after code changes to catch errors.',
     parameters: {
       type: 'object' as const,
       properties: {
@@ -374,7 +375,7 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'test',
-    description: 'Run tests. Auto-detects.',
+    description: 'Run tests. Auto-detects: vitest, npm test, go test, pytest, cargo test. IMPORTANT: Run after code changes to verify functionality.',
     parameters: {
       type: 'object' as const,
       properties: {
@@ -465,7 +466,17 @@ export async function executeTool(
         }
 
         await fs.writeFile(writePath, safeArgs.content, 'utf-8');
-        return { success: true, output: `Wrote ${writePath}`, diff };
+
+        // 自动语法检查
+        const syntaxResult = await runSyntaxCheck(writePath);
+        const syntaxWarning = formatSyntaxResult(syntaxResult, writePath);
+
+        return {
+          success: true,
+          output: `Wrote ${writePath}${syntaxWarning}`,
+          diff,
+          syntaxErrors: syntaxResult.hasErrors ? syntaxResult.errors : undefined,
+        };
       }
 
       case 'file_edit': {
@@ -483,7 +494,17 @@ export async function executeTool(
         const diff = generateEditDiff(oldStr, newStr);
 
         await fs.writeFile(editPath, newContent, 'utf-8');
-        return { success: true, output: `Edited ${editPath}`, diff };
+
+        // 自动语法检查
+        const syntaxResult = await runSyntaxCheck(editPath);
+        const syntaxWarning = formatSyntaxResult(syntaxResult, editPath);
+
+        return {
+          success: true,
+          output: `Edited ${editPath}${syntaxWarning}`,
+          diff,
+          syntaxErrors: syntaxResult.hasErrors ? syntaxResult.errors : undefined,
+        };
       }
 
       case 'file_multi_edit': {
@@ -509,10 +530,16 @@ export async function executeTool(
         }
 
         await fs.writeFile(editPath, newContent, 'utf-8');
+
+        // 自动语法检查
+        const syntaxResult = await runSyntaxCheck(editPath);
+        const syntaxWarning = formatSyntaxResult(syntaxResult, editPath);
+
         return {
           success: true,
-          output: `Edited ${editPath} (${editCount} changes)`,
+          output: `Edited ${editPath} (${editCount} changes)${syntaxWarning}`,
           diff: diffs.join('\n---\n'),
+          syntaxErrors: syntaxResult.hasErrors ? syntaxResult.errors : undefined,
         };
       }
 
@@ -601,6 +628,9 @@ export async function executeTool(
         const inputFile = safeArgs.inputFile as string;
         const outputFile = safeArgs.outputFile as string;
 
+        // 卡住检测阈值（默认30秒，可通过 stuckWarning 参数调整）
+        const stuckWarningMs = (safeArgs.stuckWarning as number) || 30000;
+
         try {
           // Read inputs from file if provided
           if (inputFile) {
@@ -673,50 +703,105 @@ export async function executeTool(
             }
           }
 
-          const bashResult = await execa(actualCommand, {
-            shell: true,
-            cwd: WORKSPACE,
-            timeout: timeout,
-            reject: false,
-          });
-          // 检查是否超时
-          if (bashResult.timedOut) {
-            return {
-              success: false,
-              error: `Timeout after ${timeout / 1000}s\nOutput:\n${bashResult.stdout || bashResult.stderr || ''}`,
-            };
-          }
-          // 合并stdout和stderr显示完整输出
-          const fullOutput = (bashResult.stdout + '\n' + bashResult.stderr).trim();
-          // 截断超长输出（防止内存溢出）
-          const truncateOutput = (text: string, maxLen: number): string => {
-            if (text.length <= maxLen) return text;
-            return text.slice(0, maxLen) + `\n... [truncated, total ${text.length} chars]`;
-          };
-          const output = truncateOutput(fullOutput, maxOutputLength);
+          // 创建 AbortController 用于卡住检测和中断（优先使用 agent 传入的 signal）
+          const externalSignal = safeArgs._abortSignal as AbortSignal | undefined;
+          const abortController = externalSignal
+            ? new AbortController()
+            : new AbortController();
 
-          // Write output to file if provided
-          if (outputFile) {
-            const outputPath = pathResolve(WORKSPACE, outputFile);
-            await fs.writeFile(outputPath, fullOutput, 'utf-8');
+          // 如果有外部 signal，监听它的 abort 事件
+          if (externalSignal) {
+            if (externalSignal.aborted) {
+              abortController.abort();
+            } else {
+              externalSignal.addEventListener('abort', () => {
+                abortController.abort();
+              });
+            }
+          }
+
+          // 设置卡住警告定时器
+          let stuckWarningSent = false;
+          let stuckWarningTimer: NodeJS.Timeout | null = setTimeout(() => {
+            if (!stuckWarningSent && eventCallback) {
+              stuckWarningSent = true;
+              eventCallback('tool_stuck_warning', {
+                tool: 'bash',
+                command: command,
+                elapsedMs: stuckWarningMs,
+                message: `命令执行超过 ${stuckWarningMs / 1000} 秒无响应。可能是交互式程序或需要更长时间。建议：1) 等待完成 2) 中断并尝试其他方案（如使用 detached 模式或 shorter timeout）`,
+              });
+            }
+          }, stuckWarningMs);
+
+          try {
+            // 执行命令
+            const bashResult = await execa(actualCommand, {
+              shell: true,
+              cwd: WORKSPACE,
+              timeout: timeout,
+              reject: false,
+              cancelSignal: abortController.signal,
+            });
+
+            // 清除卡住警告定时器（无论成功或失败都要清除）
+            if (stuckWarningTimer) {
+              clearTimeout(stuckWarningTimer);
+              stuckWarningTimer = null;
+            }
+
+            // 检查是否被中断（通过外部 abort signal）
+            if (abortController.signal.aborted) {
+              return {
+                success: false,
+                error: `Tool execution aborted (stuck or interrupted). Command: ${command.slice(0, 50)}...\n建议：尝试使用 detached=true 后台运行，或 timeout=10 设置更短超时。`,
+              };
+            }
+            // 检查是否超时
+            if (bashResult.timedOut) {
+              return {
+                success: false,
+                error: `Timeout after ${timeout / 1000}s\nOutput:\n${bashResult.stdout || bashResult.stderr || ''}`,
+              };
+            }
+            // 合并stdout和stderr显示完整输出
+            const fullOutput = (bashResult.stdout + '\n' + bashResult.stderr).trim();
+            // 截断超长输出（防止内存溢出）
+            const truncateOutput = (text: string, maxLen: number): string => {
+              if (text.length <= maxLen) return text;
+              return text.slice(0, maxLen) + `\n... [truncated, total ${text.length} chars]`;
+            };
+            const output = truncateOutput(fullOutput, maxOutputLength);
+
+            // Write output to file if provided
+            if (outputFile) {
+              const outputPath = pathResolve(WORKSPACE, outputFile);
+              await fs.writeFile(outputPath, fullOutput, 'utf-8');
+              return {
+                success: bashResult.exitCode === 0,
+                output: `Output written to ${outputFile} (${fullOutput.length} chars)`,
+                error: bashResult.exitCode !== 0 ? output : undefined,
+              };
+            }
+
             return {
               success: bashResult.exitCode === 0,
-              output: `Output written to ${outputFile} (${fullOutput.length} chars)`,
+              output: bashResult.exitCode === 0 ? output : undefined,
               error: bashResult.exitCode !== 0 ? output : undefined,
             };
+          } catch (bashError: any) {
+            // 清除卡住警告定时器（异常时也要清除）
+            if (stuckWarningTimer) {
+              clearTimeout(stuckWarningTimer);
+            }
+            // 捕获超时错误
+            if (bashError.message?.includes('timed out') || bashError.name === 'TimedOutError') {
+              return { success: false, error: `Timeout after ${timeout / 1000}s` };
+            }
+            return { success: false, error: bashError.message };
           }
-
-          return {
-            success: bashResult.exitCode === 0,
-            output: bashResult.exitCode === 0 ? output : undefined,
-            error: bashResult.exitCode !== 0 ? output : undefined,
-          };
-        } catch (bashError: any) {
-          // 捕获超时错误
-          if (bashError.message?.includes('timed out') || bashError.name === 'TimedOutError') {
-            return { success: false, error: `Timeout after ${timeout / 1000}s` };
-          }
-          return { success: false, error: bashError.message };
+        } catch (outerError: any) {
+          return { success: false, error: outerError.message };
         }
       }
 
@@ -789,50 +874,197 @@ export async function executeTool(
       }
 
       case 'web_search': {
-        const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(safeArgs.query)}`;
-        const timeoutMs = (safeArgs.timeout || 15) * 1000;
+        const timeoutMs = (safeArgs.timeout || 30) * 1000;
 
         // 尝试使用代理环境变量
         const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.https_proxy;
         const curlProxy = proxyUrl ? `--proxy "${proxyUrl}"` : '';
 
-        const searchResult = await execa(`curl -sL ${curlProxy} "${searchUrl}"`, {
-          shell: true,
-          timeout: timeoutMs,
-          reject: false,
-        });
+        // 使用 DuckDuckGo HTML 版本，添加更好的 headers
+        const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(safeArgs.query)}`;
+        const curlCmd = `curl -sL ${curlProxy} -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -H "Accept: text/html" "${searchUrl}"`;
 
-        if (searchResult.stdout.length === 0 && searchResult.stderr) {
-          return {
-            success: false,
-            error: `Search failed: ${searchResult.stderr}. Try setting HTTPS_PROXY environment variable.`
-          };
+        // 创建 AbortController（支持 ESC ESC 中断）
+        const externalSignal = safeArgs._abortSignal as AbortSignal | undefined;
+        const abortController = externalSignal ? new AbortController() : new AbortController();
+
+        if (externalSignal) {
+          if (externalSignal.aborted) {
+            abortController.abort();
+          } else {
+            externalSignal.addEventListener('abort', () => {
+              abortController.abort();
+            });
+          }
         }
 
-        return { success: true, output: searchResult.stdout.substring(0, 5000) };
+        try {
+          const searchResult = await execa(curlCmd, {
+            shell: true,
+            timeout: timeoutMs,
+            reject: false,
+            cancelSignal: abortController.signal,
+          });
+
+          // 检查是否被中断
+          if (abortController.signal.aborted) {
+            return {
+              success: false,
+              error: 'Tool execution aborted by user (ESC ESC).'
+            };
+          }
+
+          if (searchResult.stdout.length === 0) {
+            return {
+              success: false,
+              error: searchResult.stderr || 'Search failed: No results. Try setting HTTPS_PROXY environment variable.'
+            };
+          }
+
+        // 解析 HTML 提取搜索结果
+          const html = searchResult.stdout;
+          const results: string[] = [];
+
+          // 提取搜索结果链接和标题 (DuckDuckGo HTML 格式)
+          // 结果在 <a class="result__a" href="...">标题</a> 中
+          const titleMatches = html.matchAll(/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g);
+          for (const match of titleMatches) {
+            const url = match[1];
+            const title = match[2].trim();
+            // DuckDuckGo 使用重定向 URL，需要提取实际 URL
+            const actualUrl = url.includes('uddg=') ? decodeURIComponent(url.split('uddg=')[1].split('&')[0]) : url;
+            results.push(`- ${title}\n  ${actualUrl}`);
+            if (results.length >= 10) break; // 最多10个结果
+          }
+
+          if (results.length === 0) {
+            // 如果没有找到结果，尝试其他解析方式
+            const fallbackMatches = html.matchAll(/<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>([^<]{3,50})<\/a>/g);
+            for (const match of fallbackMatches) {
+              const url = match[1];
+              const title = match[2].trim();
+              if (!url.includes('duckduckgo.com') && title.length > 3) {
+                results.push(`- ${title}\n  ${url}`);
+                if (results.length >= 10) break;
+              }
+            }
+          }
+
+          const output = results.length > 0
+            ? `搜索结果 (${results.length}个):\n\n${results.join('\n\n')}`
+            : `搜索完成但未找到有效结果。\n原始输出:\n${html.substring(0, 2000)}`;
+
+          return { success: true, output };
+        } catch (searchError: any) {
+          // 检查是否是中断导致的错误
+          if (abortController.signal.aborted || searchError.message?.includes('abort')) {
+            return { success: false, error: 'Tool execution aborted by user (ESC ESC).' };
+          }
+          return { success: false, error: searchError.message };
+        }
       }
 
       case 'web_fetch': {
-        const timeoutMs = (safeArgs.timeout || 15) * 1000;
+        const timeoutMs = (safeArgs.timeout || 30) * 1000;
+        const url = safeArgs.url as string;
 
         // 尝试使用代理环境变量
         const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.https_proxy;
         const curlProxy = proxyUrl ? `--proxy "${proxyUrl}"` : '';
 
-        const fetchResult = await execa(`curl -sL ${curlProxy} "${safeArgs.url}"`, {
-          shell: true,
-          timeout: timeoutMs,
-          reject: false,
-        });
+        // 添加更好的 headers 避免被拦截
+        const curlCmd = `curl -sL ${curlProxy} \
+          -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+          -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
+          -H "Accept-Language: en-US,en;q=0.5" \
+          -H "Cache-Control: no-cache" \
+          "${url}"`;
 
-        if (fetchResult.stdout.length === 0 && fetchResult.stderr) {
-          return {
-            success: false,
-            error: `Fetch failed: ${fetchResult.stderr}. Try setting HTTPS_PROXY environment variable.`
-          };
+        // 创建 AbortController（支持 ESC ESC 中断）
+        const externalSignal = safeArgs._abortSignal as AbortSignal | undefined;
+        const abortController = externalSignal ? new AbortController() : new AbortController();
+
+        if (externalSignal) {
+          if (externalSignal.aborted) {
+            abortController.abort();
+          } else {
+            externalSignal.addEventListener('abort', () => {
+              abortController.abort();
+            });
+          }
         }
 
-        return { success: true, output: fetchResult.stdout.substring(0, 10000) };
+        try {
+          const fetchResult = await execa(curlCmd, {
+            shell: true,
+            timeout: timeoutMs,
+            reject: false,
+            cancelSignal: abortController.signal,
+          });
+
+          // 检查是否被中断
+          if (abortController.signal.aborted) {
+            return {
+              success: false,
+              error: 'Tool execution aborted by user (ESC ESC).'
+            };
+          }
+
+          if (fetchResult.stdout.length === 0) {
+            return {
+              success: false,
+              error: fetchResult.stderr || 'Fetch failed: No content. Try setting HTTPS_PROXY environment variable.'
+            };
+          }
+
+          const html = fetchResult.stdout;
+
+          // 检查是否被拦截 (Cloudflare 等)
+          if (html.includes('Just a moment') || html.includes('Checking your browser') || html.includes('cf-browser-verification')) {
+            return {
+              success: false,
+              error: '被 Cloudflare 或类似防护拦截。建议：\n1. 设置 HTTPS_PROXY 环境变量使用代理\n2. 尝试其他来源\n3. 使用 web_search 搜索替代信息',
+            };
+          }
+
+          // 尝试提取主要内容（简化 HTML）
+          let content = html;
+
+          // 移除 script, style, nav, footer, header 等无关内容
+          content = content.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+          content = content.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+          content = content.replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '');
+          content = content.replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '');
+          content = content.replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '');
+
+          // 提取 title
+          const titleMatch = content.match(/<title[^>]*>([^<]+)<\/title>/i);
+          const title = titleMatch ? titleMatch[1].trim() : '';
+
+          // 提取 body 内容
+          const bodyMatch = content.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+          let body = bodyMatch ? bodyMatch[1] : content;
+
+          // 简化：提取文本内容
+          body = body.replace(/<[^>]+>/g, ' ');
+          body = body.replace(/\s+/g, ' ').trim();
+
+          // 截取主要内容（最多 10000 字符）
+          const maxLen = 10000;
+          if (body.length > maxLen) {
+            body = body.substring(0, maxLen) + '\n... [truncated]';
+          }
+
+          const output = title ? `标题: ${title}\n\n内容:\n${body}` : body;
+
+          return { success: true, output };
+        } catch (fetchError: any) {
+          // 检查是否是中断导致的错误
+          if (abortController.signal.aborted || fetchError.message?.includes('abort')) {
+            return { success: false, error: 'Tool execution aborted by user (ESC ESC).' };
+          }
+          return { success: false, error: fetchError.message };
+        }
       }
 
       case 'question': {
@@ -1113,6 +1345,302 @@ async function detectProjectType(workspace: string): Promise<string> {
   if (await fs.pathExists(join(workspace, 'requirements.txt'))) return 'python';
   if (await fs.pathExists(join(workspace, 'Cargo.toml'))) return 'rust';
   return 'unknown';
+}
+
+// 根据文件扩展名检测语言类型
+function detectFileType(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase() || '';
+  const typeMap: Record<string, string> = {
+    'ts': 'typescript',
+    'tsx': 'typescript',
+    'mts': 'typescript',
+    'js': 'javascript',
+    'jsx': 'javascript',
+    'mjs': 'javascript',
+    'py': 'python',
+    'go': 'go',
+    'rs': 'rust',
+    'java': 'java',
+    'kt': 'kotlin',
+    'c': 'c',
+    'cpp': 'cpp',
+    'cc': 'cpp',
+    'cxx': 'cpp',
+    'h': 'c',
+    'hpp': 'cpp',
+    'cs': 'csharp',
+    'rb': 'ruby',
+    'php': 'php',
+    'swift': 'swift',
+    'sh': 'shell',
+    'bash': 'shell',
+    'zsh': 'shell',
+  };
+  return typeMap[ext] || 'unknown';
+}
+
+// 语法检查结果接口
+interface SyntaxCheckResult {
+  hasErrors: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+// 对单个文件进行语法检查
+async function runSyntaxCheck(filePath: string): Promise<SyntaxCheckResult> {
+  const result: SyntaxCheckResult = { hasErrors: false, errors: [], warnings: [] };
+  const fileType = detectFileType(filePath);
+  const absolutePath = resolvePath(filePath);
+
+  // 如果文件不存在，跳过检查
+  if (!await fs.pathExists(absolutePath)) {
+    return result;
+  }
+
+  // 检查是否在项目目录下（有 package.json 或 tsconfig.json）
+  const isProjectFile = await fs.pathExists(join(WORKSPACE, 'package.json')) ||
+                        await fs.pathExists(join(WORKSPACE, 'tsconfig.json'));
+
+  try {
+    switch (fileType) {
+      case 'typescript': {
+        // TypeScript: 优先使用项目级别的 tsc
+        if (isProjectFile) {
+          // 在项目目录下运行 tsc，只检查这个文件
+          const checkResult = await execa(`npx tsc --noEmit --skipLibCheck 2>&1 | grep -E "(error|${filePath})" | head -20`, {
+            shell: true,
+            cwd: WORKSPACE,
+            timeout: 30000,
+            reject: false,
+          });
+          const output = checkResult.stdout;
+          if (output.trim()) {
+            const lines = output.split('\n').filter(l => l.includes('error'));
+            for (const line of lines) {
+              if (line.includes(filePath) || line.includes('error TS')) {
+                result.errors.push(line.trim());
+                result.hasErrors = true;
+              }
+            }
+          }
+        } else {
+          // 非项目文件：使用简单的括号匹配检查
+          const content = await fs.readFile(absolutePath, 'utf-8');
+          const bracketErrors = checkBracketMatching(content, filePath);
+          if (bracketErrors.length > 0) {
+            result.errors.push(...bracketErrors);
+            result.hasErrors = true;
+          }
+        }
+        break;
+      }
+
+      case 'javascript': {
+        // JavaScript: 使用 node --check 进行语法检查
+        const nodeCheck = await execa(`node --check "${absolutePath}" 2>&1`, {
+          shell: true,
+          cwd: WORKSPACE,
+          timeout: 10000,
+          reject: false,
+        });
+        if (nodeCheck.exitCode !== 0) {
+          const errorOutput = nodeCheck.stderr || nodeCheck.stdout;
+          if (errorOutput && errorOutput.includes('SyntaxError')) {
+            result.errors.push(errorOutput);
+            result.hasErrors = true;
+          }
+        }
+        break;
+      }
+
+      case 'python': {
+        // Python: 使用 python3 -m py_compile
+        const pyCheck = await execa(`python3 -m py_compile "${absolutePath}" 2>&1`, {
+          shell: true,
+          cwd: WORKSPACE,
+          timeout: 15000,
+          reject: false,
+        });
+        if (pyCheck.exitCode !== 0) {
+          const errorOutput = pyCheck.stderr || pyCheck.stdout;
+          if (errorOutput && (errorOutput.includes('SyntaxError') || errorOutput.includes('IndentationError'))) {
+            result.errors.push(errorOutput);
+            result.hasErrors = true;
+          }
+        }
+        break;
+      }
+
+      case 'go': {
+        // Go: 使用 gofmt -l 检查格式（比 go vet 更可靠）
+        const gofmt = await execa(`gofmt -l "${absolutePath}" 2>&1`, {
+          shell: true,
+          cwd: WORKSPACE,
+          timeout: 5000,
+          reject: false,
+        });
+        if (gofmt.exitCode !== 0 && gofmt.stderr) {
+          result.errors.push(gofmt.stderr);
+          result.hasErrors = true;
+        }
+        // go vet 可能会报告问题
+        const goVet = await execa(`go vet "${absolutePath}" 2>&1 || true`, {
+          shell: true,
+          cwd: WORKSPACE,
+          timeout: 15000,
+          reject: false,
+        });
+        if (goVet.stdout && goVet.stdout.includes('error')) {
+          result.warnings.push(goVet.stdout);
+        }
+        break;
+      }
+
+      case 'rust': {
+        // Rust: 使用 rustfmt --check
+        const rustfmt = await execa(`rustfmt --check "${absolutePath}" 2>&1 || true`, {
+          shell: true,
+          cwd: WORKSPACE,
+          timeout: 15000,
+          reject: false,
+        });
+        if (rustfmt.exitCode !== 0 && rustfmt.stdout) {
+          result.warnings.push(`格式不符合 rustfmt 规范`);
+        }
+        break;
+      }
+
+      case 'shell': {
+        // Shell: 使用 bash -n 进行语法检查
+        const shellCheck = await execa(`bash -n "${absolutePath}" 2>&1`, {
+          shell: true,
+          cwd: WORKSPACE,
+          timeout: 5000,
+          reject: false,
+        });
+        if (shellCheck.exitCode !== 0) {
+          const errorOutput = shellCheck.stderr || shellCheck.stdout;
+          if (errorOutput) {
+            result.errors.push(errorOutput);
+            result.hasErrors = true;
+          }
+        }
+        break;
+      }
+
+      default:
+        // 未知文件类型，跳过检查
+        break;
+    }
+  } catch (error: any) {
+    // 语法检查失败不应阻止文件操作，只记录警告
+    result.warnings.push(`语法检查失败: ${error.message}`);
+  }
+
+  return result;
+}
+
+// 简单的括号匹配检查（用于非项目文件）
+function checkBracketMatching(content: string, filePath: string): string[] {
+  const errors: string[] = [];
+  const stack: { char: string; line: number }[] = [];
+  const pairs: Record<string, string> = { '(': ')', '[': ']', '{': '}' };
+  const openBrackets = new Set(['(', '[', '{']);
+  const closeBrackets = new Set([')', ']', '}']);
+  const lines = content.split('\n');
+
+  let inString: string | false = false;
+  let inComment = false;
+  let inMultiLineComment = false;
+
+  for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+    const line = lines[lineNum];
+    let i = 0;
+
+    while (i < line.length) {
+      const char = line[i];
+      const nextChar = line[i + 1];
+
+      // 处理字符串
+      if ((char === '"' || char === "'" || char === '`') && !inComment && !inMultiLineComment) {
+        if (!inString) {
+          inString = char;
+        } else if (inString === char && (i === 0 || line[i - 1] !== '\\')) {
+          inString = false;
+        }
+        i++;
+        continue;
+      }
+
+      // 处理注释
+      if (!inString) {
+        if (char === '/' && nextChar === '/' && !inMultiLineComment) {
+          inComment = true;
+          break;
+        }
+        if (char === '/' && nextChar === '*') {
+          inMultiLineComment = true;
+          i += 2;
+          continue;
+        }
+        if (char === '*' && nextChar === '/' && inMultiLineComment) {
+          inMultiLineComment = false;
+          i += 2;
+          continue;
+        }
+      }
+
+      if (!inString && !inComment && !inMultiLineComment) {
+        if (openBrackets.has(char)) {
+          stack.push({ char, line: lineNum + 1 });
+        } else if (closeBrackets.has(char)) {
+          if (stack.length === 0) {
+            errors.push(`${filePath}:${lineNum + 1}: 多余的闭合括号 '${char}'`);
+          } else {
+            const top = stack.pop()!;
+            if (pairs[top.char] !== char) {
+              errors.push(`${filePath}:${lineNum + 1}: 括号不匹配，期望 '${pairs[top.char]}' 但得到 '${char}'`);
+            }
+          }
+        }
+      }
+
+      i++;
+    }
+    inComment = false; // 单行注释在行末结束
+  }
+
+  // 检查未闭合的括号
+  for (const item of stack) {
+    errors.push(`${filePath}:${item.line}: 未闭合的括号 '${item.char}'`);
+  }
+
+  return errors;
+}
+
+// 格式化语法检查结果
+function formatSyntaxResult(result: SyntaxCheckResult, filePath: string): string {
+  const lines: string[] = [];
+
+  if (result.hasErrors) {
+    lines.push(`\n⚠️  语法错误检测到 (${filePath}):`);
+    result.errors.slice(0, 5).forEach(err => {
+      lines.push(`  ❌ ${err}`);
+    });
+    if (result.errors.length > 5) {
+      lines.push(`  ... 还有 ${result.errors.length - 5} 个错误`);
+    }
+    lines.push('\n请修复上述错误后再继续。');
+  }
+
+  if (result.warnings.length > 0) {
+    lines.push(`\n💡 提示 (${filePath}):`);
+    result.warnings.slice(0, 3).forEach(warn => {
+      lines.push(`  ⚠️ ${warn}`);
+    });
+  }
+
+  return lines.join('\n');
 }
 
 // 交互式 PTY 执行（支持 AI 输入/输出）

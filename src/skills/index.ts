@@ -331,7 +331,7 @@ export async function saveSkill(skillName: string, skill: SkillDefinition, pkgNa
 
     return true;
   } catch (error: any) {
-    console.error(`Failed to save skill: ${error.message}`);
+    // Failed to save skill - non-critical error
     return false;
   }
 }
@@ -366,7 +366,7 @@ export async function deleteSkill(skillName: string, pkgName?: string): Promise<
 
     return false;
   } catch (error: any) {
-    console.error(`Failed to delete skill: ${error.message}`);
+    // Failed to delete skill - non-critical error
     return false;
   }
 }

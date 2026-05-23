@@ -77,7 +77,7 @@ export function setupAgentEvents(
   });
 
   agent.on('tool_call', (data: any) => {
-    // 工具调用开始，停止心跳并结束流式状态
+    // 工具调用开始，停止之前的LLM心跳，启动工具执行心跳
     stopHeartbeat();
     state.setStreamingOutput(false);
     screen.setStreaming(false);
@@ -87,13 +87,29 @@ export function setupAgentEvents(
     }
     const argsStr = formatArgs(data.arguments);
     screen.appendScroll(LAIN_COLORS.tool(`\n-> ${data.name}${argsStr ? ` ${argsStr}` : ''}\n`));
+    
+    // 启动工具执行心跳（显示工具正在执行）
+    startHeartbeat();
   });
 
   agent.on('tool_result', (data: any) => {
+    // 工具执行完成，停止心跳
+    stopHeartbeat();
     state.setStreamingOutput(false);
     screen.setStreaming(false);
     const icon = data.success ? LAIN_COLORS.success('[OK]') : LAIN_COLORS.error('[ERR]');
     const output = data.output || data.error || '';
+
+    // 显示语法错误（如果有）
+    if (data.syntaxErrors && data.syntaxErrors.length > 0) {
+      screen.appendScroll(LAIN_COLORS.error(`\n⚠️ Syntax errors detected:\n`));
+      data.syntaxErrors.slice(0, 5).forEach((err: string) => {
+        screen.appendScroll(LAIN_COLORS.error(`  ❌ ${err}\n`));
+      });
+      if (data.syntaxErrors.length > 5) {
+        screen.appendScroll(LAIN_COLORS.error(`  ... and ${data.syntaxErrors.length - 5} more errors\n`));
+      }
+    }
 
     if (data.diff) {
       screen.appendScroll(`${icon} ${data.name}\n${data.diff}\n`);
@@ -149,7 +165,14 @@ export function setupAgentEvents(
   });
 
   agent.on('error_suggestion', (data: any) => {
+    stopHeartbeat();  // LLM错误时停止心跳（防止超时提示）
     screen.appendScroll(LAIN_COLORS.warning(`\n[HINT] ${data.suggestion}\n`));
+  });
+
+  agent.on('retry_attempt', (data: any) => {
+    screen.appendScroll(LAIN_COLORS.muted(`\n[RETRY] ${data.operation} attempt ${data.attempt}/${data.maxRetries} in ${Math.floor(data.delay/1000)}s...\n`));
+    screen.appendScroll(LAIN_COLORS.muted(`  Error: ${data.error.slice(0, 50)}\n`));
+    screen.restoreCursor();
   });
 
   agent.on('workspace_changed', (data: any) => {
@@ -203,6 +226,74 @@ export function setupAgentEvents(
   agent.on('hook_log', (data: any) => {
     screen.appendScroll(LAIN_COLORS.muted(`\n[LOG] ${data.message}\n`));
   });
+
+  agent.on('tool_stuck_warning', (data: any) => {
+    screen.appendScroll(LAIN_COLORS.warning(`\n[STUCK] ${data.tool}: ${data.message}\n`));
+    screen.appendScroll(LAIN_COLORS.muted(`  自动中断中... Agent 将尝试其他方案\n`));
+    screen.restoreCursor();
+    screen.refreshInput();
+  });
+
+  agent.on('tool_aborted', (data: any) => {
+    screen.appendScroll(LAIN_COLORS.warning(`\n[ABORT] ${data.tool} 已中断\n`));
+    screen.restoreCursor();
+    screen.refreshInput();
+  });
+
+  agent.on('agent_interrupted', (data: any) => {
+    screen.appendScroll(LAIN_COLORS.warning(`\n[INTERRUPTED] Agent stopped. Press Enter to continue.\n`));
+    if (data.toolResults && data.toolResults.length > 0) {
+      screen.appendScroll(LAIN_COLORS.muted(`  Interrupted tools: ${data.toolResults.map(t => t.name).join(', ')}\n`));
+    }
+    screen.restoreCursor();
+    screen.refreshInput();
+  });
+
+  agent.on('agent_stopped_on_error', (data: any) => {
+    screen.appendScroll(LAIN_COLORS.error(`\n[STOPPED] Agent stopped due to critical error.\n`));
+    screen.appendScroll(LAIN_COLORS.muted(`  Error: ${data.error?.slice(0, 100) || 'Unknown'}\n`));
+    screen.appendScroll(LAIN_COLORS.muted(`  Tool: ${data.tool || 'Unknown'}\n`));
+    screen.appendScroll(LAIN_COLORS.warning(`  Suggestion: ${data.suggestion || 'Check the error and retry.'}\n`));
+    screen.restoreCursor();
+    screen.refreshInput();
+  });
+
+  // Todo progress display
+  agent.on('todos_set', (todos: any[]) => {
+    if (todos.length > 0) {
+      displayTodoProgress(todos);
+    }
+  });
+
+  agent.on('todo_update', (data: any) => {
+    if (data.todos && data.todos.length > 0) {
+      displayTodoProgress(data.todos);
+    }
+  });
+
+  function displayTodoProgress(todos: any[]) {
+    const statusIcons: Record<string, string> = {
+      'completed': '✔',
+      'in_progress': '◼',
+      'pending': '◻',
+    };
+
+    const lines: string[] = [];
+    todos.forEach((todo, i) => {
+      const icon = statusIcons[todo.status] || '◻';
+      const colorFn = todo.status === 'completed'
+        ? LAIN_COLORS.success
+        : todo.status === 'in_progress'
+          ? LAIN_COLORS.primary
+          : LAIN_COLORS.muted;
+      lines.push(colorFn(`  ${icon} ${todo.content}`));
+    });
+
+    screen.appendScroll(LAIN_COLORS.secondary('\n[TASKS]\n'));
+    lines.forEach(line => screen.appendScroll(line + '\n'));
+    screen.restoreCursor();
+    screen.refreshInput();
+  }
 
   agent.on('context_compressed', (data: any) => {
     const formatTokens = (t: number) => t >= 1000 ? `${Math.floor(t/1000)}k` : `${t}`;

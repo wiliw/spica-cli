@@ -20,7 +20,7 @@ export function loadHistory(): ChatMessage[] {
       return JSON.parse(data);
     }
   } catch (error) {
-    console.error('Failed to load history:', error);
+    // Failed to load history - returning empty array
   }
   return [];
 }
@@ -31,7 +31,7 @@ export function saveHistory(history: ChatMessage[]): void {
     const trimmed = history.slice(-MAX_HISTORY);
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(trimmed, null, 2));
   } catch (error) {
-    console.error('Failed to save history:', error);
+    // Failed to save history - non-critical
   }
 }
 
@@ -41,6 +41,6 @@ export function clearHistory(): void {
       fs.unlinkSync(HISTORY_FILE);
     }
   } catch (error) {
-    console.error('Failed to clear history:', error);
+    // Failed to clear history - non-critical
   }
 }
