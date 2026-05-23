@@ -255,12 +255,13 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'web_search',
-    description: 'Search web.',
+    description: 'Search web using DuckDuckGo (free) or Tavily API (if configured). Returns up to 10 results with titles and URLs. Use for finding documentation, solutions, current information.',
     parameters: {
       type: 'object' as const,
       properties: {
-        query: { type: 'string', description: 'Query' },
-        timeout: { type: 'number', description: 'Timeout in seconds (default 15)' },
+        query: { type: 'string', description: 'Search query' },
+        engine: { type: 'string', enum: ['duckduckgo', 'tavily'], description: 'Search engine (default: duckduckgo)' },
+        timeout: { type: 'number', description: 'Timeout in seconds (default 30)' },
       },
       required: ['query'],
     },
@@ -875,18 +876,11 @@ export async function executeTool(
 
       case 'web_search': {
         const timeoutMs = (safeArgs.timeout || 30) * 1000;
+        const engine = safeArgs.engine || 'duckduckgo';
 
-        // 尝试使用代理环境变量
-        const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.https_proxy;
-        const curlProxy = proxyUrl ? `--proxy "${proxyUrl}"` : '';
-
-        // 使用 DuckDuckGo HTML 版本，添加更好的 headers
-        const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(safeArgs.query)}`;
-        const curlCmd = `curl -sL ${curlProxy} -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -H "Accept: text/html" "${searchUrl}"`;
-
-        // 创建 AbortController（支持 ESC ESC 中断）
+        // 创建 AbortController
         const externalSignal = safeArgs._abortSignal as AbortSignal | undefined;
-        const abortController = externalSignal ? new AbortController() : new AbortController();
+        const abortController = new AbortController();
 
         if (externalSignal) {
           if (externalSignal.aborted) {
@@ -898,7 +892,53 @@ export async function executeTool(
           }
         }
 
+        // Check for Tavily API key
+        const tavilyApiKey = process.env.TAVILY_API_KEY;
+
         try {
+          // Tavily API (preferred if configured)
+          if (engine === 'tavily' && tavilyApiKey) {
+            const tavilyUrl = 'https://api.tavily.com/search';
+            const tavilyBody = JSON.stringify({
+              api_key: tavilyApiKey,
+              query: safeArgs.query,
+              search_depth: 'basic',
+              max_results: 10,
+            });
+
+            const tavilyCmd = `curl -sL -X POST "${tavilyUrl}" -H "Content-Type: application/json" -d '${tavilyBody}' --max-time ${timeoutMs / 1000}`;
+
+            const tavilyResult = await execa(tavilyCmd, {
+              shell: true,
+              timeout: timeoutMs,
+              reject: false,
+              cancelSignal: abortController.signal,
+            });
+
+            if (abortController.signal.aborted) {
+              return { success: false, error: 'Tool execution aborted by user (ESC ESC).' };
+            }
+
+            if (tavilyResult.stdout) {
+              try {
+                const data = JSON.parse(tavilyResult.stdout);
+                if (data.results && data.results.length > 0) {
+                  const results = data.results.map((r: any) => `- ${r.title}\n  ${r.url}\n  ${r.content?.slice(0, 100) || ''}`);
+                  return { success: true, output: `Tavily搜索结果 (${results.length}个):\n\n${results.join('\n\n')}` };
+                }
+              } catch {
+                // JSON parse failed, fallback to DuckDuckGo
+              }
+            }
+          }
+
+          // DuckDuckGo HTML (default, free)
+          const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.https_proxy;
+          const curlProxy = proxyUrl ? `--proxy "${proxyUrl}"` : '';
+
+          const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(safeArgs.query)}`;
+          const curlCmd = `curl -sL ${curlProxy} -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -H "Accept: text/html" "${searchUrl}" --max-time ${timeoutMs / 1000}`;
+
           const searchResult = await execa(curlCmd, {
             shell: true,
             timeout: timeoutMs,
@@ -906,39 +946,33 @@ export async function executeTool(
             cancelSignal: abortController.signal,
           });
 
-          // 检查是否被中断
           if (abortController.signal.aborted) {
-            return {
-              success: false,
-              error: 'Tool execution aborted by user (ESC ESC).'
-            };
+            return { success: false, error: 'Tool execution aborted by user (ESC ESC).' };
           }
 
           if (searchResult.stdout.length === 0) {
             return {
               success: false,
-              error: searchResult.stderr || 'Search failed: No results. Try setting HTTPS_PROXY environment variable.'
+              error: searchResult.stderr || 'Search failed: No results. Try setting HTTPS_PROXY or TAVILY_API_KEY.'
             };
           }
 
-        // 解析 HTML 提取搜索结果
+          // Parse HTML to extract results
           const html = searchResult.stdout;
           const results: string[] = [];
 
-          // 提取搜索结果链接和标题 (DuckDuckGo HTML 格式)
-          // 结果在 <a class="result__a" href="...">标题</a> 中
+          // DuckDuckGo HTML format
           const titleMatches = html.matchAll(/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g);
           for (const match of titleMatches) {
             const url = match[1];
             const title = match[2].trim();
-            // DuckDuckGo 使用重定向 URL，需要提取实际 URL
             const actualUrl = url.includes('uddg=') ? decodeURIComponent(url.split('uddg=')[1].split('&')[0]) : url;
             results.push(`- ${title}\n  ${actualUrl}`);
-            if (results.length >= 10) break; // 最多10个结果
+            if (results.length >= 10) break;
           }
 
+          // Fallback parsing if no results
           if (results.length === 0) {
-            // 如果没有找到结果，尝试其他解析方式
             const fallbackMatches = html.matchAll(/<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>([^<]{3,50})<\/a>/g);
             for (const match of fallbackMatches) {
               const url = match[1];
@@ -951,12 +985,11 @@ export async function executeTool(
           }
 
           const output = results.length > 0
-            ? `搜索结果 (${results.length}个):\n\n${results.join('\n\n')}`
-            : `搜索完成但未找到有效结果。\n原始输出:\n${html.substring(0, 2000)}`;
+            ? `DuckDuckGo搜索结果 (${results.length}个):\n\n${results.join('\n\n')}`
+            : `搜索完成但未找到有效结果。\n提示: 设置 TAVILY_API_KEY 可获得更好的搜索体验。\n原始输出:\n${html.substring(0, 1000)}`;
 
           return { success: true, output };
         } catch (searchError: any) {
-          // 检查是否是中断导致的错误
           if (abortController.signal.aborted || searchError.message?.includes('abort')) {
             return { success: false, error: 'Tool execution aborted by user (ESC ESC).' };
           }
