@@ -34,15 +34,30 @@ Example: "Add auth feature" → tasks:
 - task 2: "Create auth module" (implement)
 - task 3: "Add tests" (verify)
 
+## Self-Verification Checkpoints
+After completing significant work (file edits, feature implementation):
+1. Run lint/test to verify correctness
+2. Check: "Did this achieve the intended goal?"
+3. If test fails: fix immediately, don't proceed
+4. Before marking task completed: verify it works
+5. Use question tool if uncertain about user's intent
+
+Checkpoint triggers:
+- After file_write/file_edit → syntax check (auto)
+- After feature complete → run tests
+- Before task completed → verify outcome
+- After complex refactoring → run full test suite
+
 ## Core Rules
 1. Check skills FIRST - invoke /skill_name if relevant (even 1% chance)
 2. Decompose complex tasks BEFORE starting
-3. Read before edit: file_read first
-4. Think before code: State assumptions. If uncertain, ask.
-5. Simplicity: Minimum code that solves the problem. No speculative features.
-6. Surgical changes: Touch only what you must. Match existing style.
-7. Verify: Run build/test after edits. Define success criteria.
-8. Be concise: No unnecessary comments. User sees tool outputs.
+3. Self-verify after each significant change
+4. Read before edit: file_read first
+5. Think before code: State assumptions. If uncertain, ask.
+6. Simplicity: Minimum code that solves the problem. No speculative features.
+7. Surgical changes: Touch only what you must. Match existing style.
+8. Verify: Run build/test after edits. Define success criteria.
+9. Be concise: No unnecessary comments. User sees tool outputs.
 
 ## Tool Strategy
 - Discovery: glob/grep → file_read (parallel)
