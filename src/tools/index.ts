@@ -1187,18 +1187,20 @@ export async function executeTool(
         }));
         savePersistedTasks(WORKSPACE, persistedTasks);
 
-        const statusLabels: Record<string, string> = {
-          'completed': '[done]',
-          'in_progress': '[active]',
-          'pending': '[pending]',
+        const statusIcons: Record<string, string> = {
+          'completed': '✅',
+          'in_progress': '🔄',
+          'pending': '⏳',
         };
 
-        const lines = [`Progress: ${completed}/${total} done, ${inProgress} active, ${pending} pending`];
-        lines.push('(Tasks saved to .spica/tasks.json for session recovery)');
+        const lines = [`\n📋 Task List (${completed}/${total} done, ${inProgress} active, ${pending} pending)`];
+        lines.push('─────────────────────────────');
         todos.forEach((t: any, i: number) => {
-          const label = statusLabels[t.status] || '[pending]';
-          lines.push(`  ${i+1}. ${label} ${t.content}`);
+          const icon = statusIcons[t.status] || '⏳';
+          lines.push(`${icon} ${i+1}. ${t.content}`);
         });
+        lines.push('─────────────────────────────');
+        lines.push('(Tasks saved to .spica/tasks.json)');
 
         return { success: true, output: lines.join('\n') };
       }
