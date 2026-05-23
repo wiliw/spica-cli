@@ -227,6 +227,13 @@ export function setupAgentEvents(
     screen.appendScroll(LAIN_COLORS.muted(`\n[LOG] ${data.message}\n`));
   });
 
+  agent.on('pending_input_detected', (data: any) => {
+    screen.appendScroll(LAIN_COLORS.warning(`\n[NEW INPUT] Detected during tool execution\n`));
+    screen.appendScroll(LAIN_COLORS.muted(`  ${data.input.slice(0, 80)}${data.input.length > 80 ? '...' : ''}\n`));
+    screen.restoreCursor();
+    screen.refreshInput();
+  });
+
   agent.on('tool_stuck_warning', (data: any) => {
     screen.appendScroll(LAIN_COLORS.warning(`\n[STUCK] ${data.tool}: ${data.message}\n`));
     screen.appendScroll(LAIN_COLORS.muted(`  自动中断中... Agent 将尝试其他方案\n`));

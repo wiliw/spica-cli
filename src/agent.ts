@@ -55,6 +55,9 @@ export class SpicaAgent extends EventEmitter {
   // 工具级 AbortController（用于中断单个工具）
   private toolAbortControllers: Map<string, AbortController> = new Map();
 
+  // 待处理的新输入（用于在工具执行间隙插入新指令）
+  private pendingInput: string | null = null;
+
   constructor(providerName?: string, workspacePath?: string) {
     super();
     this._providerName = providerName;
@@ -206,6 +209,16 @@ export class SpicaAgent extends EventEmitter {
   // 清除工具 AbortController
   clearToolAbortController(toolName: string): void {
     this.toolAbortControllers.delete(toolName);
+  }
+
+  // 设置待处理的新输入（用于在工具执行间隙插入新指令）
+  setPendingInput(input: string | null): void {
+    this.pendingInput = input;
+  }
+
+  // 获取待处理的新输入
+  getPendingInput(): string | null {
+    return this.pendingInput;
   }
 
   // 设置bypass模式
@@ -536,6 +549,13 @@ async init() {
 
     while (!response.finished && iterations < maxIterations && !this.interruptFlag) {
       iterations++;
+
+      // 检查是否有待处理的新输入（在工具执行间隙插入新指令）
+      if (this.pendingInput) {
+        this.emit('pending_input_detected', { input: this.pendingInput });
+        // 中断当前流程，返回让用户的新输入被处理
+        return `New input detected during tool execution: ${this.pendingInput.slice(0, 50)}...`;
+      }
 
       if (this.interruptFlag) {
         break;

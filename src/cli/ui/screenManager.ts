@@ -151,16 +151,23 @@ export class ScreenManager {
 
   restoreCursor(): void {
     // 计算光标在输入区域的行和列（基于原始内容，不含 ANSI 码）
-    const rawContent = this.state.inputBuffer[0].slice(0, this.state.cursorCol);
-    const content = '> ' + rawContent;
-    let displayWidth = 0;
-    for (const char of content) {
+    const rawContent = this.state.inputBuffer[0];
+    const cursorCharPos = this.state.cursorCol;
+
+    // 使用字符迭代器正确处理 UTF-8
+    const chars = [...rawContent];
+    const contentBeforeCursor = chars.slice(0, cursorCharPos).join('');
+
+    // 计算显示宽度（包含 '> ' 前缀）
+    let displayWidth = 2;  // '> ' 前缀宽度
+    for (const char of contentBeforeCursor) {
       displayWidth += char.charCodeAt(0) > 0x7F ? 2 : 1;
     }
 
     const width = this.state.terminalWidth;
-    const inputRow = this.state.statusRow + 1 + Math.floor(displayWidth / width);
-    const inputCol = (displayWidth % width) + 1;
+    // 正确计算行和列（基于显示宽度）
+    const inputRow = this.state.statusRow + 1 + Math.floor((displayWidth - 1) / width);
+    const inputCol = ((displayWidth - 1) % width) + 1;
 
     fs.writeSync(1, `${ESC}[${inputRow};${inputCol}H`);
     fs.writeSync(1, `${ESC}[?25h`);
@@ -219,7 +226,8 @@ export class ScreenManager {
     // 插入字符
     const line = this.state.inputBuffer[0];
     this.state.inputBuffer[0] = line.slice(0, this.state.cursorCol) + data + line.slice(this.state.cursorCol);
-    this.state.cursorCol += data.length;
+    this.state.cursorCol += [...data].length;  // 使用字符迭代器正确计算 UTF-8
+    this.updateLayout();  // 更新布局（输入行数可能变化）
     // 流式期间用特殊处理，非流式期间直接刷新
     if (this.state.isStreaming) {
       this.refreshInputAndKeepCursor();
@@ -256,7 +264,8 @@ export class ScreenManager {
     const hits = this.state.completer(line);
     if (hits.length === 1) {
       this.state.inputBuffer[0] = hits[0];
-      this.state.cursorCol = hits[0].length;
+      this.state.cursorCol = [...hits[0]].length;  // 使用字符迭代器正确计算 UTF-8
+      this.updateLayout();
       this.refreshInput();
       this.restoreCursor();
     } else if (hits.length > 1) {
@@ -267,8 +276,11 @@ export class ScreenManager {
 
   handlePaste(data: string): void {
     const content = data.replace(/\x1b\[200~/g, '').replace(/\x1b\[201~/g, '');
+    // 使用字符迭代器正确计算长度（UTF-8）
+    const chars = [...content];
     this.state.inputBuffer[0] += content;
-    this.state.cursorCol += content.length;
+    this.state.cursorCol += chars.length;
+    this.updateLayout();
     this.refreshInput();
     this.restoreCursor();
   }
