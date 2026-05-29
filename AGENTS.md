@@ -47,7 +47,7 @@
 - **Dev**: `npm run dev` or `tsx src/index.ts`
 - **Build**: `npm run build` (creates bin/spica executable wrapper)
 - **Test**: `npm test` (vitest watch mode)
-- **Test run**: `npm run test:run` (single run) - **273/274 tests passing** (1 flaky: ProcessMonitor.test.ts)
+- **Test run**: `npm run test:run` (single run) - **274 tests passing**
 - **Test single file**: `npx vitest run <file-pattern>`
 - **Type check**: `npx tsc --noEmit`
 - **Lint**: `npm run lint` (ESLint)
@@ -117,7 +117,7 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
   - `src/hooks/__tests__/hooks.test.ts` - Hooks tests
   - `src/skills/__tests__/skills.test.ts` - Skills tests
 
-## Built-in Skills (14 superpowers)
+## Built-in Skills (14 superpowers + _shared templates)
 
 | Skill | Trigger |
 |-------|---------|
