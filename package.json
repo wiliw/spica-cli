@@ -12,7 +12,9 @@
     "build": "npm run build:cli",
     "build:cli": "PWD=$(pwd) && cat > bin/spica << EOF\n#!/usr/bin/env -S npx tsx\nimport('${PWD}/src/index.ts');\nEOF\nchmod +x bin/spica",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "lint": "eslint src/**/*.ts --max-warnings 0",
+    "lint:fix": "eslint src/**/*.ts --fix"
   },
   "keywords": [
     "ai",

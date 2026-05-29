@@ -59,6 +59,9 @@ export class SpicaAgent extends EventEmitter {
   // 待处理的新输入（用于在工具执行间隙插入新指令）
   private pendingInput: string | null = null;
 
+  // 工具白名单（用于限制subagent工具访问）
+  private toolWhitelist: string[] | null = null;
+
   constructor(providerName?: string, workspacePath?: string) {
     super();
     this._providerName = providerName;
@@ -230,6 +233,14 @@ export class SpicaAgent extends EventEmitter {
 
   get isBypassPermissions(): boolean {
     return this.bypassPermissions;
+  }
+
+  setToolWhitelist(allowedTools: string[]): void {
+    this.toolWhitelist = allowedTools;
+  }
+
+  getToolWhitelist(): string[] | null {
+    return this.toolWhitelist;
   }
 
 // 判断错误是否可重试
@@ -494,6 +505,24 @@ async init() {
 
     const usedTokens = tokenCounter.estimateMessages(existingMessages);
     const usagePercent = Math.floor(usedTokens / contextWindow * 100);
+    
+    // 多级预警机制（上下文管理优化）
+    if (usagePercent >= 50 && usagePercent < 60) {
+      this.emit('context_warning', {
+        level: 'info',
+        usage: usagePercent,
+        message: `Context at ${usagePercent}% - consider using subagent for complex tasks`,
+        suggestion: 'Use task tool to dispatch subagent and avoid dumbzone'
+      });
+    } else if (usagePercent >= 60 && usagePercent < 70) {
+      this.emit('context_warning', {
+        level: 'warning',
+        usage: usagePercent,
+        message: `Context at ${usagePercent}% - strongly recommend subagent`,
+        suggestion: 'Dispatch independent tasks to subagents immediately'
+      });
+    }
+
     const triggerThreshold = Math.floor(contextWindow * 0.7);  // 触发阈值：70%（现代设计，更早触发避免过满）
 
     // 当使用超过触发阈值时自动压缩
@@ -558,8 +587,9 @@ async init() {
         this.emit('pending_input_detected', { input: mergedInput });
         // 把合并后的输入追加到对话中，继续处理
         this.llm.addUserMessage(mergedInput);
-        // 重新生成响应，继续当前任务（不再发出 waiting_for_llm，避免重复提示）
-        response = await this.llm.generate(this.llm.getMessages(), this.tools, this.systemPrompt);
+        // 重新生成响应，继续当前任务
+        this.emit('waiting_for_llm');  // 启动心跳
+        response = await this.llm.generateFromHistory(toolDefinitions);
         continue;  // 继续循环处理新的响应
       }
 
@@ -625,6 +655,16 @@ async init() {
             }
           }
 
+          // 工具白名单检查（subagent权限控制）
+          if (this.toolWhitelist && !this.toolWhitelist.includes(tc.name)) {
+            this.emit('tool_result', {
+              name: tc.name,
+              success: false,
+              error: `Tool ${tc.name} not allowed for this subagent`,
+            });
+            return { name: tc.name, id: tc.id, result: `Tool ${tc.name} blocked by whitelist` };
+          }
+
           this.emit('tool_call', { name: tc.name, arguments: tcArgs });
 
           // 同步 workspace 到 tools 模块
@@ -644,8 +684,9 @@ async init() {
             // 处理工具卡住警告：自动中断并尝试其他方案
             if (event === 'tool_stuck_warning') {
               // 自动中断卡住的工具（30秒后仍未完成）
-              // Agent 将收到错误结果并可以尝试其他方案
               this.abortTool(tc.name);
+              // 设置中断标志，让 agent 退出循环
+              this.interruptFlag = true;
             }
           };
 
@@ -712,7 +753,7 @@ async init() {
               await this.switchWorkspace(tcArgs.path);
             }
 
-            return { name: tc.name, id: tc.id, result: result.output || result.error || '' };
+            return { name: tc.name, id: tc.id, result: result.content || result.output || result.error || '' };
           } catch (toolError: any) {
             // 清除 AbortController
             this.clearToolAbortController(tc.name);

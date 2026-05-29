@@ -38,6 +38,7 @@ export interface ToolResult {
   error?: string;
   diff?: string;
   syntaxErrors?: string[];  // 语法错误列表（用于编辑工具后自动检查）
+  content?: string;  // 实际内容（如文件内容），output 用于简短显示
 }
 
 export const TOOLS_DEFINITIONS: ToolDefinition[] = [
@@ -440,20 +441,22 @@ export async function executeTool(
         const lines = content.split('\n');
         const lineCount = lines.length;
 
-        // 简化输出：只显示文件路径和基本信息
+        // 简化输出：只显示文件路径和基本信息，内容放在 content 字段供 AI 使用
         if (safeArgs.offset || safeArgs.limit) {
           const start = safeArgs.offset ? safeArgs.offset - 1 : 0;
           const end = safeArgs.limit ? start + safeArgs.limit : lines.length;
           const selectedLines = lines.slice(start, end);
           return {
             success: true,
-            output: `[${readPath}:${start + 1}-${end}] (${selectedLines.length} lines)\n${selectedLines.join('\n')}`
+            output: `[${readPath}:${start + 1}-${end}] (${selectedLines.length} lines)`,
+            content: selectedLines.join('\n')
           };
         }
 
         return {
           success: true,
-          output: `[${readPath}] (${lineCount} lines)\n${content}`
+          output: `[${readPath}] (${lineCount} lines)`,
+          content: content
         };
       }
 
@@ -1266,13 +1269,11 @@ export async function executeTool(
           }
 
           const taskAgent = new SpicaAgent(undefined, WORKSPACE);
-
-          // 转发子agent事件到主agent
-          taskAgent.on('tool_call', (data: any) => {
-            if (eventCallback) {
-              eventCallback('sub_agent_tool_call', { id: subTaskId, ...data });
-            }
-          });
+          
+          // 设置工具白名单（限制subagent权限，避免context pollution）
+          if (config.allowedTools !== '*') {
+            taskAgent.setToolWhitelist(config.allowedTools);
+          }
 
           taskAgent.on('tool_result', (data: any) => {
             if (eventCallback) {

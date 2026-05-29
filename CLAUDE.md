@@ -14,6 +14,8 @@ npx tsc --noEmit   # Type check
 
 ## Architecture Overview
 
+**Read `AGENTS.md` first** for project context (tech stack, setup, development notes).
+
 ### Core Components
 
 **Entry Point** (`src/index.ts`):
@@ -39,6 +41,16 @@ npx tsc --noEmit   # Type check
 - AbortController for interrupt
 - Temperature: 0.3 (faster responses)
 - Model context windows: GPT-4o 128K, GLM-5 200K, Claude-3 200K
+
+**Core Modules** (`src/core/`):
+- `EventBus`: Central event dispatcher for agent communication
+- `RuntimeState`: Global runtime state (processing status, agent reference)
+- `StateManager`: Project state persistence (todos, checkpoints)
+- `ErrorHandler`: Error categorization, retry logic, error reports
+- `SessionManager`: Session lifecycle management
+- `LogManager`: Structured logging with categories and levels
+- `ProcessMonitor`: Background process tracking and log streaming
+- `Heartbeat`: Progress indicators during long LLM waits
 
 **Tools** (`src/tools/index.ts`):
 - 24 built-in tools + MCP dynamic tools
@@ -134,8 +146,10 @@ npx tsc --noEmit   # Type check
 
 | File | Purpose |
 |------|---------|
+| `AGENTS.md` | Project description for AI context (industry standard) |
 | `src/index.ts` | CLI entry, REPL loop, input queue, `/init` prompt |
 | `src/agent.ts` | Agent loop, compression, permissions, summary generation |
+| `src/core/` | EventBus, StateManager, ErrorHandler, SessionManager, Heartbeat |
 | `src/cli/ui/screenManager.ts` | TUI with scroll regions, status bar, input handling |
 | `src/cli/ui/queue.ts` | Non-blocking input management |
 | `src/cli/events.ts` | Agent event handlers for UI output |
@@ -203,10 +217,11 @@ npx tsc --noEmit   # Type check
 ## Testing
 
 ```bash
-npm run test:run  # Run all 64 tests
-npx tsc --noEmit  # Type check
-npm run build     # Build executable
-./bin/spica --version  # Test CLI
-./bin/spica providers  # List providers
-./bin/spica skills list  # List skills
+npm run test:run           # Run all 261 tests (22 test files)
+npx vitest run <pattern>   # Run specific test file (e.g., tools.test)
+npx tsc --noEmit           # Type check
+npm run build              # Build executable
+./bin/spica --version      # Test CLI
+./bin/spica providers      # List providers
+./bin/spica skills list    # List skills
 ```

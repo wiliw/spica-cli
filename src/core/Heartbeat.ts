@@ -1,5 +1,7 @@
 // 心跳提示 - 在长时间等待期间输出进度提示
 
+import { getRuntimeState } from './RuntimeState';
+
 export interface HeartbeatConfig {
   interval?: number;     // 心跳间隔（毫秒），默认 3000
   message?: string;      // 心跳消息，默认 '.'
@@ -45,14 +47,41 @@ export class Heartbeat {
     if (this.timer) return;
 
     this.count = 0;
+    timeoutInjected = false;  // 重置注入标记
+    // 立即显示第一个心跳符号，让用户知道正在等待
+    this.output(this.config.message!);
+
     this.timer = setInterval(() => {
       this.count++;
 
-      if (this.count > this.config.maxCount!) {
-        this.output('\n[TIMEOUT] Response taking too long, press ESC ESC to interrupt\n');
-        this.stop();
-        return;
+if (this.count > this.config.maxCount!) {
+  this.output('\n[TIMEOUT] Response took >120s. AI will handle recovery...\n');
+  this.stop();
+  
+  // 防止重复注入timeout消息
+  if (!timeoutInjected) {
+    const state = getRuntimeState();
+    const agent = state.getAgent();
+    const llm = agent?.getLLM();
+    
+    if (llm) {
+      timeoutInjected = true;  // 标记已注入
+      
+      // 注入timeout消息，让AI自己决定如何处理
+      llm.addUserMessage('[TIMEOUT WARNING] Response took too long (>120s). Please:\n1. Try different approach or simpler solution\n2. Use subagent (task tool) for complex tasks\n3. Check API/network status if external call\n4. Continue from where you left off, or explain issue');
+      
+      // 不interrupt，让AI继续处理新的prompt
+      // 停止heartbeat等待新的LLM响应
+    } else {
+      // 没有LLM可用，只能interrupt
+      if (agent) {
+        agent.interrupt();
       }
+      state.setProcessing(false);
+    }
+  }
+  return;
+}
 
       // 显示进度或普通心跳
       if (this.config.showProgress && this.progress) {
@@ -88,6 +117,7 @@ export class Heartbeat {
 
 // 全局心跳实例
 let globalHeartbeat: Heartbeat | null = null;
+let timeoutInjected = false;  // 防止重复注入timeout消息
 
 export function getHeartbeat(): Heartbeat | null {
   return globalHeartbeat;

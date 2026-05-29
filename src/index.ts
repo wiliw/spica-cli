@@ -170,9 +170,21 @@ program
         return getCommands().filter(c => c.startsWith(line));
       });
 
-      // 显示状态栏（包含帮助提示）
-      const mode = state.isBypassMode() ? 'bypass' : 'strict';
-      screen.setStatus(`${providerConfig.model} | ${mode} | /h help | ESC ESC interrupt`);
+      // 显示状态栏（简洁版）
+      const updateStatusBar = () => {
+        const mode = state.isBypassMode() ? 'bypass' : 'strict';
+        screen.setStatus(`${providerConfig.model} | ${mode}`);
+      };
+      updateStatusBar();
+
+      // 设置 Ctrl+O 切换回调
+      screen.setVerboseToggleCallback(() => {
+        const newMode = state.toggleVerboseMode();
+        screen.appendScroll(LAIN_COLORS.secondary(`\n[MODE] ${newMode ? 'Verbose' : 'Compact'} display enabled\n`));
+        updateStatusBar();
+        screen.restoreCursor();
+        screen.refreshInput();
+      });
 
       // 启用 Bracketed Paste Mode（粘贴内容作为整体到达）
       screen.appendScroll(`${ESC}[?2004h`);
@@ -1141,7 +1153,11 @@ async function runSimpleMode(agent: SpicaAgent, fresh?: boolean): Promise<void> 
     await agent.init();
 
     // 创建心跳实例（用于等待 LLM 响应期间）
-    createHeartbeat((msg) => process.stdout.write(LAIN_COLORS.muted(msg)), { interval: 3000, message: '.' });
+    createHeartbeat((msg) => process.stdout.write(LAIN_COLORS.muted(msg)), { 
+  interval: 1500, 
+  message: '.',
+  maxCount: 80  // 120秒timeout，与interactive模式一致
+});
 
     // 每次等待 LLM 响应时启动心跳
     agent.on('waiting_for_llm', () => {

@@ -32,10 +32,16 @@ export function setupAgentEvents(
   interactive: boolean = false,
   model?: string
 ): void {
-  let lastWasReasoning = false;
+  // 追踪 reasoning 状态
+  let reasoningStarted = false;
+  let justSwitchedFromReasoning = false;  // 只在切换时换行一次
 
-  // 创建心跳实例（用于等待 LLM 响应期间）
-  createHeartbeat((msg) => screen.appendScroll(LAIN_COLORS.muted(msg)), { interval: 3000, message: '.' });
+// 创建心跳实例（用于等待 LLM 响应期间）
+createHeartbeat((msg) => screen.appendScroll(LAIN_COLORS.muted(msg)), { 
+  interval: 1500, 
+  message: '.',
+  maxCount: 80  // 1.5秒×80 = 120秒，给LLM足够响应时间
+});
 
   agent.on('connection_error', (data: any) => {
     state.setConnectionErrorShown(true);
@@ -51,14 +57,16 @@ export function setupAgentEvents(
     // 收到流式响应，停止心跳
     stopHeartbeat();
 
+    // 从 reasoning 切换到 stream 时，只换行一次
+    if (reasoningStarted && !justSwitchedFromReasoning) {
+      justSwitchedFromReasoning = true;
+      screen.appendScroll('\n');
+    }
+
     // 设置流式状态（防止输入刷新干扰输出）
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
       screen.setStreaming(true);
-    }
-    if (lastWasReasoning) {
-      screen.appendScroll('\n');
-      lastWasReasoning = false;
     }
     screen.appendScroll(LAIN_COLORS.primary(data.chunk));
   });
@@ -67,13 +75,26 @@ export function setupAgentEvents(
     // 收到推理内容，停止心跳
     stopHeartbeat();
 
-    // 设置流式状态
-    if (!state.isStreamingOutput()) {
-      state.setStreamingOutput(true);
-      screen.setStreaming(true);
+    // 只在第一次显示 thinking 提示
+    if (!reasoningStarted) {
+      reasoningStarted = true;
+      justSwitchedFromReasoning = false;
+      screen.appendScroll('\n');  // 心跳结束后换行
+      if (!state.isVerboseMode()) {
+        screen.appendScroll(LAIN_COLORS.muted('[thinking]\n'));
+      } else {
+        screen.appendScroll(LAIN_COLORS.reasoning('[REASONING]\n'));
+        if (!state.isStreamingOutput()) {
+          state.setStreamingOutput(true);
+          screen.setStreaming(true);
+        }
+      }
     }
-    screen.appendScroll(LAIN_COLORS.reasoning(data.content));
-    lastWasReasoning = true;
+
+    // 详细模式下显示完整 reasoning content
+    if (state.isVerboseMode()) {
+      screen.appendScroll(LAIN_COLORS.reasoning(data.content));
+    }
   });
 
   agent.on('tool_call', (data: any) => {
@@ -81,13 +102,16 @@ export function setupAgentEvents(
     stopHeartbeat();
     state.setStreamingOutput(false);
     screen.setStreaming(false);
-    if (lastWasReasoning) {
+    // 从reasoning切换到tool_call时，需要换行
+    if (reasoningStarted) {
       screen.appendScroll('\n');
-      lastWasReasoning = false;
+      reasoningStarted = false;  // 重置reasoning状态
     }
     const argsStr = formatArgs(data.arguments);
-    // 显示 tool name，让用户知道正在执行什么
-    screen.appendScroll(LAIN_COLORS.tool(`-> ${data.name}${argsStr ? ` ${argsStr}` : ''}\n`));
+    // 显示工具调用区块开始
+    const toolLabel = `${data.name}${argsStr ? ` ${argsStr}` : ''}`;
+    const boxWidth = Math.max(toolLabel.length + 4, 20);
+    screen.appendScroll(LAIN_COLORS.tool(`\n┌─ ${toolLabel} ${'─'.repeat(boxWidth - toolLabel.length - 4)}┐\n`));
 
     // 启动工具执行心跳（显示工具正在执行）
     startHeartbeat();
@@ -98,41 +122,50 @@ export function setupAgentEvents(
     stopHeartbeat();
     state.setStreamingOutput(false);
     screen.setStreaming(false);
-    const icon = data.success ? LAIN_COLORS.success('[OK]') : LAIN_COLORS.error('[ERR]');
-    const output = data.output || data.error || '';
+    const icon = data.success ? '✓' : '✗';
+    const colorFn = data.success ? LAIN_COLORS.success : LAIN_COLORS.error;
 
     // 显示语法错误（如果有）
     if (data.syntaxErrors && data.syntaxErrors.length > 0) {
-      screen.appendScroll(LAIN_COLORS.error(`\n⚠️ Syntax errors detected:\n`));
-      data.syntaxErrors.slice(0, 5).forEach((err: string) => {
-        screen.appendScroll(LAIN_COLORS.error(`  ❌ ${err}\n`));
+      screen.appendScroll(LAIN_COLORS.error(`  ⚠ Syntax errors:\n`));
+      data.syntaxErrors.slice(0, 3).forEach((err: string) => {
+        screen.appendScroll(LAIN_COLORS.error(`    ${err}\n`));
       });
-      if (data.syntaxErrors.length > 5) {
-        screen.appendScroll(LAIN_COLORS.error(`  ... and ${data.syntaxErrors.length - 5} more errors\n`));
+      if (data.syntaxErrors.length > 3) {
+        screen.appendScroll(LAIN_COLORS.error(`    ... ${data.syntaxErrors.length - 3} more\n`));
       }
     }
 
-    // 文件编辑工具的diff已在diff_preview事件中显示，这里只显示状态
-    const fileEditTools = ['file_write', 'file_edit', 'file_multi_edit'];
-    if (fileEditTools.includes(data.name) && data.diff) {
-      screen.appendScroll(`${icon} ${data.name}\n`);
-    } else if (data.diff) {
-      screen.appendScroll(`${icon} ${data.name}\n${data.diff}\n`);
-    } else if (output) {
-      // For tools that return structured output (todo_write, etc.), show full output
-      const multiLineTools = ['todo_write', 'status', 'history', 'skills'];
-      if (multiLineTools.includes(data.name) || output.includes('\n')) {
-        // Show full output for multi-line results
-        screen.appendScroll(`${icon} ${data.name}${output.startsWith('\n') ? '' : ': '}${output}\n`);
-      } else {
-        // Single line: truncate to 80 chars
-        const firstLine = output.split('\n')[0].slice(0, 80);
-        screen.appendScroll(`${icon} ${data.name}: ${firstLine}${firstLine.length >= 80 ? '...' : ''}\n`);
-      }
-    } else {
-      screen.appendScroll(`${icon} ${data.name}\n`);
+    // 显示输出内容（折叠长输出）
+    const output = data.output || data.error || '';
+    const outputLines = output.split('\n').filter((l: string) => l.trim());
+
+    if (outputLines.length > 5) {
+      // 长输出折叠：显示前3行和摘要
+      outputLines.slice(0, 3).forEach((line: string) => {
+        const truncated = line.slice(0, 60);
+        screen.appendScroll(LAIN_COLORS.muted(`  │ ${truncated}${truncated.length >= 60 ? '...' : ''}\n`));
+      });
+      screen.appendScroll(LAIN_COLORS.muted(`  │ ... (${outputLines.length - 3} more lines)\n`));
+    } else if (outputLines.length > 0 && !data.diff) {
+      // 短输出直接显示
+      outputLines.forEach((line: string) => {
+        const truncated = line.slice(0, 80);
+        screen.appendScroll(LAIN_COLORS.muted(`  │ ${truncated}${truncated.length >= 80 ? '...' : ''}\n`));
+      });
     }
-    // 输出完成，恢复光标到输入框并刷新显示（显示累积的用户输入）
+
+    // 显示工具区块结束边框
+    const statusLabel = `${icon} ${data.name}`;
+    const boxWidth = Math.max(statusLabel.length + 4, 20);
+    screen.appendScroll(colorFn(`└─ ${statusLabel} ${'─'.repeat(boxWidth - statusLabel.length - 4)}┘\n`));
+
+    // Diff 预览单独显示（不在区块内）
+    if (data.diff && !['file_write', 'file_edit', 'file_multi_edit'].includes(data.name)) {
+      screen.appendScroll(LAIN_COLORS.muted(`${data.diff}\n`));
+    }
+
+    // 输出完成，恢复光标到输入框并刷新显示
     screen.restoreCursor();
     screen.refreshInput();
   });
@@ -248,6 +281,8 @@ export function setupAgentEvents(
   });
 
   agent.on('tool_stuck_warning', (data: any) => {
+    // 停止心跳（工具执行心跳）
+    stopHeartbeat();
     screen.appendScroll(LAIN_COLORS.warning(`\n[STUCK] ${data.tool}: ${data.message}\n`));
     screen.appendScroll(LAIN_COLORS.muted(`  自动中断中... Agent 将尝试其他方案\n`));
     screen.restoreCursor();
@@ -255,12 +290,20 @@ export function setupAgentEvents(
   });
 
   agent.on('tool_aborted', (data: any) => {
+    // 停止心跳
+    stopHeartbeat();
     screen.appendScroll(LAIN_COLORS.warning(`\n[ABORT] ${data.tool} 已中断\n`));
     screen.restoreCursor();
     screen.refreshInput();
   });
 
   agent.on('agent_interrupted', (data: any) => {
+    // 停止所有心跳
+    stopHeartbeat();
+    // 重置流式状态
+    state.setStreamingOutput(false);
+    screen.setStreaming(false);
+
     screen.appendScroll(LAIN_COLORS.warning(`\n[INTERRUPTED] Agent stopped. Press Enter to continue.\n`));
     if (data.toolResults && data.toolResults.length > 0) {
       screen.appendScroll(LAIN_COLORS.muted(`  Interrupted tools: ${data.toolResults.map(t => t.name).join(', ')}\n`));

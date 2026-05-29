@@ -2,11 +2,20 @@
 
 export type SubAgentType = 'explore' | 'review' | 'fix' | 'build';
 
+export interface SubAgentResult {
+  status: 'DONE' | 'DONE_WITH_CONCERNS' | 'NEEDS_CONTEXT' | 'BLOCKED';
+  output?: string;
+  concerns?: string[];
+  neededContext?: string[];
+  blocker?: string;
+  success: boolean;
+}
+
 export interface SubAgentTask {
   prompt: string;
-  description?: string;   // 任务描述
-  type?: SubAgentType;    // 子agent类型
-  skill?: string;         // 可选skill
+  description?: string;
+  type?: SubAgentType;
+  skill?: string;
 }
 
 export interface SubAgentConfig {
