@@ -13,6 +13,7 @@ import { getInputQueue } from './cli/ui/queue';
 import { EventEmitter } from 'events';
 import fs from 'fs-extra';
 import * as path from 'path';
+import simpleGit from 'simple-git';
 import type { ChatMessage } from './llm/providers/BaseProvider';
 
 export interface Todo {
@@ -115,13 +116,35 @@ export class SpicaAgent extends EventEmitter {
         { pattern: '> /dev/', name: '写入设备文件' },
         { pattern: 'mv /', name: '移动根目录文件' },
         { pattern: 'git push --force', name: '强制推送' },
-        { pattern: 'git reset --hard', name: '硬重置' },
+        { pattern: 'git reset --hard', name: '硬重置（已保护）' },
+        { pattern: 'git clean -fd', name: '删除未跟踪文件' },
       ];
 
       for (const { pattern, name } of dangerousPatterns) {
         if (cmd.includes(pattern)) {
           return `${name}: ${cmd.slice(0, 60)}`;
         }
+      }
+    }
+    
+    // Git工具的危险操作（增强保护）
+    if (toolName === 'git') {
+      const action = safeArgs.action;
+      const gitArgs = safeArgs.args || {};
+      
+      // clean操作 - 删除未跟踪文件
+      if (action === 'clean') {
+        return `删除所有未跟踪文件和目录，无法恢复！`;
+      }
+      
+      // 用户确认的reset操作（AI已告知风险，用户明确确认）
+      if (action === 'reset' && gitArgs.userConfirmed === true) {
+        return `用户已确认reset ${gitArgs.mode || 'mixed'}操作`;
+      }
+      
+      // 用户确认的checkout操作
+      if (action === 'checkout' && gitArgs.userConfirmed === true) {
+        return `用户已确认checkout操作，将切换到 ${gitArgs.branch}`;
       }
     }
 
@@ -239,8 +262,90 @@ export class SpicaAgent extends EventEmitter {
     this.toolWhitelist = allowedTools;
   }
 
-  getToolWhitelist(): string[] | null {
-    return this.toolWhitelist;
+  // 创建自动checkpoint（备份未提交工作）
+  private async createAutoCheckpoint(prompt: string): Promise<string | null> {
+    try {
+      const git = simpleGit(this.workspacePath);
+      const status = await git.status();
+      
+      // 只有未提交更改时才创建checkpoint
+      if (status.files.length > 0) {
+        const checkpointMsg = `[SPICA-CHECKPOINT] ${new Date().toISOString()} - ${prompt.slice(0, 50)}`;
+        
+        // 1. 添加所有更改
+        await git.add('.');
+        
+        // 2. 创建checkpoint commit
+        await git.commit(checkpointMsg);
+        
+        // 3. 获取hash
+        const log = await git.log({ maxCount: 1 });
+        const hash = log.latest?.hash || '';
+        
+        // 4. 通知用户
+        this.emit('checkpoint_created', {
+          hash: hash.substring(0, 7),
+          message: checkpointMsg,
+          filesBackedUp: status.files.length
+        });
+        
+        // 5. 记录到checkpoint日志
+        const checkpointLog = {
+          timestamp: new Date().toISOString(),
+          hash,
+          message: checkpointMsg,
+          promptPreview: prompt.slice(0, 100),
+          filesBackedUp: status.files.map(f => f.path)
+        };
+        
+        const logPath = path.join(this.workspacePath, '.spica', 'checkpoints.json');
+        const logs = fs.existsSync(logPath) ? fs.readJsonSync(logPath) : [];
+        logs.push(checkpointLog);
+        fs.writeJsonSync(logPath, logs);
+        
+        return hash;
+      }
+      
+      return null; // clean状态不需要checkpoint
+    } catch (error) {
+      // checkpoint失败不影响AI工作，只记录警告
+      this.emit('checkpoint_warning', { error: 'Failed to create checkpoint' });
+      return null;
+    }
+  }
+  
+  // 获取最近的checkpoint列表
+  async getCheckpoints(): Promise<Array<{ hash: string; message: string; timestamp: string }>> {
+    try {
+      const logPath = path.join(this.workspacePath, '.spica', 'checkpoints.json');
+      if (fs.existsSync(logPath)) {
+        return fs.readJsonSync(logPath);
+      }
+      
+      // 从git历史查找checkpoint commits
+      const git = simpleGit(this.workspacePath);
+      const log = await git.log({ maxCount: 50 });
+      return log.all
+        .filter(c => c.message.includes('[SPICA-CHECKPOINT]'))
+        .map(c => ({
+          hash: c.hash,
+          message: c.message,
+          timestamp: c.date
+        }));
+    } catch {
+      return [];
+    }
+  }
+  
+  // 获取git状态（辅助方法）
+  private async getGitStatus(): Promise<{ files: any[] }> {
+    try {
+      const git = simpleGit(this.workspacePath);
+      const status = await git.status();
+      return { files: status.files };
+    } catch {
+      return { files: [] };
+    }
   }
 
 // 判断错误是否可重试
@@ -494,6 +599,9 @@ async init() {
       throw new Error('LLM client not initialized');
     }
 
+    // 🔒 自动checkpoint：在AI工作前创建备份点
+    const checkpointHash = await this.createAutoCheckpoint(prompt);
+    
     // Pre-request: 基于token数判断是否需要压缩
     const existingMessages = this.llm.getMessages();
     const tokenCounter = new TokenCounter();
