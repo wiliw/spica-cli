@@ -15,6 +15,10 @@ const PASTE_END = `${ESC}[201~`;
 
 // 计算 Unicode 字符显示宽度
 function getCharWidth(char: string): number {
+  // 换行符不计入宽度
+  if (char === '\n' || char === '\r') {
+    return 0;
+  }
   // CJK 字符宽度为 2
   if (/[\u{3000}-\u{9fff}\u{ff00}-\u{ffef}\u{4e00}-\u{9fff}]/u.test(char)) {
     return 2;

@@ -67,7 +67,7 @@ describe('ProcessMonitor', () => {
 
   describe('kill', () => {
     it('kills a running process', async () => {
-      await monitor.start('sleep', ['100'], 'long-sleep');
+      await monitor.start('sleep', ['2'], 'long-sleep');
       
       await new Promise(resolve => setTimeout(resolve, 50));
       
@@ -128,8 +128,8 @@ describe('ProcessMonitor', () => {
 
   describe('killAll', () => {
     it('kills all tracked processes', async () => {
-      await monitor.start('sleep', ['10'], 'kill1');
-      await monitor.start('sleep', ['10'], 'kill2');
+      await monitor.start('sleep', ['2'], 'kill1');
+      await monitor.start('sleep', ['2'], 'kill2');
 
       await monitor.killAll();
 

@@ -10,6 +10,7 @@ interface RuntimeState {
   connectionErrorShown: boolean;
   streamingOutput: boolean;
   permissionDialogActive: boolean;  // 权限对话框激活时，stdin监听器应跳过处理
+  verboseMode: boolean;  // 详细显示模式（默认 false = 缩略模式）
 }
 
 class RuntimeStateManager {
@@ -21,6 +22,7 @@ class RuntimeStateManager {
     connectionErrorShown: false,
     streamingOutput: false,
     permissionDialogActive: false,
+    verboseMode: false,  // 默认缩略模式
   };
 
   // Agent
@@ -90,6 +92,20 @@ class RuntimeStateManager {
     return this.state.permissionDialogActive;
   }
 
+  // Verbose Mode (详细显示模式)
+  setVerboseMode(verbose: boolean): void {
+    this.state.verboseMode = verbose;
+  }
+
+  isVerboseMode(): boolean {
+    return this.state.verboseMode;
+  }
+
+  toggleVerboseMode(): boolean {
+    this.state.verboseMode = !this.state.verboseMode;
+    return this.state.verboseMode;
+  }
+
   // Interrupt
   interrupt(): void {
     if (this.state.agent) {
@@ -107,6 +123,7 @@ class RuntimeStateManager {
       connectionErrorShown: false,
       streamingOutput: false,
       permissionDialogActive: false,
+      verboseMode: false,  // 默认缩略模式
     };
   }
 }

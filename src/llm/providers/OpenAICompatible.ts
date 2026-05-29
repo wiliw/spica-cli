@@ -442,6 +442,14 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
     });
   }
 
+  // 添加用户消息（不立即生成）
+  addUserMessage(content: string): void {
+    this.messages.push({
+      role: 'user',
+      content: content,
+    });
+  }
+
   // 从当前历史发起生成请求（不添加新的user消息）
   async generateFromHistory(tools?: ToolDefinition[], signal?: AbortSignal): Promise<LLMResponse> {
     try {

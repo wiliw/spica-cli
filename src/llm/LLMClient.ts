@@ -209,7 +209,7 @@ export class LLMClient extends EventEmitter {
           await this.rateLimiter.waitForAvailability();
           this.rateLimiter.recordRequest();
 
-          response = await this.provider.continueWithToolResult(tc.id, result.output || result.error || '', this.tools);
+          response = await this.provider.continueWithToolResult(tc.id, result.content || result.output || result.error || '', this.tools);
 
           if (response.content) {
             const tokens = this.tokenCounter.estimateTokens(response.content);
@@ -241,5 +241,36 @@ export class LLMClient extends EventEmitter {
 
   getProvider(): OpenAICompatibleProvider {
     return this.provider;
+  }
+
+  // 添加用户消息（不立即生成）
+  addUserMessage(content: string): void {
+    this.provider.addUserMessage(content);
+  }
+
+  // 从历史消息继续生成（不添加新的user消息）
+  async generateFromHistory(tools?: ToolDefinition[]): Promise<LLMResponse> {
+    const toolsToUse = tools || this.tools;
+    this.abortController = new AbortController();
+
+    try {
+      await this.rateLimiter.waitForAvailability(this.abortController.signal);
+
+      if (this.abortController.signal.aborted) {
+        throw new Error('Interrupted during rate limit wait');
+      }
+
+      this.rateLimiter.recordRequest();
+      const response = await this.provider.generateFromHistory(toolsToUse, this.abortController.signal);
+
+      if (response.content) {
+        const tokens = this.tokenCounter.estimateTokens(response.content);
+        this.rateLimiter.recordTokenUsage(tokens);
+      }
+
+      return response;
+    } finally {
+      this.abortController = null;
+    }
   }
 }
