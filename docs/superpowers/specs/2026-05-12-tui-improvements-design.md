@@ -2,6 +2,7 @@
 
 **Date**: 2026-05-12
 **Status**: Draft
+**Plan**: docs/superpowers/plans/2026-05-12-tui-improvements.md
 
 ---
 

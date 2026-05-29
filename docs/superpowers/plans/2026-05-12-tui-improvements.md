@@ -1,5 +1,8 @@
 # TUI Improvements Implementation Plan
 
+> **Spec**: docs/superpowers/specs/2026-05-12-tui-improvements-design.md
+> **Spec Status**: Draft
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Fix input loss during fast typing and add split-screen TUI with focus-linked panels
