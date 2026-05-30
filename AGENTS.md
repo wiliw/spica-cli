@@ -27,7 +27,7 @@
 |----------------|---------|
 | `src/index.ts` | CLI entry point, command definitions, TUI setup (~1291 lines) |
 | `src/agent.ts` | Core SpicaAgent class, main orchestration (~1062 lines) |
-| `src/core/` | EventBus, StateManager, ErrorHandler, SessionManager, LogManager, ProcessMonitor, Heartbeat, RuntimeState |
+| `src/core/` | EventBus, StateManager, ErrorHandler, SessionManager, LogManager, ProcessMonitor, RuntimeState |
 | `src/tools/index.ts` | 24 tool implementations (file, bash, git, web, etc.) (~1854 lines) |
 | `src/tools/subAgent.ts` | Parallel subagent task execution |
 | `src/llm/` | LLM client, providers (OpenAI, Anthropic, Local), rate limiter, token counter |

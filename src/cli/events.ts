@@ -3,7 +3,7 @@ import { getScreenManager } from './ui/screenManager';
 import { LAIN_COLORS, format } from './ui/colors';
 import prompts from 'prompts';
 import { getRuntimeState } from '../core/RuntimeState';
-import { startHeartbeat, stopHeartbeat, createHeartbeat } from '../core/Heartbeat';
+
 
 const screen = getScreenManager();
 const state = getRuntimeState();
@@ -36,26 +36,12 @@ export function setupAgentEvents(
   let reasoningStarted = false;
   let justSwitchedFromReasoning = false;  // 只在切换时换行一次
 
-// 创建心跳实例（用于等待 LLM 响应期间）
-createHeartbeat((msg) => screen.appendScroll(LAIN_COLORS.muted(msg)), { 
-  interval: 1500, 
-  message: '.',
-  maxCount: 80  // 1.5秒×80 = 120秒，给LLM足够响应时间
-});
-
   agent.on('connection_error', (data: any) => {
     state.setConnectionErrorShown(true);
     screen.appendScroll(LAIN_COLORS.error(`\n[ERR] ${data.type}: ${data.hint}\n`));
   });
 
-  // 每次等待 LLM 响应时只启动心跳，不显示提示（提示由 index.ts 在调用 runLoop 前显示）
-  agent.on('waiting_for_llm', () => {
-    startHeartbeat();
-  });
-
   agent.on('stream', (data: any) => {
-    // 收到流式响应，停止心跳
-    stopHeartbeat();
 
     // 从 reasoning 切换到 stream 时，只换行一次
     if (reasoningStarted && !justSwitchedFromReasoning) {
@@ -72,9 +58,6 @@ createHeartbeat((msg) => screen.appendScroll(LAIN_COLORS.muted(msg)), {
   });
 
   agent.on('reasoning', (data: any) => {
-    // 收到推理内容，停止心跳
-    stopHeartbeat();
-
     // 只在第一次显示 thinking 提示
     if (!reasoningStarted) {
       reasoningStarted = true;
@@ -98,8 +81,6 @@ createHeartbeat((msg) => screen.appendScroll(LAIN_COLORS.muted(msg)), {
   });
 
   agent.on('tool_call', (data: any) => {
-    // 工具调用开始，停止之前的LLM心跳，启动工具执行心跳
-    stopHeartbeat();
     state.setStreamingOutput(false);
     screen.setStreaming(false);
     // 从reasoning切换到tool_call时，需要换行
@@ -113,13 +94,9 @@ createHeartbeat((msg) => screen.appendScroll(LAIN_COLORS.muted(msg)), {
     const boxWidth = Math.max(toolLabel.length + 4, 20);
     screen.appendScroll(LAIN_COLORS.tool(`\n┌─ ${toolLabel} ${'─'.repeat(boxWidth - toolLabel.length - 4)}┐\n`));
 
-    // 启动工具执行心跳（显示工具正在执行）
-    startHeartbeat();
   });
 
   agent.on('tool_result', (data: any) => {
-    // 工具执行完成，停止心跳
-    stopHeartbeat();
     state.setStreamingOutput(false);
     screen.setStreaming(false);
     const icon = data.success ? '✓' : '✗';
@@ -223,7 +200,6 @@ createHeartbeat((msg) => screen.appendScroll(LAIN_COLORS.muted(msg)), {
   });
 
   agent.on('error_suggestion', (data: any) => {
-    stopHeartbeat();  // LLM错误时停止心跳（防止超时提示）
     screen.appendScroll(LAIN_COLORS.warning(`\n[HINT] ${data.suggestion}\n`));
   });
 
@@ -293,8 +269,6 @@ createHeartbeat((msg) => screen.appendScroll(LAIN_COLORS.muted(msg)), {
   });
 
   agent.on('tool_stuck_warning', (data: any) => {
-    // 停止心跳（工具执行心跳）
-    stopHeartbeat();
     screen.appendScroll(LAIN_COLORS.warning(`\n[STUCK] ${data.tool}: ${data.message}\n`));
     screen.appendScroll(LAIN_COLORS.muted(`  自动中断中... Agent 将尝试其他方案\n`));
     screen.restoreCursor();
@@ -302,16 +276,12 @@ createHeartbeat((msg) => screen.appendScroll(LAIN_COLORS.muted(msg)), {
   });
 
   agent.on('tool_aborted', (data: any) => {
-    // 停止心跳
-    stopHeartbeat();
     screen.appendScroll(LAIN_COLORS.warning(`\n[ABORT] ${data.tool} 已中断\n`));
     screen.restoreCursor();
     screen.refreshInput();
   });
 
   agent.on('agent_interrupted', (data: any) => {
-    // 停止所有心跳
-    stopHeartbeat();
     // 重置流式状态
     state.setStreamingOutput(false);
     screen.setStreaming(false);

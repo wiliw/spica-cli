@@ -21,7 +21,7 @@ import { TUIInputHandler } from './cli/ui/tuiInput';
 import { setupAgentEvents } from './cli/events';
 import { displayStatusLine } from './cli/status';
 import { getRuntimeState, resetRuntimeState } from './core/RuntimeState';
-import { createHeartbeat, startHeartbeat, stopHeartbeat, clearHeartbeat } from './core/Heartbeat';
+
 import { getScreenManager } from './cli/ui/screenManager';
 import { TokenCounter } from './llm/TokenCounter';
 import * as readline from 'readline';
@@ -58,7 +58,6 @@ process.on('SIGINT', () => {
   if (state.getAgent()) {
     state.getAgent()!.interrupt();
     state.setProcessing(false);
-    stopHeartbeat();
     if (tuiStarted) {
       screen.appendScroll(LAIN_COLORS.warning('\n[INTERRUPTED] Ctrl+C again to exit\n'));
       screen.setStreaming(false);
@@ -207,7 +206,6 @@ program
             state.getAgent()!.interrupt();
             isProcessing = false;
             state.setProcessing(false);
-            stopHeartbeat();  // 停止心跳
 
             screen.appendScroll(LAIN_COLORS.warning('\n[INTERRUPTED]\n'));
             screen.setStreaming(false);
@@ -658,11 +656,9 @@ Start the analysis, execute step by step, then output the document.`;
               state.setProcessing(true);
               try {
                 await agent.runLoop(prompt);
-                stopHeartbeat();  // 成功完成后停止心跳
                 screen.setStreaming(false);
                 screen.appendScroll(LAIN_COLORS.success('\n[OK] Done\n'));
               } catch (error: any) {
-                stopHeartbeat();  // 错误时停止心跳
                 screen.setStreaming(false);
                 screen.appendScroll(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
               }
@@ -694,7 +690,6 @@ Start the analysis, execute step by step, then output the document.`;
 
         try {
           const result = await agent.runLoop(finalInput);
-          stopHeartbeat();  // 成功完成后停止心跳（防止超时提示）
           if (state.isStreamingOutput()) {
             state.setStreamingOutput(false);
             screen.setStreaming(false);
@@ -703,7 +698,6 @@ Start the analysis, execute step by step, then output the document.`;
 
           screen.appendScroll(LAIN_COLORS.success('\n[OK] Done\n'));
         } catch (error: any) {
-          stopHeartbeat();  // 错误时停止心跳
           if (state.isStreamingOutput()) {
             state.setStreamingOutput(false);
             screen.setStreaming(false);
@@ -1122,21 +1116,8 @@ async function runSimpleMode(agent: SpicaAgent, fresh?: boolean): Promise<void> 
   try {
     await agent.init();
 
-    // 创建心跳实例（用于等待 LLM 响应期间）
-    createHeartbeat((msg) => process.stdout.write(LAIN_COLORS.muted(msg)), { 
-  interval: 1500, 
-  message: '.',
-  maxCount: 80  // 120秒timeout，与interactive模式一致
-});
-
-    // 每次等待 LLM 响应时启动心跳
-    agent.on('waiting_for_llm', () => {
-      startHeartbeat();
-    });
-
     // 设置简单的事件处理（无 TUI）
     agent.on('stream', (data: any) => {
-      stopHeartbeat();  // 收到流式响应，停止心跳
       process.stdout.write(data.chunk);
     });
 
@@ -1237,10 +1218,8 @@ async function runSimpleMode(agent: SpicaAgent, fresh?: boolean): Promise<void> 
       try {
         console.log(LAIN_COLORS.muted('\n[PROCESSING]...'));
         const response = await agent.runLoop(trimmed);
-        stopHeartbeat();  // 成功完成后停止心跳
         console.log(LAIN_COLORS.success('\n[OK] Done'));
       } catch (error: any) {
-        stopHeartbeat();  // 错误时停止心跳
         console.log(LAIN_COLORS.error(`\n[ERR] ${error.message}`));
       }
 

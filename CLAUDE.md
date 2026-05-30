@@ -50,7 +50,6 @@ npx tsc --noEmit   # Type check
 - `SessionManager`: Session lifecycle management
 - `LogManager`: Structured logging with categories and levels
 - `ProcessMonitor`: Background process tracking and log streaming
-- `Heartbeat`: Progress indicators during long LLM waits
 
 **Tools** (`src/tools/index.ts`):
 - 24 built-in tools + MCP dynamic tools
@@ -149,7 +148,7 @@ npx tsc --noEmit   # Type check
 | `AGENTS.md` | Project description for AI context (industry standard) |
 | `src/index.ts` | CLI entry, REPL loop, input queue, `/init` prompt |
 | `src/agent.ts` | Agent loop, compression, permissions, summary generation |
-| `src/core/` | EventBus, StateManager, ErrorHandler, SessionManager, Heartbeat |
+| `src/core/` | EventBus, StateManager, ErrorHandler, SessionManager |
 | `src/cli/ui/screenManager.ts` | TUI with scroll regions, status bar, input handling |
 | `src/cli/ui/queue.ts` | Non-blocking input management |
 | `src/cli/events.ts` | Agent event handlers for UI output |
