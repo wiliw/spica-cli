@@ -10,6 +10,7 @@ import { SkillDefinition } from './utils/settings';
 import { loadProjectState, saveProjectState, updateProjectTodos, loadProjectContext, saveProjectContext, ensureProjectDir } from './storage/projectState';
 import { runPreHooks, runPostHooks } from './hooks';
 import { LAIN_COLORS } from './cli/ui/colors';
+import { classifyIntent } from './cli/skillGate';
 import { EventEmitter } from 'events';
 import fs from 'fs-extra';
 import * as path from 'path';
@@ -670,6 +671,12 @@ async init() {
       const skillContent = buildSkillPrompt(matchedSkill, { input: prompt });
       this.emit('skill_auto_triggered', { skill: matchedSkill.name, description: matchedSkill.description });
       prompt = skillContent;
+    }
+
+    // Inject REQUIRED_SKILL as system message if classifier detects a skill
+    const classifiedSkill = classifyIntent(prompt);
+    if (classifiedSkill && (!matchedSkill || matchedSkill.name !== classifiedSkill)) {
+      this.llm.addMessage({ role: 'system' as const, content: `REQUIRED_SKILL: ${classifiedSkill}` });
     }
 
     // 🔒 自动checkpoint：在AI工作前创建备份点

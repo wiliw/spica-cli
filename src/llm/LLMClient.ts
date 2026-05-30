@@ -228,6 +228,10 @@ export class LLMClient extends EventEmitter {
     this.provider.clearHistory();
   }
 
+  addMessage(message: ChatMessage): void {
+    this.provider.addMessage(message);
+  }
+
   getMessages(): ChatMessage[] {
     return this.provider.getMessages();
   }
