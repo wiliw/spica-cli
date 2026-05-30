@@ -1148,10 +1148,11 @@ async init() {
         ? (m.content || '').slice(0, maxContentLength) + '...[truncated]'
         : m.content;
 
-      // 截断 toolCalls（最多保留 4 个，保留更多操作上下文）
+      // 截断 toolCalls（adaptive to context window）
+      const maxToolCalls = Math.max(3, Math.min(10, Math.floor(contextWindow / 25000)));
       let truncatedToolCalls = m.toolCalls;
-      if (m.toolCalls && m.toolCalls.length > 4) {
-        truncatedToolCalls = m.toolCalls.slice(0, 4);
+      if (m.toolCalls && m.toolCalls.length > maxToolCalls) {
+        truncatedToolCalls = m.toolCalls.slice(0, maxToolCalls);
         // 标记被截断
         truncatedToolCalls.push({
           id: 'truncated',
@@ -1251,7 +1252,7 @@ async init() {
       const summary = items.slice(0, 10).join(' | ');
       return {
         role: 'assistant',
-        content: `[History Summary] ${summary}`,
+        content: `[History Summary] Task chain: ${summary}`,
       };
     }
   }

@@ -144,7 +144,7 @@ describe('Compression Integration', () => {
       const msgWithToolCalls = finalMessages.find(m => m.toolCalls && m.toolCalls.length > 0);
 
       expect(msgWithToolCalls).toBeDefined();
-      expect(msgWithToolCalls!.toolCalls!.length).toBeLessThanOrEqual(5);  // 4 + truncated marker
+      expect(msgWithToolCalls!.toolCalls!.length).toBeLessThanOrEqual(5);  // maxToolCalls + truncated marker (adaptive to window)
       // Should have truncated marker
       expect(msgWithToolCalls!.toolCalls!.some(tc => tc.name.includes('[truncated]'))).toBe(true);
     });
