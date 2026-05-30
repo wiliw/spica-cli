@@ -31,6 +31,17 @@ export function classifyIntent(text: string): string | null {
     return 'brainstorming';
   }
 
+  // Tier 5 — negative patterns (pure info questions)
+  // Checked before Tier 2 so that "what is a build system" isn't caught as creation
+  if (TIER_5_ALWAYS_NULL_PREFIXES.some(p => lower.startsWith(p))) {
+    return null;
+  }
+
+  const hasCreationOrFix = [...TIER_2_VERBS, ...TIER_3_KEYWORDS].some(k => lower.includes(k));
+  if (TIER_5_CONDITIONAL_NULL_PREFIXES.some(p => lower.startsWith(p)) && !hasCreationOrFix) {
+    return null;
+  }
+
   // Tier 2 — creation keywords + target noun
   const hasCreationVerb = TIER_2_VERBS.some(v => lower.includes(v));
   const hasTargetNoun = TIER_2_NOUNS.some(n => lower.includes(n));
@@ -46,16 +57,6 @@ export function classifyIntent(text: string): string | null {
   // Tier 4 — review keywords
   if (TIER_4_PATTERNS.some(p => lower.includes(p))) {
     return 'requesting-code-review';
-  }
-
-  // Tier 5 — negative patterns (pure info questions)
-  if (TIER_5_ALWAYS_NULL_PREFIXES.some(p => lower.startsWith(p))) {
-    return null;
-  }
-
-  const hasCreationOrFix = [...TIER_2_VERBS, ...TIER_3_KEYWORDS].some(k => lower.includes(k));
-  if (TIER_5_CONDITIONAL_NULL_PREFIXES.some(p => lower.startsWith(p)) && !hasCreationOrFix) {
-    return null;
   }
 
   return null;
