@@ -668,6 +668,17 @@ Start the analysis, execute step by step, then output the document.`;
               state.setProcessing(false);
               saveSession(process.cwd(), agent.getMessages());
               
+              // Auto-drain queued inputs
+              const skillQueue = getInputQueue();
+              if (skillQueue.hasPending()) {
+                const pendingCount = skillQueue.getPending().length;
+                const merged = skillQueue.mergePending();
+                screen.appendScroll(LAIN_COLORS.muted(`\n[QUEUE] Processing ${pendingCount} queued input(s)\n`));
+                screen.restoreCursor();
+                screen.refreshInput();
+                await handleInput(merged);
+              }
+              
               return;
             }
           }
@@ -712,6 +723,17 @@ Start the analysis, execute step by step, then output the document.`;
         isProcessing = false;
         state.setProcessing(false);
         saveSession(process.cwd(), agent.getMessages());
+
+        // Auto-drain queued inputs
+        const pendingQueue = getInputQueue();
+        if (pendingQueue.hasPending()) {
+          const pendingCount = pendingQueue.getPending().length;
+          const merged = pendingQueue.mergePending();
+          screen.appendScroll(LAIN_COLORS.muted(`\n[QUEUE] Processing ${pendingCount} queued input(s)\n`));
+          screen.restoreCursor();
+          screen.refreshInput();
+          await handleInput(merged);
+        }
       };
 
       // 帮助信息
