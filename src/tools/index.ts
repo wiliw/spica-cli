@@ -217,8 +217,6 @@ name: 'bash',
       },
       required: ['command'],
     },
-      required: ['command'],
-    },
   },
   {
     name: 'git',
