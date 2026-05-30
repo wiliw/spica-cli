@@ -1238,15 +1238,20 @@ async init() {
         content: `[History Summary] ${response.content || 'Early conversation compressed'}`,
       };
     } catch {
-      // Fallback: preserve user message topics
-      const userTopics = messages
-        .filter(m => m.role === 'user')
-        .map(m => (m.content || '').slice(0, 60))
-        .slice(0, 5)
-        .join(' → ');
+      // Fallback: preserve user questions AND tool call names in order
+      const items: string[] = [];
+      for (const m of messages) {
+        if (m.role === 'user') {
+          items.push((m.content || '').slice(0, 60));
+        } else if (m.toolCalls && m.toolCalls.length > 0) {
+          const toolNames = m.toolCalls.map(tc => tc.name).join(', ');
+          items.push(`[${toolNames}]`);
+        }
+      }
+      const summary = items.slice(0, 10).join(' | ');
       return {
         role: 'assistant',
-        content: `[History Summary] Task chain: ${userTopics}`,
+        content: `[History Summary] ${summary}`,
       };
     }
   }
