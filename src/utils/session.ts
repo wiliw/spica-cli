@@ -75,12 +75,13 @@ function deduplicateToolMessages(messages: ChatMessage[]): ChatMessage[] {
 function truncateMessages(messages: ChatMessage[]): ChatMessage[] {
   const recent = messages.slice(-MAX_SESSION_MESSAGES);
 
-  return recent.map(m => ({
-    ...m,
-    content: (m.content || '').length > MAX_MESSAGE_LENGTH
-      ? (m.content || '').slice(0, MAX_MESSAGE_LENGTH) + '...[truncated]'
-      : m.content,
-  }));
+  return recent
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => ({
+      role: m.role,
+      content: (m.content || '').slice(0, MAX_MESSAGE_LENGTH) + 
+        ((m.content || '').length > MAX_MESSAGE_LENGTH ? '...[truncated]' : ''),
+    }));
 }
 
 // Save current session

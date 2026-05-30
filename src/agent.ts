@@ -952,7 +952,7 @@ async init() {
           try {
             response = await this.callLLMWithRetry(
               () => this.llm!.continueWithAllToolResults(
-                toolResults.map(t => ({ name: t.name, result: t.result })),
+                toolResults.map(t => ({ name: t.name, result: t.result, id: t.id })),
                 toolDefinitions
               ),
               'llm_continue'
