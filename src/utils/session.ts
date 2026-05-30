@@ -42,6 +42,9 @@ export function loadSession(workspacePath: string): SessionState | null {
   try {
     if (fs.existsSync(sessionPath)) {
       const session = fs.readJsonSync(sessionPath);
+      if (session.messages) {
+        session.messages = deduplicateToolMessages(session.messages);
+      }
       return session;
     }
   } catch (error) {
@@ -49,6 +52,23 @@ export function loadSession(workspacePath: string): SessionState | null {
   }
 
   return null;
+}
+
+function deduplicateToolMessages(messages: ChatMessage[]): ChatMessage[] {
+  const seenToolCallIds = new Set<string>();
+  const result: ChatMessage[] = [];
+  
+  for (const msg of messages) {
+    if (msg.role === 'tool' && msg.toolCallId) {
+      if (seenToolCallIds.has(msg.toolCallId)) {
+        continue;
+      }
+      seenToolCallIds.add(msg.toolCallId);
+    }
+    result.push(msg);
+  }
+  
+  return result;
 }
 
 // Truncate messages before saving to prevent huge session files
@@ -170,7 +190,11 @@ export function loadSessionById(workspacePath: string, sessionId: string): Sessi
 
   try {
     if (fs.existsSync(sessionPath)) {
-      return fs.readJsonSync(sessionPath);
+      const session = fs.readJsonSync(sessionPath);
+      if (session.messages) {
+        session.messages = deduplicateToolMessages(session.messages);
+      }
+      return session;
     }
   } catch (error) {}
 
