@@ -43,7 +43,7 @@ export function loadSession(workspacePath: string): SessionState | null {
     if (fs.existsSync(sessionPath)) {
       const session = fs.readJsonSync(sessionPath);
       if (session.messages) {
-        session.messages = deduplicateToolMessages(session.messages);
+        session.messages = cleanMessages(session.messages);
       }
       return session;
     }
@@ -54,20 +54,46 @@ export function loadSession(workspacePath: string): SessionState | null {
   return null;
 }
 
-function deduplicateToolMessages(messages: ChatMessage[]): ChatMessage[] {
-  const seenToolCallIds = new Set<string>();
+function cleanMessages(messages: ChatMessage[]): ChatMessage[] {
   const result: ChatMessage[] = [];
-  
-  for (const msg of messages) {
-    if (msg.role === 'tool' && msg.toolCallId) {
-      if (seenToolCallIds.has(msg.toolCallId)) {
-        continue;
+  const usedToolCallIds = new Set<string>();
+
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    
+    if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+      // 检查这个assistant的tool_calls是否都有对应的tool响应
+      const expectedIds = m.toolCalls.map(tc => tc.id);
+      let j = i + 1;
+      const foundIds: string[] = [];
+      while (j < messages.length && messages[j].role === 'tool') {
+        foundIds.push(messages[j].toolCallId || '');
+        j++;
       }
-      seenToolCallIds.add(msg.toolCallId);
+      
+      const missing = expectedIds.filter(id => !foundIds.includes(id) || usedToolCallIds.has(id));
+      
+      if (missing.length === 0) {
+        // 完整配对，保留assistant和所有tool响应
+        result.push({ role: 'assistant', content: m.content || '', toolCalls: m.toolCalls });
+        for (let k = i + 1; k < j; k++) {
+          result.push(messages[k]);
+          usedToolCallIds.add(messages[k].toolCallId || '');
+        }
+      } else {
+        // 不完整，只保留assistant纯文本
+        result.push({ role: 'assistant', content: m.content || '' });
+      }
+      i = j - 1; // 跳过已处理的tool消息
+    } else if (m.role === 'tool') {
+      // 单独的tool消息（没有前面的assistant），跳过
+      continue;
+    } else {
+      // user或纯文本assistant，保留
+      result.push({ role: m.role, content: m.content || '' });
     }
-    result.push(msg);
   }
-  
+
   return result;
 }
 
@@ -193,7 +219,7 @@ export function loadSessionById(workspacePath: string, sessionId: string): Sessi
     if (fs.existsSync(sessionPath)) {
       const session = fs.readJsonSync(sessionPath);
       if (session.messages) {
-        session.messages = deduplicateToolMessages(session.messages);
+        session.messages = cleanMessages(session.messages);
       }
       return session;
     }
