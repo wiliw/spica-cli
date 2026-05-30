@@ -681,11 +681,14 @@ export async function executeTool(
         if (!command) {
           return { success: false, error: 'Command is required' };
         }
-        const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
+const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
         const detached = safeArgs.detached === true;
         const interactive = safeArgs.interactive === true;
-        const autoRetry = safeArgs.autoRetry !== false; // 默认true
+        const autoRetry = safeArgs.autoRetry !== false;
         const maxOutputLength = (safeArgs.maxOutputLength as number) || 50000;
+        let inputs = (safeArgs.inputs as string[]) || [];
+        const inputFile = safeArgs.inputFile as string;
+        const outputFile = safeArgs.outputFile as string;
 
         // 卡住检测阈值（默认30秒，可通过 stuckWarning 参数调整）
         const stuckWarningMs = (safeArgs.stuckWarning as number) || 60000;
