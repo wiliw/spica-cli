@@ -42,6 +42,7 @@ export interface ToolResult {
   filesAtRisk?: string[];
   safetyMode?: 'protected' | 'normal';
   requiresUserConfirmation?: boolean;
+  referencedSkills?: string[];
 }
 
 export const TOOLS_DEFINITIONS: ToolDefinition[] = [
@@ -1338,9 +1339,31 @@ export async function executeTool(
           };
         }
 
+        const skillContent = skill.promptTemplate || '';
+
+        // Find skill references in loaded skill content
+        const allSkillNames = Array.from(skills.keys());
+        const referencedSkills: string[] = [];
+        const lowerContent = skillContent.toLowerCase();
+
+        for (const name of allSkillNames) {
+          if (name === skillName) continue;
+          if (
+            lowerContent.includes(`superpowers:${name}`) ||
+            lowerContent.includes(`skill(name="${name}")`) ||
+            lowerContent.includes(`skill(name='${name}')`) ||
+            lowerContent.includes(`use the \`${name}\` skill`) ||
+            lowerContent.includes(`use ${name}`) ||
+            lowerContent.includes(`invoke ${name}`)
+          ) {
+            referencedSkills.push(name);
+          }
+        }
+
         return {
           success: true,
-          output: `Skill: ${skill.name}\nDescription: ${skill.description}\n\n${skill.promptTemplate || ''}`,
+          output: `Skill: ${skill.name}\nDescription: ${skill.description}\n\n${skillContent}`,
+          referencedSkills: [...new Set(referencedSkills)],
         };
       }
 

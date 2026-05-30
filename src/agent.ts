@@ -927,6 +927,13 @@ async init() {
               this.emit('hook_log', { tool: tc.name, message: postHookMessage });
             }
 
+            // Skill chain: inject REQUIRED_SKILL for referenced skills
+            if (tc.name === 'skill' && result.success && result.referencedSkills?.length) {
+              for (const refName of result.referencedSkills) {
+                this.llm!.addMessage({ role: 'system' as const, content: `REQUIRED_SKILL: ${refName}` });
+              }
+            }
+
             // workspace切换处理
             if (tc.name === 'workspace' && result.success && tcArgs.path) {
               await this.switchWorkspace(tcArgs.path);
