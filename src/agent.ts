@@ -1110,6 +1110,7 @@ async init() {
     const tokenCounter = new TokenCounter();
     const provider = this.llm.getProvider();
     tokenCounter.setContextWindow(provider.getContextWindow());
+    const contextWindow = provider.getContextWindow();
 
     const usedTokens = tokenCounter.estimateMessages(allMessages);
 
@@ -1124,12 +1125,13 @@ async init() {
     let keepCount = ratio > 2 ? 5 : ratio > 1.5 ? 8 : 12;
     // 确保最小保留 5 条，最大保留不超过 15 条，且不超过总数的 25%
     // 测试证明 min=3 max=8 过于激进，会丢失太多上下文
-    keepCount = Math.max(5, Math.min(keepCount, 15, Math.floor(allMessages.length * 0.25)));
+    // Adaptive floor: small windows keep fewer, large windows keep more
+    const minKeep = Math.max(3, Math.min(8, Math.ceil(contextWindow / 50000)));
+    keepCount = Math.max(minKeep, Math.min(keepCount, Math.max(minKeep + 2, 15), Math.floor(allMessages.length * 0.25)));
 
     const recentMessages = allMessages.slice(-keepCount);
     const oldMessages = allMessages.slice(0, -keepCount);
 
-    const contextWindow = provider.getContextWindow();
     // Adaptive truncation: 1% of context window, floor 500 chars
     const maxContentLength = Math.max(500, Math.floor(contextWindow * 0.01));
 
@@ -1160,9 +1162,19 @@ async init() {
     });
 
     // 用 LLM 生成摘要（如果还有旧消息）
-    if (oldMessages.length > 0) {
-      const summary = await this.generateSummary(oldMessages);
-      const compressed = [summary, ...truncatedRecent];
+    // Safety: if kept messages alone exceed 70% of target, reduce until they fit
+    let safetyTruncated = [...truncatedRecent];
+    let safetyTokens = tokenCounter.estimateMessages(safetyTruncated);
+    while (safetyTokens > targetTokens * 0.7 && safetyTruncated.length > 2) {
+      safetyTruncated.shift();
+      safetyTokens = tokenCounter.estimateMessages(safetyTruncated);
+    }
+    // Recompute oldMessages to match possibly reduced recent set
+    const finalOldMessages = allMessages.slice(0, allMessages.length - safetyTruncated.length);
+
+    if (finalOldMessages.length > 0) {
+      const summary = await this.generateSummary(finalOldMessages);
+      const compressed = [summary, ...safetyTruncated];
       this.llm.setMessages(compressed);
 
       // 检查压缩后的 tokens，如果仍然超限，继续压缩
@@ -1175,7 +1187,7 @@ async init() {
       }
     } else {
       // 没有旧消息，只截断
-      this.llm.setMessages(truncatedRecent);
+      this.llm.setMessages(safetyTruncated);
     }
 
     this.emit('context_compressed', {
