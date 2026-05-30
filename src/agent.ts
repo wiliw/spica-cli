@@ -1188,7 +1188,11 @@ async init() {
 
     if (finalOldMessages.length > 0) {
       const summary = await this.generateSummary(finalOldMessages);
-      const compressed = [summary, ...safetyTruncated];
+      // Filter tool messages before setting
+      const safetyTruncatedClean = safetyTruncated.filter(m => 
+        m.role === 'user' || m.role === 'assistant' || m.role === 'system'
+      );
+      const compressed = [summary, ...safetyTruncatedClean];
       this.llm.setMessages(compressed);
 
       // 检查压缩后的 tokens，如果仍然超限，继续压缩
@@ -1200,8 +1204,11 @@ async init() {
         this.llm.setMessages([secondSummary, ...finalMessages]);
       }
     } else {
-      // 没有旧消息，只截断
-      this.llm.setMessages(safetyTruncated);
+      // 没有旧消息，只截断（也要过滤）
+      const safetyTruncatedClean = safetyTruncated.filter(m => 
+        m.role === 'user' || m.role === 'assistant' || m.role === 'system'
+      );
+      this.llm.setMessages(safetyTruncatedClean);
     }
 
     this.emit('context_compressed', {
@@ -1214,8 +1221,13 @@ async init() {
 
   // Generate history summary using LLM
   private async generateSummary(messages: ChatMessage[]): Promise<ChatMessage> {
+    // Filter out tool messages before compression
+    const filteredMessages = messages.filter(m => 
+      m.role === 'user' || m.role === 'assistant' || m.role === 'system'
+    );
+    
     // Build messages text (smart truncation)
-    const messagesText = messages.map(m => {
+    const messagesText = filteredMessages.map(m => {
       const role = m.role === 'user' ? 'User' : m.role === 'assistant' ? 'AI' : 'System';
       let content = m.content || '';
       
