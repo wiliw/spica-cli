@@ -1,4 +1,6 @@
 // spica System Prompt - English only
+import fs from 'fs-extra';
+import * as path from 'path';
 
 export const SYSTEM_PROMPT = `You are spica, a coding agent CLI. You edit files, run commands, and help developers.
 
@@ -95,7 +97,29 @@ Do NOT skip this check. Do NOT assume "this is too simple". Check first.
 `;
 }
 
-export function getSystemPrompt(projectConfig?: any, skillsMetadata?: string, usingSuperpowersContent?: string): string {
+// Read .spica/learnings/*.md and return concatenated content
+function loadLearnings(workspacePath: string): string {
+  try {
+    const learningsDir = path.join(workspacePath, '.spica', 'learnings');
+    if (!fs.existsSync(learningsDir)) return '';
+    
+    const files = fs.readdirSync(learningsDir)
+      .filter(f => f.endsWith('.md'))
+      .sort(); // chronological by filename (YYYY-MM-DD prefix)
+    
+    if (files.length === 0) return '';
+    
+    const contents = files
+      .map(f => fs.readFileSync(path.join(learningsDir, f), 'utf-8'))
+      .join('\n\n');
+    
+    return `\n\n## Project Learnings (from .spica/learnings/)\n${contents}`;
+  } catch {
+    return ''; // never break system prompt for learnings issues
+  }
+}
+
+export function getSystemPrompt(projectConfig?: any, skillsMetadata?: string, usingSuperpowersContent?: string, workspacePath?: string): string {
   let prompt = SYSTEM_PROMPT;
 
   // Using-superpowers core content injected at session start
@@ -117,6 +141,11 @@ export function getSystemPrompt(projectConfig?: any, skillsMetadata?: string, us
     if (projectConfig.constraints?.length > 0) {
       prompt += `\nConstraints: ${projectConfig.constraints.slice(0, 3).join(', ')}`;
     }
+  }
+
+  // Project learnings from .spica/learnings/
+  if (workspacePath) {
+    prompt += loadLearnings(workspacePath);
   }
 
   // Skills metadata injection

@@ -595,7 +595,7 @@ async init() {
     const superpowersSkill = skills.find(s => s.name === 'using-superpowers');
     const superpowersContent = superpowersSkill?.promptTemplate || '';
     
-    this.llm.setSystemPrompt(getSystemPrompt(this.projectConfig, skillsMetadata, superpowersContent));
+    this.llm.setSystemPrompt(getSystemPrompt(this.projectConfig, skillsMetadata, superpowersContent, this.workspacePath));
     
     this.llm.on('chunk', (chunk: string) => {
       this.emit('stream', { chunk });
