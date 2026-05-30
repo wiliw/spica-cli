@@ -751,7 +751,7 @@ async init() {
         error: llmError.message,
         suggestion: '网络或API临时错误。请检查网络连接，稍后重试。'
       });
-      return `LLM请求失败（已重试10次）: ${llmError.message}\n建议: 检查API配置和网络连接，然后重试。`;
+      return `LLM request failed (retried 10 times): ${llmError.message}. Check API config and network.`;
     }
 
     // 防御性检查：确保 response 存在
@@ -881,7 +881,7 @@ async init() {
                 this.emit('tool_result', {
                   name: tc.name,
                   success: false,
-                  error: `工具执行被中断（可能卡住）。建议尝试其他方案：使用 detached 模式、更短 timeout，或 interactive 模式。`,
+                  error: `Tool execution aborted (stuck or interrupted). Try: detached=true, shorter timeout, or interactive mode.`,
                 });
                 return { name: tc.name, id: tc.id, result: `工具被中断，需要尝试其他方案`, isCritical: true };
               }
@@ -1000,7 +1000,7 @@ async init() {
             
             const resultsSummary = toolResults.map(t => `${t.name}: ${t.result.slice(0, 100)}`).join('\n');
             const errorTypeText = isRetryable ? '网络或API临时错误' : 'API错误（请求格式问题）';
-            return `工具执行完成，但LLM响应中断。\n错误类型: ${errorTypeText}\n错误详情: ${llmError.message}\n已执行的操作:\n${resultsSummary}\n建议: ${isRetryable ? '可以继续对话，之前的操作结果已保留。' : '需要修复问题后重新开始会话。消息历史已清理。'}`;
+            return `Tool execution completed but LLM response interrupted.\nError type: ${errorTypeText}\nError: ${llmError.message}\nExecuted operations:\n${resultsSummary}\nSuggestion: ${isRetryable ? 'Continue conversation, previous results retained.' : 'Fix issue and restart session. Message history cleaned.'}`;
           }
         }
       } else {
@@ -1076,22 +1076,22 @@ async init() {
   private generateErrorSuggestion(toolName: string, error: string, args: any): string {
     const suggestions: Record<string, (e: string, a: any) => string> = {
       file_read: (e, a) =>
-        e.includes('ENOENT') ? `文件不存在: ${a.path}. 建议: 检查路径或使用glob查找`
-        : e.includes('EACCES') ? `无权限读取: ${a.path}. 建议: 检查文件权限`
-        : `读取失败. 建议: 确认路径正确`,
+        e.includes('ENOENT') ? `File not found: ${a.path}. Check path or use glob.`
+        : e.includes('EACCES') ? `Permission denied: ${a.path}. Check file permissions.`
+        : `Read failed. Check path.`,
       file_write: (e, a) =>
-        e.includes('EACCES') ? `无权限写入: ${a.path}. 建议: 检查文件权限`
-        : e.includes('ENOENT') ? `目录不存在: ${a.path}. 建议: 先创建目录`
-        : `写入失败. 建议: 确认路径和内容`,
+        e.includes('EACCES') ? `Permission denied: ${a.path}. Check file permissions.`
+        : e.includes('ENOENT') ? `Directory not found: ${a.path}. Create directory first.`
+        : `Write failed. Check path and content.`,
       bash: (e, a) =>
-        e.includes('command not found') ? `命令不存在: ${a.command}. 建议: 安装对应工具`
-        : e.includes('Permission denied') ? `权限不足: ${a.command}. 建议: 检查权限或使用sudo`
-        : `执行失败. 建议: 检查命令语法`,
-      glob: (e, a) => `搜索失败. 建议: 检查pattern: ${a.pattern}`,
-      grep: (e, a) => `搜索失败. 建议: 检查pattern和路径`,
+        e.includes('command not found') ? `Command not found: ${a.command}. Install required tool.`
+        : e.includes('Permission denied') ? `Permission denied: ${a.command}. Check permissions or use sudo.`
+        : `Execution failed. Check command syntax.`,
+      glob: (e, a) => `Search failed. Check pattern: ${a.pattern}`,
+      grep: (e, a) => `Search failed. Check pattern and path.`,
     };
 
-    let baseSuggestion = suggestions[toolName]?.(error, args) || `工具 ${toolName} 失败. 建议: 检查参数`;
+    let baseSuggestion = suggestions[toolName]?.(error, args) || `Tool ${toolName} failed. Check parameters.`;
 
     return baseSuggestion;
   }

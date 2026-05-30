@@ -269,8 +269,7 @@ export function setupAgentEvents(
   });
 
   agent.on('tool_stuck_warning', (data: any) => {
-    screen.appendScroll(LAIN_COLORS.warning(`\n[STUCK] ${data.tool}: ${data.message}\n`));
-    screen.appendScroll(LAIN_COLORS.muted(`  自动中断中... Agent 将尝试其他方案\n`));
+    screen.appendScroll(LAIN_COLORS.warning(`\n[STUCK] ${data.tool}: execution stalled (${data.elapsedMs / 1000}s)\n`));
     screen.restoreCursor();
     screen.refreshInput();
   });

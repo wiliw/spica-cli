@@ -181,19 +181,22 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
       type: 'object' as const,
       properties: {
         pattern: { type: 'string', description: 'Glob pattern' },
+        ignore: { type: 'array', items: { type: 'string' }, description: 'Patterns to ignore (default: node_modules, .git, dist, build, *.lock)' },
+        maxFiles: { type: 'number', description: 'Max files to return (default: 100, prevents overflow)' },
       },
       required: ['pattern'],
     },
   },
   {
     name: 'grep',
-    description: 'Search text in files.',
+    description: 'Search text patterns in files. Returns matches with file paths and line numbers.',
     parameters: {
       type: 'object' as const,
       properties: {
-        pattern: { type: 'string', description: 'Search pattern' },
-        path: { type: 'string', description: 'Directory (optional)' },
-        include: { type: 'string', description: 'File pattern (optional)' },
+        pattern: { type: 'string', description: 'Regex pattern to search' },
+        path: { type: 'string', description: 'Directory to search (default: workspace)' },
+        include: { type: 'string', description: 'File pattern to include (e.g., "*.ts")' },
+        maxLines: { type: 'number', description: 'Max lines to return (default: 100, prevents overflow)' },
       },
       required: ['pattern'],
     },
@@ -609,33 +612,73 @@ export async function executeTool(
       }
 
       case 'glob': {
+        const ignorePatterns = (safeArgs.ignore as string[]) || ['node_modules', '.git', 'dist', 'build', '*.lock'];
+        const maxFiles = (safeArgs.maxFiles as number) || 100;
+        
         const files = await fastGlob(safeArgs.pattern, {
           cwd: WORKSPACE,
           absolute: true,
-          ignore: ['node_modules', '.git', 'dist', 'build', '*.lock'],
+          ignore: ignorePatterns,
         });
+        
+        const truncated = files.slice(0, maxFiles);
         return { 
           success: true, 
           output: files.length > 0 
-            ? `Found ${files.length} files:\n${files.slice(0, 100).join('\n')}`
-            : 'No files found'
+            ? `Found ${files.length} files (showing ${truncated.length}):\n${truncated.join('\n')}`
+            : 'No files found',
+          content: truncated.join('\n'),
         };
       }
 
       case 'grep': {
         const grepPath = safeArgs.path ? resolvePath(safeArgs.path) : WORKSPACE;
-        const includePattern = safeArgs.include ? `--include="${safeArgs.include}"` : '';
+        const includePattern = safeArgs.include || '*';
+        const maxLines = (safeArgs.maxLines as number) || 100;
         
-        const grepResult = await execa(`grep -r ${includePattern} "${safeArgs.pattern}" ${grepPath} | head -100`, {
-          shell: true,
-          cwd: WORKSPACE,
-          reject: false,
-        });
-        
-        return { 
-          success: true, 
-          output: grepResult.stdout || 'No matches found'
-        };
+        try {
+          const files = await fastGlob(includePattern, {
+            cwd: grepPath,
+            absolute: true,
+            ignore: ['node_modules', '.git', 'dist', 'build', '*.lock'],
+          });
+          
+          const regex = new RegExp(safeArgs.pattern, 'g');
+          const matches: string[] = [];
+          
+          for (const file of files) {
+            if (matches.length >= maxLines) break;
+            
+            try {
+              const content = await fs.readFile(file, 'utf-8');
+              const lines = content.split('\n');
+              
+              for (let i = 0; i < lines.length; i++) {
+                if (matches.length >= maxLines) break;
+                
+                if (regex.test(lines[i])) {
+                  const relativePath = file.replace(WORKSPACE, '').replace(/^\//, '');
+                  matches.push(`${relativePath}:${i + 1}: ${lines[i].trim()}`);
+                }
+              }
+            } catch (readError) {
+              // Skip unreadable files
+            }
+          }
+          
+          return {
+            success: true,
+            output: matches.length > 0 
+              ? `Found ${matches.length} matches:\n${matches.join('\n')}`
+              : 'No matches found',
+            content: matches.join('\n'),
+          };
+        } catch (error: any) {
+          return {
+            success: false,
+            error: `Grep failed: ${error.message}`,
+          };
+        }
       }
 
       case 'bash': {
@@ -656,7 +699,7 @@ export async function executeTool(
         const outputFile = safeArgs.outputFile as string;
 
         // 卡住检测阈值（默认30秒，可通过 stuckWarning 参数调整）
-        const stuckWarningMs = (safeArgs.stuckWarning as number) || 30000;
+        const stuckWarningMs = (safeArgs.stuckWarning as number) || 60000;
 
         try {
           // Read inputs from file if provided
@@ -756,7 +799,7 @@ export async function executeTool(
                 tool: 'bash',
                 command: command,
                 elapsedMs: stuckWarningMs,
-                message: `命令执行超过 ${stuckWarningMs / 1000} 秒无响应。可能是交互式程序或需要更长时间。建议：1) 等待完成 2) 中断并尝试其他方案（如使用 detached 模式或 shorter timeout）`,
+                message: `Command stalled for ${stuckWarningMs / 1000}s. Possible interactive mode or long operation.`,
               });
             }
           }, stuckWarningMs);
@@ -781,7 +824,7 @@ export async function executeTool(
             if (abortController.signal.aborted) {
               return {
                 success: false,
-                error: `Tool execution aborted (stuck or interrupted). Command: ${command.slice(0, 50)}...\n建议：尝试使用 detached=true 后台运行，或 timeout=10 设置更短超时。`,
+                error: `Tool execution aborted (stuck or interrupted). Command: ${command.slice(0, 50)}...`,
               };
             }
             // 检查是否超时
