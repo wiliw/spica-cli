@@ -120,5 +120,4 @@ describe('Edge Cases', () => {
       expect(formatted).toContain('x');
       expect(formatted).toContain('c');
     });
-  });
 });
