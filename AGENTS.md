@@ -47,7 +47,7 @@
 - **Dev**: `npm run dev` or `tsx src/index.ts`
 - **Build**: `npm run build` (creates bin/spica executable wrapper)
 - **Test**: `npm test` (vitest watch mode)
-- **Test run**: `npm run test:run` (single run) - **274 tests passing**
+- **Test run**: `npm run test:run` (single run) - 274 tests (269 passing, 5 failing in edge-case/session tests)
 - **Test single file**: `npx vitest run <file-pattern>`
 - **Type check**: `npx tsc --noEmit`
 - **Lint**: `npm run lint` (ESLint)
@@ -109,7 +109,8 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
 - Session persistence in `.spica/session.json`
 
 ### Testing
-- Tests in `src/**/__tests__/` (15 test files, 274 tests)
+- Tests in `src/**/__tests__/` (23 test files, 274 tests, 269 passing)
+- 5 known failing tests: session truncation edge cases in `src/__tests__/edgeCases.test.ts` and `src/utils/__tests__/session.test.ts`
 - Run `npm run test:run` for single execution
 - Key test files:
   - `src/core/__tests__/EventBus.test.ts` - Event system tests
