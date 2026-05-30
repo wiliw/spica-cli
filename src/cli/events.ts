@@ -180,25 +180,37 @@ createHeartbeat((msg) => screen.appendScroll(LAIN_COLORS.muted(msg)), {
   agent.on('permission_request', async (data: any) => {
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(false);
+      process.stdin.pause();
       state.setPermissionDialogActive(true);
     }
 
     let approved = false;
     try {
       screen.appendScroll(format.permissionBox(data.reason));
-      const answer = await prompts({
-        type: 'confirm',
-        name: 'approve',
-        message: LAIN_COLORS.primary.bold('Do you want to allow this action?'),
-        initial: false,
-      });
+      const answer = await prompts(
+        {
+          type: 'confirm',
+          name: 'approve',
+          message: LAIN_COLORS.primary.bold('Do you want to allow this action?'),
+          initial: false,
+        },
+        {
+          onCancel: () => {
+            approved = false;
+            return true;
+          }
+        }
+      );
       screen.appendScroll(LAIN_COLORS.permissionBorder('═'.repeat(50)) + '\n');
-      approved = answer.approve;
+      if (answer && typeof answer.approve === 'boolean') {
+        approved = answer.approve;
+      }
     } catch (e) {
       approved = false;
     } finally {
       state.setPermissionDialogActive(false);
       if (process.stdin.isTTY) {
+        process.stdin.resume();
         process.stdin.setRawMode(true);
       }
     }

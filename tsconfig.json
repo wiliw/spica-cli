@@ -19,5 +19,5 @@
     "types": ["vitest/globals"]
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "test"]
+  "exclude": ["node_modules", "dist", "test", "src/builtin-skills/superpowers/**/*.ts"]
 }

@@ -110,7 +110,6 @@ digraph brainstorming {
 
 - Write the validated design (spec) to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
   - (User preferences for spec location override this default)
-- **Use the spec template:** `_shared/spec-template.md` — follow its structure for consistency
 - Use elements-of-style:writing-clearly-and-concisely skill if available
 - Commit the design document to git
 

@@ -49,9 +49,6 @@ This structure informs the task decomposition. Each task should produce self-con
 ```markdown
 # [Feature Name] Implementation Plan
 
-> **Spec**: docs/superpowers/specs/YYYY-MM-DD-<feature>-design.md
-> **Spec Status**: Approved
-
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** [One sentence describing what this builds]
@@ -62,11 +59,6 @@ This structure informs the task decomposition. Each task should produce self-con
 
 ---
 ```
-
-**Spec link is REQUIRED** — it enables:
-- Spec Reviewer to automatically locate the spec
-- Traceability between spec and plan
-- Plan validation against spec requirements
 
 ## Task Structure
 
