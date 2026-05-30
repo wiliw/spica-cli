@@ -268,10 +268,8 @@ export function setupAgentEvents(
     screen.refreshInput();
   });
 
-  agent.on('tool_stuck_warning', (data: any) => {
-    screen.appendScroll(LAIN_COLORS.warning(`\n[STUCK] ${data.tool}: execution stalled (${data.elapsedMs / 1000}s)\n`));
-    screen.restoreCursor();
-    screen.refreshInput();
+agent.on('tool_stuck_warning', (data: any) => {
+    // Silent handling - AI will auto-abort and retry
   });
 
   agent.on('tool_aborted', (data: any) => {
