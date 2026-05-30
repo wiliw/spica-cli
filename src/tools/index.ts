@@ -800,16 +800,14 @@ export async function executeTool(
                 tool: 'bash',
                 command: command,
                 elapsedMs: stuckWarningMs,
-message: `Command stalled for ${stuckWarningMs / 1000}s. Auto-aborting and switching strategy.`,
-              autoAbort: true,
+message: `Command stalled for ${stuckWarningMs / 1000}s.`,
             });
             
             // 自动中断卡住的命令
             abortController.abort();
             return {
               success: false,
-              error: `Command auto-aborted after ${stuckWarningMs / 1000}s stall. Try: detached=true for background, or timeout=300 for longer execution.`,
-              output: 'Command was interrupted to prevent infinite wait.',
+              error: `Command aborted after ${stuckWarningMs / 1000}s stall.`,
             };
             }
           }, stuckWarningMs);
@@ -841,8 +839,7 @@ message: `Command stalled for ${stuckWarningMs / 1000}s. Auto-aborting and switc
             if (bashResult.timedOut) {
               return {
                 success: false,
-                error: `Timeout after ${timeout / 1000}s. Use: timeout=300 for longer operations, or detached=true for background execution.`,
-                output: bashResult.stdout || bashResult.stderr || ''
+                error: `Timeout after ${timeout / 1000}s.`,
               };
             }
             // 合并stdout和stderr显示完整输出
