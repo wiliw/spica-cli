@@ -791,24 +791,12 @@ export async function executeTool(
             }
           }
 
-          // 设置卡住警告定时器
+// 设置卡住警告定时器 - 触发自动中断和重试
           let stuckWarningSent = false;
           let stuckWarningTimer: NodeJS.Timeout | null = setTimeout(() => {
-            if (!stuckWarningSent && eventCallback) {
+            if (!stuckWarningSent) {
               stuckWarningSent = true;
-              eventCallback('tool_stuck_warning', {
-                tool: 'bash',
-                command: command,
-                elapsedMs: stuckWarningMs,
-message: `Command stalled for ${stuckWarningMs / 1000}s.`,
-            });
-            
-            // 自动中断卡住的命令
-            abortController.abort();
-            return {
-              success: false,
-              error: `Command aborted after ${stuckWarningMs / 1000}s stall.`,
-            };
+              abortController.abort();
             }
           }, stuckWarningMs);
 
@@ -832,7 +820,7 @@ message: `Command stalled for ${stuckWarningMs / 1000}s.`,
             if (abortController.signal.aborted) {
               return {
                 success: false,
-                error: `Tool execution aborted (stuck or interrupted). Command: ${command.slice(0, 50)}...`,
+                error: `Command aborted after ${stuckWarningMs / 1000}s stall. Timeout exceeded.`,
               };
             }
             // 检查是否超时

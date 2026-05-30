@@ -269,7 +269,7 @@ export function setupAgentEvents(
   });
 
 agent.on('tool_stuck_warning', (data: any) => {
-    // Silent handling - AI will auto-abort and retry
+    screen.appendScroll(LAIN_COLORS.warning(`\n[STUCK] ${data.tool}: stalled ${data.elapsedMs / 1000}s. Auto-aborting and retrying with alternative strategy...\n`));
   });
 
   agent.on('tool_aborted', (data: any) => {
