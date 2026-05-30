@@ -1,19 +1,17 @@
-# LLM Provider Configuration
+# spica-cli 提供商配置
 
 ## 支持的 Provider
 
 spica-cli 使用 **OpenAI API 兼容格式**，支持所有第三方模型。
 
-### Builtin Providers
+### 内置 Providers
 
 | Provider | Base URL | 描述 |
 |----------|----------|------|
 | **openai** | `https://api.openai.com/v1` | OpenAI GPT models (GPT-4, GPT-3.5) |
 | **anthropic** | `https://api.anthropic.com/v1` | Claude models (via OpenAI-compatible) |
 | **together** | `https://api.together.xyz/v1` | 开源模型 |
-| **replicate** | `https://api.replicate.com/v1` | 各种模型 |
 | **groq** | `https://api.groq.com/openai/v1` | 快速推理 |
-| **azure** | (自定义) | Azure OpenAI Service |
 | **local** | `http://localhost:8000/v1` | 本地模型 |
 | **custom** | (自定义) | 任何 OpenAI-compatible endpoint |
 
@@ -25,42 +23,42 @@ spica-cli 使用 **OpenAI API 兼容格式**，支持所有第三方模型。
 
 ```bash
 # OpenAI
-spica provider set openai sk-xxx...
+spica providers set openai sk-xxx...
 
 # Anthropic (via OpenAI-compatible)
-spica provider set anthropic sk-ant-xxx...
+spica providers set anthropic sk-ant-xxx...
 
 # Together AI
-spica provider set together xxx... -m llama-3-70b
+spica providers set together xxx... -m llama-3-70b
 
 # Groq
-spica provider set groq gsk_xxx... -m llama-3-70b
+spica providers set groq gsk_xxx... -m llama-3-70b
 
 # 本地模型
-spica provider set local dummy-key -b http://localhost:8000/v1 -m llama-3
+spica providers set local dummy-key -b http://localhost:8000/v1 -m llama-3
 
 # 自定义服务
-spica provider set custom your-key -b https://your-api.com/v1 -m your-model
+spica providers set custom your-key -b https://your-api.com/v1 -m your-model
 ```
 
 ### 2. 设置默认 Provider
 
 ```bash
 # 设置默认
-spica provider default openai
+spica providers default openai
 
 # 或
-spica provider default together
+spica providers default together
 ```
 
 ### 3. 查看 Provider
 
 ```bash
 # 列出所有配置的 provider
-spica provider list
+spica providers
 
 # 显示详细信息
-spica provider show openai
+spica providers show openai
 ```
 
 ---
@@ -71,27 +69,27 @@ spica provider show openai
 
 ```bash
 # 使用默认 provider
-spica mvp "build file classifier"
+spica run "build file classifier"
 ```
 
 ### 指定 Provider
 
 ```bash
 # 使用特定 provider
-spica mvp "build file classifier" --provider together
+spica run "build file classifier" -p together
 
 # 使用本地模型
-spica cycle "add feature" --provider local
+spica run "add feature" -p local
 
 # 使用 Groq（快速）
-spica cycle "quick fix" --provider groq
+spica run "quick fix" -p groq
 ```
 
 ---
 
 ## 配置示例
 
-**~/.spica/config.json:**
+**~/.spica/settings.json:**
 
 ```json
 {
@@ -133,12 +131,12 @@ spica cycle "quick fix" --provider groq
 llama-server -m llama-3-8b.Q4_K_M.gguf --port 8000
 
 # 配置 spica
-spica provider set local dummy-key \
+spica providers set local dummy-key \
   -b http://localhost:8000/v1 \
   -m llama-3-8b
 
 # 使用
-spica mvp "build app" --provider local
+spica run "build app" -p local
 ```
 
 ### vLLM
@@ -148,7 +146,7 @@ spica mvp "build app" --provider local
 python -m vllm.entrypoints.openai.api_server --model llama-3-8b
 
 # 配置 spica
-spica provider set local dummy-key \
+spica providers set local dummy-key \
   -b http://localhost:8000/v1 \
   -m llama-3-8b
 ```
@@ -160,7 +158,7 @@ spica provider set local dummy-key \
 ollama serve
 
 # 配置 spica
-spica provider set local dummy-key \
+spica providers set local dummy-key \
   -b http://localhost:11434/v1 \
   -m llama3
 ```
@@ -211,15 +209,15 @@ tools: [
 
 ```bash
 # 一键配置多个 provider
-spica provider set openai sk-xxx...
-spica provider set together xxx... -m llama-3-70b
-spica provider set local dummy-key -b http://localhost:8000/v1 -m llama-3
+spica providers set openai sk-xxx...
+spica providers set together xxx... -m llama-3-70b
+spica providers set local dummy-key -b http://localhost:8000/v1 -m llama-3
 
 # 设置默认
-spica provider default openai
+spica providers default openai
 
 # 查看配置
-spica provider list
+spica providers
 ```
 
 ---
@@ -227,7 +225,7 @@ spica provider list
 ## 核心优势
 
 ✅ **统一 API**: OpenAI API format，无需学习不同 API
-✅ **多 Provider**: 支持 8+ builtin + 自定义
+✅ **多 Provider**: 支持 6 个 builtin + 自定义
 ✅ **灵活切换**: 命令行指定或配置默认
 ✅ **Function Calling**: 所有 provider 支持
 ✅ **本地模型**: 完整支持 llama.cpp/vLLM/Ollama

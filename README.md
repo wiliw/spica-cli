@@ -34,13 +34,15 @@ spica --continue
 ## 核心特性
 
 - ✅ **持续对话** - 多轮交互，自动保存历史
-- ✅ **33种工具** - 文件/Shell/Git/GitHub/Web/搜索
+- ✅ **24种工具** - 文件/Shell/Git/GitHub/Web/搜索
 - ✅ **Skills系统** - 自定义命令模板
 - ✅ **MCP协议** - 连接外部工具服务器
 - ✅ **Hooks系统** - 安全拦截和日志记录
 - ✅ **Git Checkpoint** - 自动保存，错误恢复
 - ✅ **会话持久化** - 断点续传，压缩优化
-- ✅ **权限控制** - 危险操作检测
+- ✅ **权限控制** - 安全拦截和确认
+- ✅ **Hooks 系统** - Pre/Post 工具拦截
+- ✅ **MCP 协议** - 外部工具服务器
 - ✅ **多提供商** - OpenAI/Anthropic/Together/Groq/本地模型
 
 ---
@@ -53,9 +55,10 @@ spica --continue
 |------|------|
 | `spica` | 启动交互模式 |
 | `spica run <request>` | 单次执行 |
-| `spica -c/--continue` | 恢复上次会话 |
+| `spica -f/--fresh` | 清空历史启动 |
 | `spica -p/--provider <name>` | 使用指定提供商 |
 | `spica --version` | 显示版本 |
+| `spica --no-tui` | 非交互模式 |
 
 ### 管理命令
 
@@ -79,16 +82,16 @@ spica --continue
 `glob` `grep`
 
 ### Shell & Git
-`bash` `git_status` `git_diff` `git_log` `git_add` `git_commit` `git_branch` `git_checkout`
+`bash` `git`
 
 ### GitHub
-`gh_pr_view` `gh_issue_list` `gh_issue_view` `gh_repo_view` `gh_run_list`
+`gh`
 
 ### 网络
 `web_search` `web_fetch`
 
 ### 其他
-`question` `todo_write` `task` `workspace` `checkpoint_restore` `lint` `test`
+`question` `todo_write` `todo_read` `task` `workspace` `lint` `test`
 
 ---
 
@@ -100,8 +103,8 @@ spica --continue
 | Anthropic | `api.anthropic.com/v1` | `claude-3-opus` |
 | Together AI | `api.together.xyz/v1` | `llama-3-70b` |
 | Groq | `api.groq.com/openai/v1` | `llama-3-70b` |
-| Replicate | `api.replicate.com/v1` | `llama-3` |
 | Local | `localhost:8000/v1` | `llama-3` |
+| Custom | 自定义 | `gpt-4` |
 
 ---
 
@@ -111,14 +114,12 @@ spica --continue
 
 ```
 ~/.spica/
-├── config.json    # API配置
-├── skills.json    # Skills定义
-├── mcp.json       # MCP服务器
-├── hooks.json     # Hooks规则
+├── settings.json  # 统一配置（providers, mcp, skills, hooks）
 
 <project>/.spica/
 ├── session.json   # 会话历史
-├── state.json     # 项目状态
+├── skills.json    # 项目 Skills（可选）
+├── hooks.json     # 项目 Hooks（可选）
 ```
 
 ### CLI配置
@@ -128,10 +129,10 @@ spica --continue
 spica providers set openai sk-xxx...
 
 # 设置模型
-spica providers set openai model gpt-4-turbo
+spica providers set openai -m gpt-4-turbo
 
 # 设置API地址
-spica providers set openai baseUrl https://api.openai.com/v1
+spica providers set openai -b https://api.openai.com/v1
 
 # 设置默认提供商
 spica providers default openai
@@ -154,13 +155,18 @@ export OPENAI_BASE_URL=https://api.openai.com/v1
 | 指令 | 说明 |
 |------|------|
 | `quit` / `exit` | 退出 |
-| `clear` | 清空历史 |
-| `save` | 保存会话 |
+| `clear` / `reset` | 清空历史 |
 | `help` | 显示帮助 |
-| `/bypass` | 自动批准操作 |
-| `/strict` | 请求权限确认 |
+| `/bypass` | 自动批准模式 |
+| `/strict` | 权限请求模式 |
 | `/status` | 显示状态 |
-| `/skill_name` | 调用skill |
+| `/history` | 查看历史消息 |
+| `/compact` | 压缩上下文 |
+| `/init` | 分析代码库生成 AGENTS.md |
+| `/queue` | 显示输入队列 |
+| `/undo` | 撤回排队输入 |
+| `/skills` | 列出已安装 skills |
+| `/skill_name [args]` | 调用指定 skill |
 
 ---
 
@@ -169,7 +175,7 @@ export OPENAI_BASE_URL=https://api.openai.com/v1
 自定义命令模板：
 
 ```json
-// ~/.spica/skills.json
+// ~/.spica/settings.json 的 skills 字段
 {
   "skills": {
     "review": {
@@ -190,21 +196,23 @@ export OPENAI_BASE_URL=https://api.openai.com/v1
 连接外部工具服务器：
 
 ```json
-// ~/.spica/mcp.json
+// ~/.spica/settings.json 的 mcp.servers 字段
 {
-  "servers": [
-    {
-      "name": "filesystem",
-      "command": "npx",
-      "args": ["-y", "@anthropic-ai/mcp-server-filesystem", "/path"]
-    },
-    {
-      "name": "postgres",
-      "command": "npx",
-      "args": ["-y", "@anthropic-ai/mcp-server-postgres"],
-      "env": { "POSTGRES_URL": "postgres://localhost/db" }
-    }
-  ]
+  "mcp": {
+    "servers": [
+      {
+        "name": "filesystem",
+        "command": "npx",
+        "args": ["-y", "@anthropic-ai/mcp-server-filesystem", "/path"]
+      },
+      {
+        "name": "postgres",
+        "command": "npx",
+        "args": ["-y", "@anthropic-ai/mcp-server-postgres"],
+        "env": { "POSTGRES_URL": "postgres://localhost/db" }
+      }
+    ]
+  }
 }
 ```
 
@@ -215,7 +223,7 @@ export OPENAI_BASE_URL=https://api.openai.com/v1
 安全拦截：
 
 ```json
-// ~/.spica/hooks.json
+// ~/.spica/settings.json 的 hooks 字段
 {
   "hooks": {
     "PreToolUse": [
@@ -258,16 +266,19 @@ spica providers set local dummy -b http://localhost:8000/v1 -m llama-3
 | [STORAGE.md](docs/STORAGE.md) | 存储位置详解 |
 | [providers.md](docs/providers.md) | 提供商说明 |
 | [ENV_VARS.md](docs/ENV_VARS.md) | 环境变量 |
+| [SECURITY.md](docs/SECURITY.md) | 安全说明 |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构文档 |
 
 ---
 
 ## 开发
 
 ```bash
-npm run dev      # 开发模式运行
+npm run dev      # 开发模式运行 (tsx)
 npm run build    # 构建CLI
-npm test         # 运行测试
+npm test         # 运行测试 (vitest watch)
 npm run test:run # 单次测试
+npx tsc --noEmit # 类型检查
 ```
 
 ---

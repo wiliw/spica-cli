@@ -28,10 +28,7 @@ spica providers default openai
 
 | 文件 | 位置 | 用途 |
 |------|------|------|
-| `config.json` | `~/.spica/config.json` | API提供商配置 |
-| `skills.json` | `~/.spica/skills.json` | Skills定义 |
-| `mcp.json` | `~/.spica/mcp.json` | MCP服务器配置 |
-| `hooks.json` | `~/.spica/hooks.json` | Hooks规则（可选） |
+| `settings.json` | `~/.spica/settings.json` | 统一配置（providers, mcp, skills, hooks） |
 
 ### 项目配置
 
@@ -67,7 +64,7 @@ spica providers default <name>
 
 ### 配置文件格式
 
-`~/.spica/config.json`:
+`~/.spica/settings.json`:
 
 ```json
 {
@@ -104,8 +101,6 @@ spica providers default <name>
 | anthropic | `https://api.anthropic.com/v1` | `claude-3-opus` |
 | together | `https://api.together.xyz/v1` | `llama-3-70b` |
 | groq | `https://api.groq.com/openai/v1` | `llama-3-70b` |
-| replicate | `https://api.replicate.com/v1` | `llama-3` |
-| azure | (需手动设置) | `gpt-4` |
 | local | `http://localhost:8000/v1` | `llama-3` |
 | custom | (需手动设置) | `gpt-4` |
 
@@ -129,7 +124,7 @@ export SPICA_LOCAL_BASE_URL=http://localhost:8000/v1
 
 ### 配置位置
 
-- 全局: `~/.spica/skills.json`
+- 全局: `~/.spica/settings.json` 的 `skills` 字段
 - 项目: `.spica/skills.json`（优先级更高）
 
 ### 配置格式
@@ -181,7 +176,7 @@ spica skills uninstall <name>
 
 ### 配置位置
 
-`~/.spica/mcp.json`
+`~/.spica/settings.json` 的 `mcp.servers` 字段
 
 ### 配置格式
 
@@ -241,7 +236,7 @@ spica mcp init
 
 ### 配置位置
 
-- 全局: `~/.spica/hooks.json`
+- 全局: `~/.spica/settings.json` 的 `hooks` 字段
 - 项目: `.spica/hooks.json`（合并生效）
 
 ### 配置格式
@@ -382,9 +377,7 @@ spica providers set local dummy \
 
 ```bash
 chmod 700 ~/.spica/
-chmod 600 ~/.spica/config.json
-chmod 600 ~/.spica/skills.json
-chmod 600 ~/.spica/mcp.json
+chmod 600 ~/.spica/settings.json
 ```
 
 ### Git忽略
@@ -410,7 +403,7 @@ spica providers
 
 ### Q: 配置文件在哪里？
 
-- 全局: `~/.spica/`
+- 全局: `~/.spica/settings.json`
 - 项目: `.spica/`
 
 ### Q: 如何切换提供商？
@@ -426,7 +419,10 @@ spica providers default together
 ### Q: 如何清空配置？
 
 ```bash
+# 清空全局配置
 rm -rf ~/.spica/
+# 清空项目配置
+rm -rf .spica/
 ```
 
 ---

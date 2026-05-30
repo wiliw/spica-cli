@@ -15,7 +15,7 @@ export OPENAI_BASE_URL=https://api.together.xyz/v1
 export OPENAI_MODEL=meta-llama/Llama-3-70b-chat-hf
 
 # 运行
-./bin/spica mvp "build hello world"
+spica run "build hello world"
 ```
 
 ---
@@ -44,7 +44,7 @@ export OPENAI_API_KEY=your-together-key
 export OPENAI_BASE_URL=https://api.together.xyz/v1
 export OPENAI_MODEL=meta-llama/Llama-3-70b-chat-hf
 
-./bin/spica mvp "build CLI tool"
+spica run "build CLI tool"
 ```
 
 ### Groq
@@ -54,7 +54,7 @@ export OPENAI_API_KEY=gsk-your-groq-key
 export OPENAI_BASE_URL=https://api.groq.com/openai/v1
 export OPENAI_MODEL=llama-3-70b
 
-./bin/spica cycle "fix bug"
+spica run "fix bug"
 ```
 
 ### 本地模型（llama.cpp）
@@ -68,7 +68,7 @@ export OPENAI_API_KEY=dummy
 export OPENAI_BASE_URL=http://localhost:8000/v1
 export OPENAI_MODEL=llama-3-8b
 
-./bin/spica mvp "build app"
+spica run "build app"
 ```
 
 ### OpenAI（默认）
@@ -77,7 +77,7 @@ export OPENAI_MODEL=llama-3-8b
 export OPENAI_API_KEY=sk-proj-xxx...
 # Base URL 和 Model 会自动使用默认值
 
-./bin/spica mvp "build app"
+spica run "build app"
 ```
 
 ---
@@ -87,12 +87,12 @@ export OPENAI_API_KEY=sk-proj-xxx...
 如果不想每次设置环境变量：
 
 ```bash
-./bin/spica providers set custom YOUR_KEY \
+spica providers set custom YOUR_KEY \
   -b https://api.together.xyz/v1 \
   -m llama-3-70b
 
 # 使用
-./bin/spica mvp "build app"
+spica run "build app"
 ```
 
 ---
@@ -135,7 +135,7 @@ export OPENAI_BASE_URL=https://api.together.xyz/v1
 export OPENAI_MODEL=meta-llama/Llama-3-70b-chat-hf
 
 cd ~/development/spica/spica-cli
-./bin/spica mvp "build hello world CLI"
+spica run "build hello world CLI"
 ```
 
 **场景 2：本地模型完全隐私**
@@ -148,7 +148,7 @@ export OPENAI_API_KEY=dummy
 export OPENAI_BASE_URL=http://localhost:11434/v1
 export OPENAI_MODEL=llama3
 
-./bin/spica mvp "build private app"
+spica run "build private app"
 ```
 
 **场景 3：快速推理（Groq）**
@@ -158,7 +158,7 @@ export OPENAI_API_KEY=gsk_xxx...
 export OPENAI_BASE_URL=https://api.groq.com/openai/v1
 export OPENAI_MODEL=llama-3-70b
 
-./bin/spica cycle "quick fix"  # Groq 超快
+spica run "quick fix"  # Groq 超快
 ```
 
 ---
@@ -186,5 +186,5 @@ export OPENAI_BASE_URL=YOUR_SERVICE_URL
 export OPENAI_MODEL=YOUR_MODEL_NAME
 
 cd ~/development/spica/spica-cli
-./bin/spica mvp "build hello world CLI"
+spica run "build hello world CLI"
 ```

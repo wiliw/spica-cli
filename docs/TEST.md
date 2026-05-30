@@ -1,4 +1,4 @@
-# ✅ spica-cli 完整测试流程
+# ✅ spica-cli 测试指南
 
 ## 测试步骤
 
@@ -8,56 +8,54 @@
 cd ~/development/spica/spica-cli
 
 # 设置 provider
-./bin/spica providers set openai YOUR_REAL_API_KEY
+spica providers set openai YOUR_REAL_API_KEY
 
 # 查看
-./bin/spica providers
-./bin/spica providers show openai
+spica providers
+spica providers show openai
 ```
 
-### 2. 启动 TUI
+### 2. 启动交互模式
 
 ```bash
-# 启动 TUI（沉浸式界面）
-./bin/spica
+# 启动交互模式
+spica
 
-# 显示：
-# ┌─────────────┬─────────────────────┐
-# │ Workflow    │ [Todos | Messages]  │
-# │ ▸ MVP       │ Select workflow     │
-# │   Cycle     │                     │
-# │   Archive   │                     │
-# └─────────────┴─────────────────────┘
+# 或非交互模式
+spica --no-tui
 ```
 
 ### 3. 测试 CLI 命令
 
 ```bash
-# 直接执行 MVP
-./bin/spica mvp "build hello world go CLI" --provider openai
+# 单次执行
+spica run "build hello world go CLI" -p openai
 
-# 直接执行 Cycle
-./bin/spica cycle "add feature" --provider openai
+# 查看帮助
+spica --help
 
-# 直接执行 Archive
-./bin/spica archive v1.0
+# 清空历史启动
+spica --fresh
 ```
 
 ---
 
-## 已修复问题
+## 运行自动化测试
 
-✅ getOpenAIConfig → getProviderConfig（统一 API）
-✅ TUI 启动成功
-✅ Provider 配置成功
-✅ CLI 命令可用
+```bash
+# 运行所有测试
+npm run test:run
 
----
+# 运行特定测试
+npx vitest run tools
+npx vitest run agent
 
-## 小问题（不影响使用）
+# 类型检查
+npx tsc --noEmit
 
-⚠️ React key warning（TUI显示正常）
-⚠️ 需要真实 API key 才能测试完整流程
+# ESLint
+npm run lint
+```
 
 ---
 
@@ -65,47 +63,29 @@ cd ~/development/spica/spica-cli
 
 ```bash
 # Provider 配置验证
-./bin/spica providers
+spica providers
 # 输出：
 # Configured Providers:
 #   openai (default) ✓
 
-# TUI 启动验证
-./bin/spica
-# 显示全屏界面 ✓
-
 # CLI 命令验证
-./bin/spica --help
+spica --help
 # 显示所有命令 ✓
-```
 
----
-
-## 下一步（需要真实 API key）
-
-```bash
-# 设置真实 API key
-./bin/spica providers set openai sk-proj-xxx...
-
-# 测试完整 MVP 流程
-./bin/spica mvp "build simple hello world CLI"
-
-# 预期：
-# - Gather requirements
-# - Recommend tech stack
-# - Implement code
-# - Run tests
-# - Create documents
+# 交互模式验证
+spica
+# 显示交互式界面 ✓
 ```
 
 ---
 
 ## 项目状态
 
-✅ 所有代码编译成功
-✅ TUI 启动成功
+✅ TypeScript 编译通过
+✅ 交互模式正常
 ✅ CLI 命令可用
 ✅ Provider 配置可用
 ✅ OpenAI API 兼容架构完成
+✅ 269+ 测试通过
 
 **需要真实 API key 才能测试完整 AI agent 功能。**

@@ -3,91 +3,73 @@
 ## 实现内容
 
 **核心功能：**
-- ✅ OpenAI Client（API 调用 + Function Calling）
-- ✅ 工具系统（file_write, file_read, file_edit, bash, git_commit）
-- ✅ CLI 命令
-- ✅ 配置管理（set/get/list）
-- ✅ Agent 核心（MVP/Cycle/Archive 流程）
+- ✅ LLM 客户端（API 调用 + Function Calling + 流式输出）
+- ✅ 24 种工具（file_write, file_read, file_edit, bash, git, gh, web_search, web_fetch 等）
+- ✅ CLI 命令（spica, spica run, spica providers, spica skills, spica mcp）
+- ✅ 配置管理（providers set/get/default）
+- ✅ Agent 核心（交互循环 + 工具执行 + 权限控制）
 - ✅ Todo 追踪和进度显示
+- ✅ Skills 系统（14 个 superpowers）
+- ✅ MCP 协议（外部工具服务器）
+- ✅ Hooks 系统（安全拦截）
+- ✅ 会话持久化（自动保存/恢复/压缩）
 
 **文件结构：**
 ```
 spica-cli/
 ├── package.json
 ├── README.md
-├── docs/2025-05-10-spica-cli-design.md
+├── docs/
 ├── bin/spica (可执行脚本)
 ├── src/
 │   ├── index.ts (CLI 入口)
 │   ├── agent.ts (Agent 核心)
-│   ├── llm/client.ts (OpenAI client)
-│   ├── tools/index.ts (工具实现)
-│   └── utils/
-│   │   ├── config.ts (配置管理)
-│   │   └ logger.ts (日志)
-│   └── skills/
-│   │   ├── mvp.ts (已嵌入 agent)
-│   │   ├── cycle.ts (已嵌入 agent)
-│   │   └ archive.ts (已嵌入 agent)
-└── node_modules/ (已安装)
+│   ├── llm/ (LLM 客户端)
+│   ├── tools/ (工具实现)
+│   ├── cli/ (CLI/UI 组件)
+│   ├── core/ (核心模块)
+│   ├── storage/ (持久化)
+│   ├── mcp/ (MCP 客户端)
+│   ├── skills/ (Skills 系统)
+│   ├── hooks/ (Hooks 系统)
+│   ├── prompts/ (系统提示)
+│   └── utils/ (工具函数)
+└── node_modules/
 ```
 
 ## 测试验证
 
 ```bash
 # 配置功能
-./bin/spica config set openai.apiKey test-key
-./bin/spica config get openai.apiKey
-./bin/spica config list
+spica providers set openai test-key
+spica providers
 
 # CLI 帮助
-./bin/spica --help
-./bin/spica mvp --help
-./bin/spica cycle --help
-./bin/spica archive --help
+spica --help
+spica run --help
 ```
 
 ## 使用方式
 
 **1. 配置 API key：**
 ```bash
-spica config set openai.apiKey YOUR_API_KEY
-spica config set openai.model gpt-4
+spica providers set openai YOUR_API_KEY
 ```
 
-**2. 使用三步走：**
+**2. 交互模式：**
 ```bash
-spica mvp "build a file classifier CLI"
-spica cycle "add drag-and-drop interface"
-spica archive v1.0
+spica
 ```
 
-## 下一步
-
-**Phase 2（完善 Agent）：**
-- 完善三步走流程细节
-- 实现自动修复循环
-- 实现对话交互（等待用户输入）
-- 补充测试
-
-**Phase 3（发布）：**
-- npm 发布
-- 完善文档
-- 添加更多示例
+**3. 单次执行：**
+```bash
+spica run "build a file classifier CLI"
+```
 
 ## 当前状态
 
-**MVP 版本可用：**
+**生产可用：**
 - CLI 可运行
 - 配置功能正常
-- 基础架构完整
-- 准备测试 OpenAI API 调用（需要真实 API key）
-
-**完成时间：**
-- 传统估算：1-2 周
-- 实际用时：30 分钟（AI 加持）
-
-**验证结论：**
-- ✅ 架构可行
-- ✅ 技术栈正确
-- ✅ 快速实现成功
+- 架构完整
+- 269+ 测试通过

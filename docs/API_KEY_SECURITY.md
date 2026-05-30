@@ -1,5 +1,7 @@
 # API Key 安全分析
 
+> ⚠️ 本文档为安全分析参考，当前默认存储方案使用 `~/.spica/settings.json`# API Key 安全分析
+
 ## 当前方案的安全风险
 
 ---
@@ -64,7 +66,7 @@ export OPENAI_API_KEY=sk-proj-xxx...  # ← 永久暴露！
 
 **当前方案：**
 ```bash
-~/.spica/config.json (权限: 0600)
+~/.spica/settings.json (权限: 0600)
 ```
 
 **风险：**
@@ -83,14 +85,14 @@ export OPENAI_API_KEY=sk-proj-xxx...  # ← 永久暴露！
 
 a) **Root 用户可读**
 ```bash
-sudo cat ~/.spica/config.json  # ← root 可读
+sudo cat ~/.spica/settings.json  # ← root 可读
 ```
 
 b) **文件系统备份**
 ```bash
 # 备份软件可能备份此文件
 tar czf backup.tar.gz ~/.spica/
-# API key 进入备份文件（明文）
+# API key 进入备份文件（明文，settings.json 中）
 ```
 
 c) **文件系统快照**
@@ -213,7 +215,7 @@ await fs.chmod(CONFIG_FILE, 0o600);  // ← 权限保护（但不够）
 **实现：**
 ```bash
 # 加密配置文件
-~/.spica/config.json.enc
+~/.spica/settings.json.enc
 
 # 运行时解密（需要 master password）
 ./bin/spica mvp "build app"

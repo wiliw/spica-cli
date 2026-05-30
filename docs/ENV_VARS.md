@@ -1,5 +1,32 @@
 # 环境变量配置
 
+## 完整支持环境变量
+
+---
+
+## 环境变量列表
+
+### API Keys
+
+```bash
+# OpenAI
+export OPENAI_API_KEY=sk-proj-xxx...
+
+# Anthropic (via OpenAI-compatible)
+export ANTHROPIC_API_KEY=sk-ant-xxx...
+
+# Together AI
+export TOGETHER_API_KEY=xxx...
+
+# Groq
+export GROQ_API_KEY=gsk_xxx...
+
+# spica 特定环境变量（优先级高于通用变量）
+export SPICA_OPENAI_API_KEY=sk-xxx...
+export SPICA_TOGETHER_API_KEY=xxx...
+export SPICA_GROQ_API_KEY=xxx...
+```# 环境变量配置
+
 ## 完整支持环境变量（已修复）
 
 ---
@@ -129,7 +156,7 @@ export OPENAI_MODEL=your-model-name
 
 spica-cli 读取顺序：
 
-1. **配置文件** `~/.spica/config.json`（最高优先级）
+1. **配置文件** `~/.spica/settings.json`（最高优先级）
 2. **Provider 特定环境变量** `SPICA_{PROVIDER}_{VAR}`
 3. **通用环境变量** `OPENAI_{VAR}`, `TOGETHER_{VAR}`
 4. **Fallback 环境变量** `MODEL`

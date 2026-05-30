@@ -1,31 +1,28 @@
-# spica-cli MVP Complete
+# spica-cli 当前状态
 
 ## 功能实现
 
 **核心功能：**
-- ✅ 三步走工作流（mvp → cycle → archive）
-- ✅ OpenAI Client（Function Calling）
-- ✅ 工具系统（file, bash, git）
-- ✅ CLI 命令
-- ✅ 配置管理（CLI + TUI）
-- ✅ Agent 核心
-- ✅ Todo 进度追踪
+- ✅ 交互模式 + 单次执行 (`spica run`)
+- ✅ OpenAI API 兼容 (Function Calling + Streaming)
+- ✅ 24 种工具 (文件/Shell/Git/GitHub/Web/搜索等)
+- ✅ Skills 系统 (14 个 superpowers)
+- ✅ MCP 协议 (外部工具服务器)
+- ✅ Hooks 系统 (安全拦截)
+- ✅ 会话持久化和智能压缩
+- ✅ 输入队列 (处理时不阻塞)
 
-**配置 TUI：**
+**CLI 命令：**
+
 ```bash
-spica config tui
+spica              # 交互模式
+spica run "task"   # 单次执行
+spica --fresh      # 清空历史
+spica -p together  # 指定 provider
+spica providers    # 管理 API providers
+spica skills       # 管理 skills
+spica mcp          # 管理 MCP
 ```
-
-显示交互式界面：
-- ↑↓ 导航配置项
-- Enter/E 编辑
-- Esc/Q 退出
-- 实时保存
-
-**配置项：**
-- API Key
-- Model（gpt-4, gpt-3.5-turbo, etc）
-- Base URL（支持本地模型）
 
 ## 项目结构
 
@@ -37,62 +34,43 @@ spica-cli/
 ├── src/
 │   ├── index.ts (CLI)
 │   ├── agent.ts (核心)
-│   ├── llm/client.ts
-│   ├── tools/index.ts
-│   ├── utils/
-│   │   ├── config.ts
-│   │   ├── config-tui.tsx (TUI)
-│   │   └── logger.ts
-│   └── skills/ (嵌入 agent)
+│   ├── llm/ (LLM 客户端)
+│   ├── tools/ (工具实现)
+│   ├── cli/ (CLI/UI)
+│   │   ├── events.ts
+│   │   ├── status.ts
+│   │   ├── init.ts
+│   │   └── ui/ (screenManager, colors, queue, input)
+│   ├── core/ (EventBus, RuntimeState, ...)
+│   ├── storage/ (checkpoint, projectState)
+│   ├── mcp/ (MCP 客户端)
+│   ├── skills/ (Skills 系统)
+│   ├── hooks/ (Hooks 系统)
+│   ├── prompts/ (系统提示)
+│   └── utils/ (config, settings, session)
 ├── docs/
-│   ├── 2025-05-10-spica-cli-design.md
-│   ├── config-examples.md
-│   └── mvp-complete.md
 └── node_modules/
 ```
 
 ## 使用方式
 
-**1. 配置（TUI）：**
+**1. 配置：**
 ```bash
-spica config tui
+spica providers set openai sk-xxx...
 ```
 
-交互式界面：
-```
- ╭─────────────────────────╮
- │ spica config            │
- ╰─────────────────────────╯
-
- ↑↓ Navigate | Enter Edit | Esc Exit
-
- ▸ API Key:    sk-xxx
-   Model:      gpt-4
-   Base URL:   https://api.openai.com/v1
-```
-
-**2. 三步走：**
+**2. 交互模式：**
 ```bash
-spica mvp "build file classifier"
-spica cycle "add drag-drop"
-spica archive v1.0
+spica
 ```
 
-## 下一步计划
+**3. 单次执行：**
+```bash
+spica run "build file classifier"
+```
 
-**Phase 2（完善 Agent）：**
-- 主 TUI（三步走状态界面）
-- 对话交互（等待用户输入）
-- 自动修复循环完善
-- Iron Law 强制检查
+## 项目状态
 
-**Phase 3（发布）：**
-- npm 发布
-- 完善文档
-- 添加示例
-
-## 完成时间
-
-- 传统估算：1-2周
-- 实际用时：1小时
-- AI 加持效率：10-20倍
+✅ TypeScript 编译通过
+✅ 269+ 测试通过
+✅ 生产可用

@@ -1,4 +1,8 @@
-# AGENTS.md
+## Configuration Files
+- `~/.spica/settings.json` - API keys, provider settings, skills, hooks, MCP
+- `<project>/.spica/session.json` - Session history
+- `<project>/.spica/skills.json` - Project-specific skills (optional)
+- `<project>/.spica/hooks.json` - Project-specific hooks (optional)# AGENTS.md
 
 ## Project Overview
 - **Type**: CLI tool

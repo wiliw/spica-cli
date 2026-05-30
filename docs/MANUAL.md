@@ -58,16 +58,19 @@ spica run "任务"   # 单次执行
 | 命令 | 说明 |
 |------|------|
 | `spica` | 启动交互模式（自动加载历史） |
-| `spica --fresh` | 清空历史启动 |
+| `spica -f/--fresh` | 清空历史启动 |
 | `spica -p <name>` | 使用指定 provider |
+| `spica --no-tui` | 非交互模式（纯文本输出） |
 | `spica run <request>` | 单次执行任务 |
 
 ### Providers 管理
 
 ```bash
 spica providers                    # 列出所有 providers
-spica providers set <name> <key>   # 设置 provider
-spica providers add <name> <key> --url <url>  # 添加自定义 provider
+spica providers set <name> <key>   # 设置 provider API密钥
+spica providers set <name> model <model>  # 设置模型
+spica providers set <name> baseUrl <url>  # 设置 API 地址
+spica providers add <name> <key> --url <url> --model <model>  # 添加自定义 provider
 spica providers default <name>     # 设置默认 provider
 spica providers show <name>        # 显示 provider 详情
 spica providers remove <name>      # 删除 provider

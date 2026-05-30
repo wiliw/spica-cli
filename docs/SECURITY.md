@@ -5,7 +5,7 @@
 **当前方案：本地文件存储（明文）**
 
 ```
-~/.spica/config.json (权限: 0600)
+~/.spica/settings.json (权限: 0600)
 ```
 
 ---
@@ -55,7 +55,7 @@ export OPENAI_API_KEY=sk-xxx...
 
 ## 不要做
 
-❌ 不要提交 `~/.spica/config.json` 到 git
+❌ 不要提交 `~/.spica/settings.json` 到 git
 ❌ 不要在共享服务器存储真实 API key
 ❌ 不要在 CI/CD 中硬编码 API key
 
@@ -65,8 +65,9 @@ export OPENAI_API_KEY=sk-xxx...
 
 **立即处理：**
 1. 删除泄露的 API key
-2. 生成新 key
+2. 在提供商后台吊销旧 key，生成新 key
 3. 更新配置：`spica providers set openai NEW_KEY`
+4. 如果使用了环境变量，检查 shell history 并清理
 
 ---
 
@@ -74,7 +75,7 @@ export OPENAI_API_KEY=sk-xxx...
 
 | 工具 | 存储方式 | 安全性 |
 |------|----------|--------|
-| **spica-cli** | ~/.spica/config.json (0600) | 中等 |
+| **spica-cli** | ~/.spica/settings.json (0600) | 中等 |
 | **OpenCode** | 环境变量 | 高 |
 | **Cursor** | 本地加密 | 高 |
 | **Aider** | 环境变量 | 高 |
