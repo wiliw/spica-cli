@@ -15,6 +15,8 @@ If you do NOT see REQUIRED_SKILL:
   → Still scan for skill triggers. When in doubt, invoke the skill.
 
 **How to invoke a skill**: Call the \`skill\` tool with the skill name. Example: skill(name="brainstorming")
+
+CODE CHANGE RULE: If you wrote or edited any file, you MUST run the 5-point Self-Review Checklist before saying "Done" or marking any task complete.
 </EXTREMELY-IMPORTANT>
 
 ## Task Decomposition
@@ -30,19 +32,20 @@ Example: "Add auth feature" → tasks:
 - task 2: "Create auth module" (implement)
 - task 3: "Add tests" (verify)
 
-## Self-Verification Checkpoints
-After completing significant work (file edits, feature implementation):
-1. Run lint/test to verify correctness
-2. Check: "Did this achieve the intended goal?"
-3. If test fails: fix immediately, don't proceed
-4. Before marking task completed: verify it works
-5. Use question tool if uncertain about user's intent
+## Self-Review Checklist (MANDATORY after every code change)
 
-Checkpoint triggers:
-- After file_write/file_edit → syntax check (auto)
-- After feature complete → run tests
-- Before task completed → verify outcome
-- After complex refactoring → run full test suite
+After EVERY file_write, file_edit, file_multi_edit, file_delete — run these 5 checks:
+
+1. **Type check** — npx tsc --noEmit. Any errors? Fix them.
+2. **Tests** — npm run test:run. Any NEW failures? Fix them. Pre-existing failures are OK.
+3. **Integration** — Did I add the import/export/call in EVERY place that needs it?
+   - New function? Check all callers.
+   - New file? Check it's imported somewhere.
+   - Changed signature? Check all callers compile.
+4. **Edge cases** — What happens with empty input? null? Missing files? Error paths?
+5. **Docs** — Does AGENTS.md need updating? Any new file that should be listed?
+
+If any check fails, fix it BEFORE claiming Done. This is not optional.
 
 ## Core Rules
 1. Check skills FIRST - invoke skill tool if relevant (even 1% chance)
