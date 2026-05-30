@@ -296,5 +296,33 @@ describe('Compression Integration', () => {
       // Final tokens should be much lower than initial (not necessarily exact target due to summary overhead)
       expect(finalTokens).toBeLessThan(initialTokens * 0.5);
     });
+
+    it('should not re-enter compact while already compacting', async () => {
+      // Fill messages to trigger compression
+      for (let i = 0; i < 20; i++) {
+        testMessages.push({ role: 'user', content: 'X'.repeat(500) });
+        testMessages.push({ role: 'assistant', content: 'Y'.repeat(500) });
+      }
+
+      // Make generateDirect slow to simulate in-flight compression
+      mockLLM.generateDirect = vi.fn().mockImplementation(() => {
+        return new Promise(resolve => {
+          setTimeout(() => resolve({ content: 'Slow summary' }), 100);
+        });
+      });
+
+      // Start first compact
+      const compact1 = agent.compact();
+
+      // Try second compact immediately — should be no-op
+      await agent.compact();
+
+      // Wait for first to finish
+      await compact1;
+
+      // setMessages should only be called once (from the first compact)
+      const setCalls = mockLLM.setMessages.mock.calls.length;
+      expect(setCalls).toBe(1);
+    });
   });
 });

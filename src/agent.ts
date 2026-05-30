@@ -49,6 +49,7 @@ export class SpicaAgent extends EventEmitter {
   private _providerName?: string;
   private _initAbortController: AbortController | null = null;
   private _cachedSkills: SkillDefinition[] = [];
+  private _compacting = false;
 
   // 权限确认状态
   private permissionQueue: Array<{ reason: string; resolve: (approved: boolean) => void }> = [];
@@ -1097,10 +1098,15 @@ async init() {
 
   // 公开方法：手动压缩历史（使用 LLM 生成摘要）
   public async compact(): Promise<void> {
-    if (!this.llm) return;
-    const provider = this.llm.getProvider();
-    const targetTokens = Math.floor(provider.getContextWindow() * 0.3);  // 目标：30%（现代设计，留足够缓冲避免再次触发）
-    await this.compactToTarget(targetTokens);
+    if (!this.llm || this._compacting) return;
+    this._compacting = true;
+    try {
+      const provider = this.llm.getProvider();
+      const targetTokens = Math.floor(provider.getContextWindow() * 0.3);
+      await this.compactToTarget(targetTokens);
+    } finally {
+      this._compacting = false;
+    }
   }
 
   // 压缩到指定目标tokens以下
