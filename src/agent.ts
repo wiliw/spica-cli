@@ -652,7 +652,10 @@ async init() {
 
   setMessages(messages: ChatMessage[]) {
     if (this.llm) {
-      this.llm.setMessages(messages);
+      const cleanedMessages = messages.filter(m => 
+        m.role === 'user' || m.role === 'assistant' || m.role === 'system'
+      );
+      this.llm.setMessages(cleanedMessages);
     }
   }
 
@@ -975,15 +978,28 @@ async init() {
               'llm_continue'
             );
           } catch (llmError: any) {
-            // LLM调用失败（网络问题、API错误等），不要崩溃整个会话
+            const isRetryable = this.isRetryableError(llmError);
+            const suggestionText = isRetryable 
+              ? '网络或API临时错误（已重试10次），工具执行结果已保存。可尝试继续对话或重新发送请求。'
+              : `错误不可重试，需要用户处理: ${llmError.message}`;
+            
             this.emit('error_suggestion', {
               tool: 'llm_continue',
               error: llmError.message,
-              suggestion: '网络或API临时错误（已重试10次），工具执行结果已保存。可尝试继续对话或重新发送请求。'
+              suggestion: suggestionText
             });
-            // 返回已执行的工具结果摘要，让用户知道发生了什么
+            
+            if (this.llm) {
+              const allMessages = this.llm.getMessages();
+              const cleanedMessages = allMessages.filter(m => 
+                m.role === 'user' || m.role === 'assistant' || m.role === 'system'
+              );
+              this.llm.setMessages(cleanedMessages);
+            }
+            
             const resultsSummary = toolResults.map(t => `${t.name}: ${t.result.slice(0, 100)}`).join('\n');
-            return `工具执行完成，但LLM响应中断（已重试10次）。\n错误: ${llmError.message}\n已执行的操作:\n${resultsSummary}\n建议: 可以继续对话，之前的操作结果已保留。`;
+            const errorTypeText = isRetryable ? '网络或API临时错误' : 'API错误（请求格式问题）';
+            return `工具执行完成，但LLM响应中断。\n错误类型: ${errorTypeText}\n错误详情: ${llmError.message}\n已执行的操作:\n${resultsSummary}\n建议: ${isRetryable ? '可以继续对话，之前的操作结果已保留。' : '需要修复问题后重新开始会话。消息历史已清理。'}`;
           }
         }
       } else {
