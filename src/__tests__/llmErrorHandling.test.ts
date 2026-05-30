@@ -57,7 +57,7 @@ describe('LLM Error Handling', () => {
 
       const result = await resultPromise;
 
-      expect(result).toContain('LLM请求失败');
+      expect(result).toContain('LLM request failed');
       expect(result).toContain('Connection error');
     });
 
@@ -143,7 +143,7 @@ describe('LLM Error Handling', () => {
 
       const result = await resultPromise;
 
-      expect(result).toContain('LLM请求失败');
+      expect(result).toContain('LLM request failed');
       // Agent handles gracefully, doesn't crash
     });
   });
