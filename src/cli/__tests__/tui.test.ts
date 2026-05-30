@@ -1,6 +1,8 @@
 // TUI interaction tests
 import { computeDiff, formatDiff } from '../ui/diff';
 import { getRuntimeState, resetRuntimeState } from '../../core/RuntimeState';
+import { getScreenManager } from '../ui/screenManager';
+import fs from 'fs';
 
 describe('TUI Interaction Tests', () => {
   describe('Diff Display', () => {
@@ -93,6 +95,35 @@ describe('TUI Interaction Tests', () => {
       // Queue exists in src/cli/ui/queue.ts
       // Tests would cover add, mergePending, undoLast, getStatus
       expect(true).toBe(true);
+    });
+  });
+
+  describe('ScreenManager scroll cursor preservation', () => {
+    it('should not reset cursor to column 1 after refreshInputAndKeepCursor during streaming', () => {
+      const screen = getScreenManager();
+      const writes: string[] = [];
+      const orig = fs.writeSync;
+
+      // Intercept writes to fd 1
+      (fs as any).writeSync = (fd: number, data: string) => {
+        if (fd === 1) writes.push(data);
+      };
+
+      screen.state.scrollBottom = 10;
+      screen.state.cursorInScrollArea = true;
+      screen.setStreaming(true);
+      writes.length = 0;
+
+      screen.refreshInputAndKeepCursor();
+
+      fs.writeSync = orig;
+
+      // Bug: emits ESC[10;1H (column reset to 1), causing next appendScroll to overwrite
+      // Fix: uses DECSC/DECRC to preserve cursor column
+      const allWritesStr = writes.join('');
+      const hasColumn1Reset = allWritesStr.includes(`[${screen.state.scrollBottom};1H`);
+
+      expect(hasColumn1Reset).toBe(false);
     });
   });
 });
