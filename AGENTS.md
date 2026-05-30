@@ -1,23 +1,19 @@
-## Configuration Files
-- `~/.spica/settings.json` - API keys, provider settings, skills, hooks, MCP
-- `<project>/.spica/session.json` - Session history
-- `<project>/.spica/skills.json` - Project-specific skills (optional)
-- `<project>/.spica/hooks.json` - Project-specific hooks (optional)# AGENTS.md
+# AGENTS.md
 
 ## Project Overview
 - **Type**: CLI tool
-- **Purpose**: AI coding agent with multi-turn conversations, 24 tools, extensible skills system, and session persistence
+- **Purpose**: AI coding agent with multi-turn conversations, 24+ tools, extensible skills system, and session persistence
 - **Use case**: Developers who want an AI assistant to read/write/edit files, run shell commands, manage git, interact with GitHub, search web, and execute coding tasks
 
 ## Tech Stack
 - **Language**: TypeScript (ES2022, ESM modules)
 - **Runtime**: Node.js 18+
 - **Core dependencies**:
-  - `commander` - CLI framework
-  - `openai` - OpenAI API client (supports multiple providers)
-  - `node-pty` - PTY for interactive shell commands (requires native build tools)
-  - `@modelcontextprotocol/sdk` - MCP protocol support
-  - `execa` - Process execution
+  - `commander` — CLI framework
+  - `openai` — OpenAI API client (supports multiple providers)
+  - `node-pty` — PTY for interactive shell commands (requires native build tools)
+  - `@modelcontextprotocol/sdk` — MCP protocol support
+  - `execa` — Process execution
 - **Dev tools**: `tsx`, `vitest`, `typescript`
 
 ## Setup Requirements
@@ -29,29 +25,31 @@
 
 | Directory/File | Purpose |
 |----------------|---------|
-| `src/index.ts` | CLI entry point, command definitions, TUI setup (~1291 lines) |
-| `src/agent.ts` | Core SpicaAgent class, main orchestration (~1062 lines) |
+| `src/index.ts` | CLI entry point, command definitions, TUI setup, input loop |
+| `src/agent.ts` | Core SpicaAgent class — main orchestration, permission handling, event emission |
 | `src/core/` | EventBus, StateManager, ErrorHandler, SessionManager, LogManager, ProcessMonitor, RuntimeState |
-| `src/tools/index.ts` | 24 tool implementations (file, bash, git, web, etc.) (~1854 lines) |
+| `src/tools/index.ts` | 24 tool implementations (file, bash, git, web, etc.) + tool definitions |
 | `src/tools/subAgent.ts` | Parallel subagent task execution |
-| `src/llm/` | LLM client, providers (OpenAI, Anthropic, Local), rate limiter, token counter |
-| `src/cli/` | CLI components (TUI, events, status, colors, commands) |
-| `src/cli/ui/` | TUI components (screenManager, colors, queue, input) |
+| `src/llm/` | LLM client, FunctionCaller, RateLimiter, TokenCounter, provider implementations |
+| `src/llm/providers/` | OpenAI, Anthropic, OpenAICompatible, Local, BaseProvider |
+| `src/cli/` | CLI components: events, init, queueDrain, status, TUI |
+| `src/cli/ui/` | TUI components: screenManager, colors, diff, fixedBox, input, queue, stringWidth, tuiInput |
 | `src/mcp/` | MCP (Model Context Protocol) client integration |
-| `src/skills/` | Skills system for custom command templates |
-| `src/hooks/` | Hooks system for tool call interception |
-| `src/storage/` | Session and project state persistence |
+| `src/skills/` | Skills system — install, uninstall, list, parse, build prompts |
+| `src/hooks/` | Hooks system — Pre/Post tool call interception |
+| `src/storage/` | Project state and task persistence |
 | `src/prompts/` | System prompts for AI |
-| `src/utils/` | Config, session, settings utilities |
+| `src/utils/` | Config, session, settings, history, logger, projectConfig |
+| `src/external/` | Reserved for external integrations (currently empty) |
 | `src/builtin-skills/superpowers/` | 14 built-in superpowers skills |
 | `bin/spica` | CLI executable wrapper |
-| `docs/` | Documentation (MANUAL.md, CONFIGURATION.md, etc.) |
+| `docs/` | Documentation (MANUAL.md, CONFIGURATION.md, ARCHITECTURE.md, etc.) |
 
 ## Development Commands
-- **Dev**: `npm run dev` or `tsx src/index.ts`
-- **Build**: `npm run build` (creates bin/spica executable wrapper)
-- **Test**: `npm test` (vitest watch mode)
-- **Test run**: `npm run test:run` (single run) - 274 tests (269 passing, 5 failing in edge-case/session tests)
+- **Dev**: `npm run dev` (runs `tsx src/index.ts`)
+- **Build**: `npm run build` (creates `bin/spica` executable)
+- **Test (watch)**: `npm test` (vitest watch mode)
+- **Test (single run)**: `npm run test:run` — **279 tests, 275 passing, 4 failing** (pre-existing session truncation edge cases)
 - **Test single file**: `npx vitest run <file-pattern>`
 - **Type check**: `npx tsc --noEmit`
 - **Lint**: `npm run lint` (ESLint)
@@ -61,19 +59,20 @@
 ## Core Architecture
 
 ### Main Modules
-1. **SpicaAgent** (`src/agent.ts`) - Central orchestrator managing LLM client, tools, permissions, todos, and workflow
-2. **Tools System** (`src/tools/index.ts`) - 24 tools for file ops, shell, git, GitHub, web, etc.
-3. **LLM Client** (`src/llm/`) - OpenAI-compatible client with rate limiting, streaming, and function calling
-4. **CLI/TUI** (`src/cli/`) - Terminal UI with scroll regions, status bar, input handling
+1. **SpicaAgent** (`src/agent.ts`) — Central orchestrator managing LLM client, tools, permissions, todos, and workflow loop
+2. **Tools System** (`src/tools/index.ts`) — 24 tools for file ops, shell, git, GitHub, web, search; returns `{ success, output?, error?, diff?, syntaxErrors?, content? }`
+3. **LLM Client** (`src/llm/`) — OpenAI-compatible client with streaming, function calling, rate limiting, and multi-provider support
+4. **CLI/TUI** (`src/cli/`) — Terminal UI with scroll regions, status bar, input handling, queue management
 
 ### Data Flow
 User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution → Response → TUI output
 
 ### Key Design Patterns
-- **EventEmitter pattern**: Agent emits events (stream, tool_call, tool_result, etc.) for UI updates
-- **Plugin architecture**: Tools are self-contained, MCP allows external tool servers
+- **EventEmitter pattern**: Agent emits events (`stream`, `tool_call`, `tool_result`, etc.) consumed by TUI for updates
+- **Plugin architecture**: Tools are self-contained; MCP allows external tool servers
 - **Skills system**: User-defined prompt templates with restricted tool access
 - **Hooks system**: Pre/Post tool use interception for security/logging
+- **Queue auto-drain**: After processing completes, `autoDrainQueue()` in `src/cli/queueDrain.ts` checks for queued input and automatically processes it (no need to send an extra message)
 
 ### 24 Tools
 | Category | Tools |
@@ -94,17 +93,20 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
 - Prefer concise, readable code
 - TypeScript with `strict: true` but `noImplicitAny: false`
 - ESM modules with ES2022 target
-- Test files use vitest globals (describe, it, expect, beforeEach, etc.)
+- Test files use vitest globals (`describe`, `it`, `expect`, `beforeEach`, etc.)
+- ESLint: `prefer-const`, `no-var`, unused vars error (with `_` prefix ignore)
 
 ### Key Files to Understand
-- `src/index.ts` - All CLI commands and TUI setup (~1291 lines)
-- `src/tools/index.ts` - All tool implementations (~1854 lines)
-- `src/agent.ts` - Core agent logic with permission handling (~1062 lines)
-- `src/cli/ui/screenManager.ts` - TUI with dynamic layout
-- `src/prompts/system.ts` - System prompt with skill invocation rules
+- `src/index.ts` — All CLI commands and TUI setup
+- `src/tools/index.ts` — All tool implementations and TOOLS_DEFINITIONS
+- `src/agent.ts` — Core agent logic with permission handling
+- `src/cli/ui/screenManager.ts` — TUI with dynamic layout
+- `src/prompts/system.ts` — System prompt with skill invocation rules
+- `src/cli/queueDrain.ts` — Auto-drains queued input after processing completes
+- `src/utils/config.ts` — Provider configuration (BUILTIN_PROVIDERS)
 
 ### Common Patterns
-- Tools return `{ success: boolean, output?: string, error?: string, diff?: string, syntaxErrors?: string[], content?: string }`
+- Tool results: `{ success: boolean, output?: string, error?: string, diff?: string, syntaxErrors?: string[], content?: string }`
   - `output`: Short summary for TUI display
   - `content`: Full content for LLM processing (e.g., file contents)
 - Use `resolvePath()` for relative path resolution
@@ -113,14 +115,15 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
 - Session persistence in `.spica/session.json`
 
 ### Testing
-- Tests in `src/**/__tests__/` (23 test files, 274 tests, 269 passing)
-- 5 known failing tests: session truncation edge cases in `src/__tests__/edgeCases.test.ts` and `src/utils/__tests__/session.test.ts`
+- Tests in `src/**/__tests__/` (24 test files, 279 tests, 275 passing)
+- 4 known failing tests: session truncation edge cases in `src/__tests__/edgeCases.test.ts` and `src/utils/__tests__/session.test.ts`
 - Run `npm run test:run` for single execution
 - Key test files:
-  - `src/core/__tests__/EventBus.test.ts` - Event system tests
-  - `src/core/__tests__/SessionManager.test.ts` - Session persistence tests
-  - `src/hooks/__tests__/hooks.test.ts` - Hooks tests
-  - `src/skills/__tests__/skills.test.ts` - Skills tests
+  - `src/core/__tests__/EventBus.test.ts` — Event system tests
+  - `src/core/__tests__/SessionManager.test.ts` — Session persistence tests
+  - `src/hooks/__tests__/hooks.test.ts` — Hooks tests
+  - `src/skills/__tests__/skills.test.ts` — Skills tests
+  - `src/__tests__/queueDrain.test.ts` — Queue auto-drain tests
 
 ## Built-in Skills (14 superpowers + _shared templates)
 
@@ -150,10 +153,3 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
 | Together | llama-3-70b | Varies |
 | Groq | llama-3-70b | Varies |
 | Local | llama-3 | Varies |
-
-## Configuration Files
-- `~/.spica/config.json` - API keys and provider settings
-- `~/.spica/skills.json` - Custom skills
-- `~/.spica/mcp.json` - MCP server configurations
-- `~/.spica/hooks.json` - Hook rules
-- `<project>/.spica/` - Project-specific session and state
