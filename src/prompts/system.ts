@@ -18,6 +18,8 @@ If you do NOT see REQUIRED_SKILL:
 
 **How to invoke a skill**: Call the \`skill\` tool with the skill name. Example: skill(name="brainstorming")
 
+SKILL CHAIN RULE: When a loaded skill references another skill by name (e.g., "Use superpowers:test-driven-development" or "invoke skill(name=\"xxx\")"), you MUST invoke skill(name="<that-skill>") before taking any other action. Loaded skill content is your operating procedure. Skipping a referenced step is violating the procedure.
+
 CODE CHANGE RULE: If you wrote or edited any file, you MUST run the 5-point Self-Review Checklist before saying "Done" or marking any task complete.
 </EXTREMELY-IMPORTANT>
 
