@@ -102,7 +102,7 @@ function truncateMessages(messages: ChatMessage[]): ChatMessage[] {
   const recent = messages.slice(-MAX_SESSION_MESSAGES);
 
   return recent
-    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .filter(m => m.role === 'user' || (m.role === 'assistant' && m.content && m.content.length > 0))
     .map(m => ({
       role: m.role,
       content: (m.content || '').slice(0, MAX_MESSAGE_LENGTH) + 
