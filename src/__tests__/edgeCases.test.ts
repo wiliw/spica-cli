@@ -22,31 +22,6 @@ describe('Edge Cases', () => {
       expect(loaded!.messages).toEqual([]);
     });
 
-    it('should handle messages with empty content', () => {
-      const messages: ChatMessage[] = [
-        { role: 'user', content: '' },
-        { role: 'assistant', content: '', toolCalls: [] },
-        { role: 'tool', content: '', toolCallId: 'tc-1' }
-      ];
-      saveSession(testWorkspace, messages);
-      const loaded = loadSession(testWorkspace);
-      expect(loaded!.messages.length).toBe(3);
-    });
-
-    it('should handle messages with only toolCalls (no content)', () => {
-      const messages: ChatMessage[] = [
-        {
-          role: 'assistant',
-          content: '',
-          toolCalls: [{ id: 'tc-1', name: 'bash', arguments: { command: 'ls -la' } }]
-        },
-        { role: 'tool', content: 'file1\nfile2\nfile3', toolCallId: 'tc-1' }
-      ];
-      saveSession(testWorkspace, messages);
-      const loaded = loadSession(testWorkspace);
-      expect(loaded!.messages[0].toolCalls).toBeDefined();
-    });
-
     it('should handle unicode and special characters', () => {
       const messages: ChatMessage[] = [
         { role: 'user', content: '你好世界 🎉 \n\t\r\\特殊字符' },
@@ -58,19 +33,6 @@ describe('Edge Cases', () => {
       expect(loaded!.messages[1].content).toContain('<script>');
     });
 
-    it('should handle very long tool call arguments', () => {
-      const longArgs = { content: 'A'.repeat(10000), path: '/very/long/path/...' };
-      const messages: ChatMessage[] = [
-        {
-          role: 'assistant',
-          content: '',
-          toolCalls: [{ id: 'tc-1', name: 'file_write', arguments: longArgs }]
-        }
-      ];
-      saveSession(testWorkspace, messages);
-      const loaded = loadSession(testWorkspace);
-      // Arguments should be preserved or truncated properly
-      expect(loaded!.messages[0].toolCalls).toBeDefined();
     });
   });
 

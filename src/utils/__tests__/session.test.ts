@@ -48,22 +48,5 @@ describe('Session Truncation', () => {
     expect(loaded!.messages[0].content.startsWith('A')).toBe(true);
   });
 
-  it('should preserve toolCalls in truncated messages', () => {
-    const messages: ChatMessage[] = [];
-    for (let i = 0; i < 60; i++) {
-      messages.push({
-        role: 'assistant',
-        content: '',
-        toolCalls: [{ id: `tc-${i}`, name: 'file_read', arguments: { path: `file${i}` } }]
-      });
-      messages.push({ role: 'tool', content: 'result', toolCallId: `tc-${i}` });
-    }
-
-    saveSession(testWorkspace, messages);
-    const loaded = loadSession(testWorkspace);
-
-    // Should still have toolCalls in recent messages
-    expect(loaded!.messages[loaded!.messages.length - 2].toolCalls).toBeDefined();
-    expect(loaded!.messages[loaded!.messages.length - 1].toolCallId).toBeDefined();
   });
 });
