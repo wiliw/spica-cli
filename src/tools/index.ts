@@ -203,24 +203,20 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
-    name: 'bash',
-    description: 'Run shell command. For build/test/package ops. Use interactive=true for TUI apps that need real PTY with input/output. Use tty=true for one-shot TTY execution. Use detached=true to run in background. Use action=status/kill to manage detached sessions.',
+name: 'bash',
+    description: 'Run shell command. Auto-retries with detached=true if timeout/stuck.',
     parameters: {
       type: 'object' as const,
       properties: {
         command: { type: 'string', description: 'Command to execute' },
         timeout: { type: 'number', description: 'Timeout in seconds (default 120)' },
-        tty: { type: 'boolean', description: 'Provide TTY environment (one-shot, no input)' },
-        detached: { type: 'boolean', description: 'Run in background (tmux/screen), user can attach' },
-        interactive: { type: 'boolean', description: 'Enable real PTY interaction (AI can input/output)' },
-        inputs: { type: 'array', items: { type: 'string' }, description: 'Input sequence to send (for interactive mode). Use \x04 for Ctrl+D' },
-        expect: { type: 'array', items: { type: 'object' }, description: 'Wait for output pattern then input: [{ wait: "pattern" or "^regex$", input: "text" }] - use ^ for regex match' },
-        maxOutputLength: { type: 'number', description: 'Max output length in chars (default 50000, prevents memory overflow)' },
-        action: { type: 'string', enum: ['status', 'kill'], description: 'Action for detached session management' },
-        session: { type: 'string', description: 'Session ID for status/kill actions' },
-        inputFile: { type: 'string', description: 'Read inputs from file (for large inputs)' },
-        outputFile: { type: 'string', description: 'Write output to file (for large outputs)' },
+        detached: { type: 'boolean', description: 'Run in background (tmux/screen)' },
+        interactive: { type: 'boolean', description: 'Enable PTY interaction' },
+        maxOutputLength: { type: 'number', description: 'Max output chars (default 50000)' },
+        autoRetry: { type: 'boolean', description: 'Auto-retry with detached if stuck (default true)' },
       },
+      required: ['command'],
+    },
       required: ['command'],
     },
   },
@@ -688,16 +684,10 @@ export async function executeTool(
           return { success: false, error: 'Command is required' };
         }
         const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
-        const useTTY = safeArgs.tty === true;
         const detached = safeArgs.detached === true;
         const interactive = safeArgs.interactive === true;
-        let inputs = (safeArgs.inputs as string[]) || [];
-        const expect = (safeArgs.expect as Array<{ wait: string; input: string }>) || [];
+        const autoRetry = safeArgs.autoRetry !== false; // 默认true
         const maxOutputLength = (safeArgs.maxOutputLength as number) || 50000;
-        const action = safeArgs.action as string;
-        const session = safeArgs.session as string;
-        const inputFile = safeArgs.inputFile as string;
-        const outputFile = safeArgs.outputFile as string;
 
         // 卡住检测阈值（默认30秒，可通过 stuckWarning 参数调整）
         const stuckWarningMs = (safeArgs.stuckWarning as number) || 60000;
@@ -816,15 +806,18 @@ export async function executeTool(
               stuckWarningTimer = null;
             }
 
-            // 检查是否被中断（通过外部 abort signal）
-            if (abortController.signal.aborted) {
-              return {
-                success: false,
-                error: `Command aborted after ${stuckWarningMs / 1000}s stall. Timeout exceeded.`,
-              };
-            }
-            // 检查是否超时
-            if (bashResult.timedOut) {
+            // 检查是否超时或被中断
+            if (bashResult.timedOut || abortController.signal.aborted) {
+              // Auto-retry with detached if enabled and not already detached
+              if (autoRetry && !detached && !interactive) {
+                return {
+                  success: false,
+                  error: `Command timeout/stuck. Auto-retrying in background...`,
+                  autoRetry: true,
+                  retryCommand: command,
+                  retryMode: 'detached',
+                };
+              }
               return {
                 success: false,
                 error: `Timeout after ${timeout / 1000}s.`,
