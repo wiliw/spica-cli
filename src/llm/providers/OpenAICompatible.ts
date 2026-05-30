@@ -435,11 +435,16 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
 
   // 添加tool结果消息
   addToolMessage(toolCallId: string, result: string): void {
-    this.messages.push({
-      role: 'tool',
-      content: result,
-      toolCallId: toolCallId,
-    });
+    const exists = this.messages.some(m => 
+      m.role === 'tool' && m.toolCallId === toolCallId
+    );
+    if (!exists) {
+      this.messages.push({
+        role: 'tool',
+        content: result,
+        toolCallId: toolCallId,
+      });
+    }
   }
 
   // 添加用户消息（不立即生成）
