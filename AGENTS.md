@@ -49,11 +49,12 @@
 - **Dev**: `npm run dev` (runs `tsx src/index.ts`)
 - **Build**: `npm run build` (creates `bin/spica` executable)
 - **Test (watch)**: `npm test` (vitest watch mode)
-- **Test (single run)**: `npm run test:run` — **279 tests, 275 passing, 4 failing** (pre-existing session truncation edge cases)
+- **Test (single run)**: `npm run test:run` — **323 tests, 322 passing, 1 failing** (flaky ProcessMonitor ENOTEMPTY temp dir cleanup)
 - **Test single file**: `npx vitest run <file-pattern>`
 - **Type check**: `npx tsc --noEmit`
 - **Lint**: `npm run lint` (ESLint)
 - **Lint fix**: `npm run lint:fix`
+- **Lint strict**: `npm run lint:strict` (ESLint with --max-warnings 0)
 - **Global install**: `npm link` (after build)
 
 ## Core Architecture
@@ -115,15 +116,18 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
 - Session persistence in `.spica/session.json`
 
 ### Testing
-- Tests in `src/**/__tests__/` (24 test files, 279 tests, 275 passing)
-- 4 known failing tests: session truncation edge cases in `src/__tests__/edgeCases.test.ts` and `src/utils/__tests__/session.test.ts`
-- Run `npm run test:run` for single execution
+- Tests in `src/**/__tests__/` (26 test files, 323 tests, 322 passing)
+- 1 known flaky test: `ProcessMonitor.test.ts` — ENOTEMPTY on `/tmp/spica-test-processes` rmdir
+- Run `npm run test:run` for single execution, `npx vitest run <pattern>` for a single file
 - Key test files:
   - `src/core/__tests__/EventBus.test.ts` — Event system tests
   - `src/core/__tests__/SessionManager.test.ts` — Session persistence tests
   - `src/hooks/__tests__/hooks.test.ts` — Hooks tests
   - `src/skills/__tests__/skills.test.ts` — Skills tests
+  - `src/__tests__/compression.test.ts` — Context compression tests (12 tests)
   - `src/__tests__/queueDrain.test.ts` — Queue auto-drain tests
+  - `src/__tests__/agent.test.ts` — Core agent workflow tests
+  - `src/__tests__/tools.test.ts` — Tool implementation tests
 
 ## Built-in Skills (14 superpowers + _shared templates)
 
