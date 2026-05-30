@@ -240,22 +240,22 @@ describe('SpicaAgent', () => {
   });
 
   describe('generateErrorSuggestion', () => {
-    it('should suggest for ENOENT error', () => {
+it('should suggest for ENOENT error', () => {
       const suggestion = (agent as any).generateErrorSuggestion(
         'file_read',
-        'ENOENT: file not found',
+        'ENOENT: no such file',
         { path: '/missing/file' }
       );
-      expect(suggestion).toContain('不存在');
+      expect(suggestion).toContain('not found');
     });
 
     it('should suggest for EACCES error', () => {
       const suggestion = (agent as any).generateErrorSuggestion(
-        'file_write',
+        'file_read',
         'EACCES: permission denied',
         { path: '/protected/file' }
       );
-      expect(suggestion).toContain('权限');
+      expect(suggestion).toContain('Permission denied');
     });
 
     it('should suggest for command not found', () => {
@@ -264,7 +264,7 @@ describe('SpicaAgent', () => {
         'command not found: xyz',
         { command: 'xyz' }
       );
-      expect(suggestion).toContain('不存在');
+      expect(suggestion).toContain('not found');
     });
 
     it('should provide generic suggestion for unknown errors', () => {
@@ -273,7 +273,34 @@ describe('SpicaAgent', () => {
         'some error',
         {}
       );
-      expect(suggestion).toContain('失败');
+      expect(suggestion).toContain('failed');
+    });
+
+    it('should suggest for EACCES error', () => {
+      const suggestion = (agent as any).generateErrorSuggestion(
+        'file_write',
+        'EACCES: permission denied',
+        { path: '/protected/file' }
+      );
+      expect(suggestion).toContain('Permission denied');
+    });
+
+    it('should suggest for command not found', () => {
+      const suggestion = (agent as any).generateErrorSuggestion(
+        'bash',
+        'command not found: xyz',
+        { command: 'xyz' }
+      );
+      expect(suggestion).toContain('not found');
+    });
+
+    it('should provide generic suggestion for unknown errors', () => {
+      const suggestion = (agent as any).generateErrorSuggestion(
+        'unknown_tool',
+        'some error',
+        {}
+      );
+      expect(suggestion).toContain('failed');
     });
   });
 
