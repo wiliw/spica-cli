@@ -17,6 +17,7 @@ import { runInit } from './cli/init';
 import { getMCPManager, generateExampleConfig, shutdownMCP } from './mcp/client';
 import { LAIN_COLORS, format, BG } from './cli/ui/colors';
 import { getInputQueue, clearInputQueue } from './cli/ui/queue';
+import { autoDrainQueue } from './cli/queueDrain';
 import { TUIInputHandler } from './cli/ui/tuiInput';
 import { setupAgentEvents } from './cli/events';
 import { displayStatusLine } from './cli/status';
@@ -667,17 +668,11 @@ Start the analysis, execute step by step, then output the document.`;
               isProcessing = false;
               state.setProcessing(false);
               saveSession(process.cwd(), agent.getMessages());
-              
+
               // Auto-drain queued inputs
-              const skillQueue = getInputQueue();
-              if (skillQueue.hasPending()) {
-                const pendingCount = skillQueue.getPending().length;
-                const merged = skillQueue.mergePending();
-                screen.appendScroll(LAIN_COLORS.muted(`\n[QUEUE] Processing ${pendingCount} queued input(s)\n`));
-                screen.restoreCursor();
-                screen.refreshInput();
+              await autoDrainQueue(getInputQueue(), async (merged) => {
                 await handleInput(merged);
-              }
+              });
               
               return;
             }
@@ -725,15 +720,9 @@ Start the analysis, execute step by step, then output the document.`;
         saveSession(process.cwd(), agent.getMessages());
 
         // Auto-drain queued inputs
-        const pendingQueue = getInputQueue();
-        if (pendingQueue.hasPending()) {
-          const pendingCount = pendingQueue.getPending().length;
-          const merged = pendingQueue.mergePending();
-          screen.appendScroll(LAIN_COLORS.muted(`\n[QUEUE] Processing ${pendingCount} queued input(s)\n`));
-          screen.restoreCursor();
-          screen.refreshInput();
+        await autoDrainQueue(getInputQueue(), async (merged) => {
           await handleInput(merged);
-        }
+        });
       };
 
       // 帮助信息
