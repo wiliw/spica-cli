@@ -88,6 +88,45 @@ describe('API Pressure Tests', () => {
     });
   });
 
+  describe('Tool Message Deduplication', () => {
+    it('should not add duplicate tool messages with same toolCallId', () => {
+      const provider = new OpenAICompatibleProvider({
+        apiKey: 'test-key',
+        baseUrl: 'https://test.com',
+        model: 'test-model',
+      });
+
+      provider.addToolMessage('tc-123', 'result 1');
+      provider.addToolMessage('tc-123', 'result 2');
+      provider.addToolMessage('tc-456', 'result 3');
+
+      const messages = provider.getMessages();
+      const toolMessages = messages.filter(m => m.role === 'tool');
+      
+      expect(toolMessages.length).toBe(2);
+      expect(toolMessages[0].toolCallId).toBe('tc-123');
+      expect(toolMessages[0].content).toBe('result 1');
+      expect(toolMessages[1].toolCallId).toBe('tc-456');
+    });
+
+    it('should allow different toolCallIds', () => {
+      const provider = new OpenAICompatibleProvider({
+        apiKey: 'test-key',
+        baseUrl: 'https://test.com',
+        model: 'test-model',
+      });
+
+      provider.addToolMessage('tc-1', 'result 1');
+      provider.addToolMessage('tc-2', 'result 2');
+      provider.addToolMessage('tc-3', 'result 3');
+
+      const messages = provider.getMessages();
+      const toolMessages = messages.filter(m => m.role === 'tool');
+      
+      expect(toolMessages.length).toBe(3);
+    });
+  });
+
   describe('Message Size Limits', () => {
     it('should truncate text to fit in context', () => {
       const counter = new TokenCounter();
