@@ -27,6 +27,7 @@ describe('LLM Error Handling', () => {
     mockLLM = {
       getMessages: vi.fn(() => testMessages),
       setMessages: vi.fn((msgs: ChatMessage[]) => { testMessages = msgs; }),
+      addMessage: vi.fn((msg: ChatMessage) => { testMessages.push(msg); }),
       getProvider: vi.fn(() => ({
         getContextWindow: () => 10000
       })),
