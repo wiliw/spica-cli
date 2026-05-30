@@ -812,9 +812,11 @@ export async function executeTool(
                 return {
                   success: false,
                   error: `Command timeout after ${timeout / 1000}s.`,
-                  fallback: {
-                    detached: true,
-                    timeout: 300,
+                  timeoutContext: {
+                    commandType: command.split(' ')[0], // 命令类型
+                    hasOutput: (bashResult.stdout || bashResult.stderr).length > 0,
+                    suggestedTimeout: 300,
+                    suggestedMode: 'detached',
                   },
                 };
               }
