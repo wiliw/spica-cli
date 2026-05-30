@@ -357,20 +357,20 @@ private matchSkill(prompt: string): SkillDefinition | null {
     }
 
     const keywordMap = new Map([
-      ['brainstorming', ['create', 'build', 'implement', 'add', 'refactor', 'design', 'new feature', 'remove', 'delete', 'change', 'modify', 'update', '调查', '分析', '优化', '重构', '新建', '创建', '添加', '移除', '删除', '修改', '更改']],
-      ['systematic-debugging', ['fix', 'bug', 'error', 'failure', 'not working', 'crash', 'test fail', 'broken', 'debug', '调试', '修复', '报错', '出错', '失败']],
-      ['test-driven-development', ['write test', 'add test', 'implement feature', 'need test', '测试', '写测试', '加测试']],
-      ['writing-plans', ['multi-step', 'plan', 'spec', 'requirements', 'before coding', 'strategy', '计划', '规划', '方案', '设计']],
-      ['verification-before-completion', ['complete', 'done', 'finished', 'verify', 'before commit', '完成', '验证', '确认', '检查']],
-      ['requesting-code-review', ['review', 'merge', 'pr', 'check code', '审查', '代码审查', '合并']],
-      ['receiving-code-review', ['feedback', 'review comment', 'suggestion', 'change requested', '反馈', '建议', '修改意见']],
-      ['using-superpowers', ['skill', 'capability', 'ability', 'what can you', 'help', '功能', '能力', '技能', '会什么', '能做什么', '你有什么']],
-      ['using-git-worktrees', ['worktree', 'isolate', 'branch', '隔离', '分支', '工作区']],
-      ['executing-plans', ['execute plan', 'implement plan', '执行计划', '实现计划']],
-      ['subagent-driven-development', ['subagent', 'parallel', '多任务', '并行', '同时']],
-      ['finishing-a-development-branch', ['finish', 'merge branch', 'pr', '完成开发', '结束']],
-      ['dispatching-parallel-agents', ['parallel', 'dispatch', 'simultaneously', '并行', '同时']],
-      ['writing-skills', ['write skill', 'create skill', 'new skill', '自定义技能', '创建技能', '编写技能']],
+      ['brainstorming', ['create', 'build', 'implement', 'add', 'refactor', 'design', 'new feature', 'remove', 'delete', 'change', 'modify', 'update']],
+      ['systematic-debugging', ['fix', 'bug', 'error', 'failure', 'not working', 'crash', 'test fail', 'broken', 'debug']],
+      ['test-driven-development', ['write test', 'add test', 'implement feature', 'need test']],
+      ['writing-plans', ['multi-step', 'plan', 'spec', 'requirements', 'before coding', 'strategy']],
+      ['verification-before-completion', ['complete', 'done', 'finished', 'verify', 'before commit']],
+      ['requesting-code-review', ['review', 'merge', 'pr', 'check code']],
+      ['receiving-code-review', ['feedback', 'review comment', 'suggestion', 'change requested']],
+      ['using-superpowers', ['skill', 'capability', 'ability', 'what can you', 'help']],
+      ['using-git-worktrees', ['worktree', 'isolate', 'branch']],
+      ['executing-plans', ['execute plan', 'implement plan']],
+      ['subagent-driven-development', ['subagent', 'parallel']],
+      ['finishing-a-development-branch', ['finish', 'merge branch', 'pr']],
+      ['dispatching-parallel-agents', ['parallel', 'dispatch', 'simultaneously']],
+      ['writing-skills', ['write skill', 'create skill', 'new skill']],
     ]);
 
     const promptLower = prompt.toLowerCase();
