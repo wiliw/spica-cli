@@ -12,7 +12,7 @@ const TIER_1_COMPOSITE_PATTERNS: Array<[string, string]> = [
 const TIER_2_VERBS = ['create', 'add', 'build', 'make', 'implement', 'write'];
 const TIER_2_NOUNS = ['feature', 'component', 'module', 'system', 'function', 'class', 'file', 'something', 'thing'];
 
-const TIER_3_KEYWORDS = ['fix', 'debug', 'bug', 'error', 'broken', 'not working', 'failing', 'crash'];
+const TIER_3_KEYWORDS = ['fix', 'debug', 'bug', 'error', 'broken', 'not working', 'failing', 'crash', 'test fail', 'tests fail'];
 
 const TIER_4_PATTERNS = ['review', 'check my code', 'look over'];
 

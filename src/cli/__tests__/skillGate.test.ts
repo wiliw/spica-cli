@@ -66,6 +66,12 @@ describe('classifyIntent', () => {
     it('returns systematic-debugging for failing', () => {
       expect(classifyIntent('failing tests in CI')).toBe('systematic-debugging');
     });
+    it('returns systematic-debugging for test fail', () => {
+      expect(classifyIntent('test fail: expected 1 to be 3')).toBe('systematic-debugging');
+    });
+    it('returns systematic-debugging for tests failed', () => {
+      expect(classifyIntent('6 tests failed, 308 passed')).toBe('systematic-debugging');
+    });
   });
 
   describe('Tier 4 — review keywords', () => {

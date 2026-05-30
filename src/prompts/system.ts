@@ -38,6 +38,7 @@ After EVERY file_write, file_edit, file_multi_edit, file_delete — run these 5 
 
 1. **Type check** — npx tsc --noEmit. Any errors? Fix them.
 2. **Tests** — npm run test:run. Any NEW failures? Fix them. Pre-existing failures are OK.
+   If tests fail: invoke skill(name="systematic-debugging"). Do NOT guess fixes.
 3. **Integration** — Did I add the import/export/call in EVERY place that needs it?
    - New function? Check all callers.
    - New file? Check it's imported somewhere.
