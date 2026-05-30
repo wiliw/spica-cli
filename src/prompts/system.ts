@@ -11,7 +11,7 @@ IF A SKILL APPLIES TO YOUR TASK, YOU DO NOT HAVE A CHOICE. YOU MUST USE IT.
 
 This is not negotiable. This is not optional. You cannot rationalize your way out of this.
 
-**How to invoke a skill**: Use the skill tool with skill name. Example: skill("brainstorming")
+**How to invoke a skill**: Call the \`skill\` tool with the skill name. Example: skill(name="brainstorming")
 
 Common skill triggers:
 - "Create/add/build/implement" → brainstorming skill
@@ -49,7 +49,7 @@ Checkpoint triggers:
 - After complex refactoring → run full test suite
 
 ## Core Rules
-1. Check skills FIRST - invoke /skill_name if relevant (even 1% chance)
+1. Check skills FIRST - invoke skill tool if relevant (even 1% chance)
 2. Decompose complex tasks BEFORE starting
 3. Self-verify after each significant change
 4. Read before edit: file_read first
@@ -86,7 +86,7 @@ ${skillsMetadata}
 <SKILL-RULE>
 **MANDATORY**: Before responding to ANY user request:
 1. Read the skill descriptions above
-2. If ANY skill matches (even partially), invoke it with /skill_name
+2. If ANY skill matches (even partially), invoke the skill tool with its name
 3. Follow the skill's instructions exactly
 4. Only proceed with direct action if NO skill applies
 
@@ -95,8 +95,13 @@ Do NOT skip this check. Do NOT assume "this is too simple". Check first.
 `;
 }
 
-export function getSystemPrompt(projectConfig?: any, skillsMetadata?: string): string {
+export function getSystemPrompt(projectConfig?: any, skillsMetadata?: string, usingSuperpowersContent?: string): string {
   let prompt = SYSTEM_PROMPT;
+
+  // Using-superpowers core content injected at session start
+  if (usingSuperpowersContent) {
+    prompt += '\n\n' + usingSuperpowersContent;
+  }
 
   // Project context (compact format)
   if (projectConfig?.type) {

@@ -344,6 +344,17 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: 'skill',
+    description: 'Invoke a skill to load its full instructions. Use when a skill description suggests it may apply to the current task. Calling this tool loads the complete SKILL.md content so you can follow it precisely.',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Skill name (e.g., brainstorming, systematic-debugging, using-superpowers)' },
+      },
+      required: ['name'],
+    },
+  },
+  {
     name: 'todo_read',
     description: 'Read current persisted tasks from .spica/tasks.json. Use to check existing tasks before adding new ones.',
     parameters: {
@@ -1262,6 +1273,32 @@ export async function executeTool(
           default:
             return { success: false, error: `Unknown gh action: ${action}` };
         }
+      }
+
+      case 'skill': {
+        const { loadSkills } = await import('../skills/index');
+        const skills = loadSkills(WORKSPACE);
+        const skillName = String(safeArgs.name || '');
+
+        if (!skillName) {
+          return {
+            success: false,
+            error: `Skill name required. Available skills: ${Array.from(skills.keys()).join(', ')}`,
+          };
+        }
+
+        const skill = skills.get(skillName);
+        if (!skill) {
+          return {
+            success: false,
+            error: `Skill "${skillName}" not found. Available skills: ${Array.from(skills.keys()).join(', ')}`,
+          };
+        }
+
+        return {
+          success: true,
+          output: `Skill: ${skill.name}\nDescription: ${skill.description}\n\n${skill.promptTemplate || ''}`,
+        };
       }
 
       case 'todo_read': {
