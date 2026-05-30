@@ -1,75 +1,161 @@
-# Skill Gate Prompt Enhancement — Design Spec
+# Skill Gate — Testable Classifier + Prompt Injection
 
 **Date**: 2025-01-16
 **Status**: approved
-**Topic**: Strengthen system prompt to prevent AI from skipping brainstorming/skill checks
+**Topic**: Prevent AI from skipping skill checks by adding a testable classifier that injects REQUIRED_SKILL into the system prompt
 
 ## Problem
 
-The system prompt (`src/prompts/system.ts`) has an `<EXTREMELY-IMPORTANT>` block mandating skill invocation. Despite this, the AI sometimes skips the skill check — typically by self-rationalizing that the request is "too simple" or "just a question."
+The system prompt mandates skill invocation, but the AI sometimes skips it by self-rationalizing ("too simple," "just a question"). Pure prompt-based solutions cannot be tested — the only way to verify is manual observation in the next session.
 
-Real example: User asked "How would you improve yourself?" — a design question about system changes. AI should have invoked `brainstorming` but instead answered directly.
-
-### Root Cause
-
-The current prompt says "If you think there is even a 1% chance..." — this leaves room for the AI's own judgment to override the rule. The AI rationalizes: "This doesn't feel like a 1% case" → bypass.
+Real example: User asked "How would you improve yourself?" — a design question. AI should have invoked `brainstorming` but answered directly.
 
 ## Solution
 
-Replace the `<EXTREMELY-IMPORTANT>` block with a **decision tree** that removes subjective judgment. Instead of "if you think," use pattern matching: "does the message contain X → invoke Y."
+Two-component approach: a **testable code classifier** that pattern-matches user input to skill names, plus **simplified prompt injection** that removes AI judgment from the decision.
 
-### Key Changes
+```
+User message
+      ↓
+classifyIntent(text)  ←  unit-testable pure function
+      ↓
+  "brainstorming" | "systematic-debugging" | null
+      ↓
+injected into system prompt as REQUIRED_SKILL
+      ↓
+AI sees REQUIRED_SKILL and calls skill(name="...")
+```
 
-1. **Decision tree, not judgment call** — keyword-based triggers with explicit mappings
-2. **Anti-patterns list** — name the specific rationalizations the AI will be tempted to use, and pre-reject them
-3. **Ambiguous-request examples** — show that "questions about improvement" ARE design work
+## Component 1: Classifier
 
-### File Changed
+**File**: `src/cli/skillGate.ts` (new)
 
-`src/prompts/system.ts` — replace the `<EXTREMELY-IMPORTANT>` block only.
+**Signature**: `classifyIntent(text: string): string | null`
 
-### New Prompt Text
+**Logic**: Five priority-ordered tiers, first match wins:
+
+### Tier 1 — Explicit design/improvement questions
+Matches if message contains: `"how to improve"`, `"how to make better"`, `"could we"`, `"should we"`, `"what would you change"`
+→ `"brainstorming"`
+
+### Tier 2 — Creation keywords + target noun
+`"create"`/`"add"`/`"build"`/`"make"`/`"implement"`/`"write"` **AND** `"feature"`/`"component"`/`"module"`/`"system"`/`"function"`/`"class"`/`"file"`
+→ `"brainstorming"`
+
+### Tier 3 — Bug/fix keywords
+`"fix"`/`"debug"`/`"bug"`/`"error"`/`"broken"`/`"not working"`/`"failing"`/`"crash"`
+→ `"systematic-debugging"`
+
+### Tier 4 — Review keywords
+`"review"`/`"check my code"`/`"look over"`
+→ `"requesting-code-review"`
+
+### Tier 5 — Negative patterns (override)
+Starts with `"what is"`/`"how does"`/`"explain"` **AND** contains no creation/fix keywords
+→ `null`
+
+### Fallback
+No match → `null`
+
+All matching is case-insensitive.
+
+## Component 2: Prompt Injection
+
+**File**: `src/prompts/system.ts` (edit)
+
+### Function signature change
+
+Add `classifiedSkill?: string | null` parameter to `getSystemPrompt()`:
+
+```typescript
+export function getSystemPrompt(
+  projectConfig?: any,
+  skillsMetadata?: string,
+  usingSuperpowersContent?: string,
+  classifiedSkill?: string | null  // NEW
+): string
+```
+
+### Injection
+
+When `classifiedSkill` is non-null, prepend to prompt:
+
+```
+REQUIRED_SKILL: brainstorming
+```
+
+### New EXTREMELY-IMPORTANT block
+
+Replace current block with:
 
 ```
 <EXTREMELY-IMPORTANT>
-Before ANY response or action, scan for skill triggers using this DECISION TREE — not your own judgment:
+At the top of this system prompt, you may see REQUIRED_SKILL followed by a skill name.
 
-1. Does the user's message contain:
-   - "create"/"add"/"build"/"make"/"implement"/"write" + "feature/component/module/system" → brainstorming
-   - "fix"/"debug"/"bug"/"error"/"broken"/"not working" → systematic-debugging
-   - "how to improve"/"how to make better"/"could we" → brainstorming (designing improvements IS creative work)
-   - "review"/"check my" → requesting-code-review
+If REQUIRED_SKILL is present:
+  → Call skill(name="<that skill>") before taking ANY other action.
+  → Do NOT evaluate relevance. Do NOT judge complexity. Just call it.
+  → If the skill turns out wrong for the situation, you don't need to use it after loading.
 
-2. If ANY keyword matches → invoke skill. Do NOT evaluate "complexity" — the skill itself decides scope.
-
-ANTI-PATTERNS (you WILL be tempted by these — RESIST):
-- "This is too simple for design" → WRONG. Every change goes through design.
-- "The user already knows what they want" → WRONG. Skill will surface hidden assumptions.
-- "I've done this before" → WRONG. This project may differ.
-- "It's just a question about the project" → If it involves creating/changing ANYTHING, it's design.
-
-CORRECT responses to ambiguous requests:
-- "What would you improve?" → This is about designing improvements → brainstorming
-- "Can you add X?" → This is creating a feature → brainstorming
-- "Let's fix Y" → This is debugging → systematic-debugging
-
-When in doubt: INVOKE THE SKILL. The cost of unnecessary skill invocation is 2-3 messages. The cost of skipping design is wasted implementation.
+If REQUIRED_SKILL is null or absent:
+  → Still scan for skill triggers. When in doubt, invoke the skill.
 </EXTREMELY-IMPORTANT>
 ```
 
-## Non-Goals
+## Component 3: Integration
 
-- No code-level enforcement (user chose against hard gate)
-- No new files or modules
-- No changes to skill loading/invocation logic
-- No changes to how skills work internally
+**File**: `src/index.ts` (edit)
+
+Before calling `getSystemPrompt()`, run classifier:
+
+```typescript
+const classifiedSkill = classifyIntent(userMessage);
+const systemPrompt = getSystemPrompt(projectConfig, skillsMetadata, superpowersContent, classifiedSkill);
+```
+
+## Files Changed
+
+| File | Action |
+|------|--------|
+| `src/cli/skillGate.ts` | **New** — `classifyIntent()` pure function |
+| `src/cli/__tests__/skillGate.test.ts` | **New** — tier-by-tier unit tests |
+| `src/prompts/system.ts` | **Edit** — add param, simplify EXTREMELY-IMPORTANT, inject REQUIRED_SKILL |
+| `src/index.ts` | **Edit** — run classifier before prompt build |
 
 ## Testing
 
-- Run full test suite to confirm no regressions (pure text change, no logic impact)
-- Manual verification: in next session, ask a design-adjacent question and observe whether skill is invoked
+### Classifier tests (`skillGate.test.ts`)
 
-## Risks
+| Test | Input | Expected |
+|------|-------|----------|
+| Tier 1 explicit improvement | `"how to improve error handling"` | `"brainstorming"` |
+| Tier 1 "could we" | `"could we add a cache layer"` | `"brainstorming"` |
+| Tier 2 create feature | `"create a login module"` | `"brainstorming"` |
+| Tier 2 add function | `"add a helper function"` | `"brainstorming"` |
+| Tier 3 fix bug | `"fix the login bug"` | `"systematic-debugging"` |
+| Tier 3 broken | `"the build is broken"` | `"systematic-debugging"` |
+| Tier 3 crash | `"app crashes on startup"` | `"systematic-debugging"` |
+| Tier 4 review | `"review my latest changes"` | `"requesting-code-review"` |
+| Tier 5 negative | `"what is a closure"` | `null` |
+| Tier 5 negative | `"explain how promises work"` | `null` |
+| Fallback | `"hello"` | `null` |
+| Case insensitive | `"FIX THE BUG"` | `"systematic-debugging"` |
+| Empty string | `""` | `null` |
+| Mixed (Tier 1 wins) | `"how to improve the broken login"` | `"brainstorming"` |
 
-- **Prompt alone may still be insufficient** — if this iteration fails again, the fallback is a lightweight code gate (option B-lite from discussion)
-- **Keyword matching is brittle** — user phrasing varies; the decision tree can't cover everything. The anti-patterns and "when in doubt" clause serve as catch-alls.
+### Prompt tests
+
+Verify `getSystemPrompt()`:
+- Includes `REQUIRED_SKILL: brainstorming` when `classifiedSkill = "brainstorming"`
+- Does NOT include `REQUIRED_SKILL` when `classifiedSkill = null` or `undefined`
+
+### Regression
+
+Full test suite (`npm run test:run`) must remain at 275+ passing.
+
+## Non-Goals
+
+- No code-level enforcement/hard gate (user chose against)
+- No changes to skill loading/invocation logic
+- No changes to how skills work internally
+- Classifier does NOT cover every possible phrasing — it catches common patterns; the prompt's "when in doubt" clause is the catch-all
