@@ -984,34 +984,13 @@ async init() {
     if (this.llm) {
       const allMessages = this.llm.getMessages();
 
-      // 结束时不再压缩，直接保存（压缩只在开始前触发）
-      const simplifiedMessages = allMessages.map(m => {
-        if (m.role === 'tool') {
-          return { role: 'tool', content: m.content, toolCallId: m.toolCallId };
-        }
-
-        if (m.toolCalls && allToolResults.length > 0) {
-          const enrichedToolCalls = m.toolCalls.map(tc => {
-            const matchingResult = allToolResults.find(tr => tr.name === tc.name);
-            return {
-              ...tc,
-              result: matchingResult?.result || '',
-            };
-          });
-
-          return {
-            role: m.role,
-            content: m.content,
-            toolCalls: enrichedToolCalls,
-          };
-        }
-
-        return {
+      // 结束时保存，只保留 user 和 assistant 消息，移除 toolCalls 防止 API 报错
+      const simplifiedMessages = allMessages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => ({
           role: m.role,
-          content: m.content,
-          toolCalls: m.toolCalls,
-        };
-      }).filter(m => m.role === 'user' || m.role === 'assistant');
+          content: m.content || '',
+        }));
 
       saveProjectContext(this.workspacePath, simplifiedMessages);
       
