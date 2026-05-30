@@ -293,12 +293,19 @@ export class ScreenManager {
   }
 
   refreshInputAndKeepCursor(): void {
+    // During streaming, save scroll area cursor position before redrawing input.
+    // Without this, the cursor resets to column 1 after input refresh, causing
+    // the next appendScroll() to overwrite previous streaming output.
+    if (this.state.isStreaming) {
+      fs.writeSync(1, '\x1b7');  // DECSC: Save cursor (position in scroll area)
+    }
+
     this.refreshInput();
     this.restoreCursor();
 
     if (this.state.isStreaming) {
-      fs.writeSync(1, `${ESC}[${this.state.scrollBottom};1H`);
-      fs.writeSync(1, `${ESC}[?25l`);
+      fs.writeSync(1, '\x1b8');  // DECRC: Restore cursor (preserves column)
+      fs.writeSync(1, `${ESC}[?25l`);  // Hide cursor again
       this.state.cursorInScrollArea = true;
     }
   }
