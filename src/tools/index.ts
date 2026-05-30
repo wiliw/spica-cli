@@ -808,15 +808,26 @@ export async function executeTool(
 
             // 检查是否超时或被中断
             if (bashResult.timedOut || abortController.signal.aborted) {
-              // Auto-retry with detached if enabled and not already detached
+              // Auto-retry with detached mode (execute in background automatically)
               if (autoRetry && !detached && !interactive) {
-                return {
-                  success: false,
-                  error: `Command timeout/stuck. Auto-retrying in background...`,
-                  autoRetry: true,
-                  retryCommand: command,
-                  retryMode: 'detached',
-                };
+                try {
+                  const detachedResult = await execa(command, {
+                    shell: true,
+                    cwd: WORKSPACE,
+                    detached: true,
+                    timeout: 300000,
+                  });
+                  return {
+                    success: detachedResult.exitCode === 0,
+                    output: `Auto-retried in background (detached). Exit code: ${detachedResult.exitCode}`,
+                    error: detachedResult.exitCode !== 0 ? detachedResult.stderr : undefined,
+                  };
+                } catch (detachError) {
+                  return {
+                    success: false,
+                    error: `Timeout. Auto-retry in background failed: ${detachError.message}`,
+                  };
+                }
               }
               return {
                 success: false,
