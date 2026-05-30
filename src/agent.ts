@@ -2,14 +2,14 @@ import { LLMClient } from './llm/LLMClient';
 import { TokenCounter } from './llm/TokenCounter';
 import { executeTool, getAllToolDefinitions, setWorkspace, getWorkspace } from './tools/index';
 import { initMCP, shutdownMCP } from './mcp/client';
-import { initSkills, listSkills } from './skills/index';
+import { initSkills, listSkills, getSkill, buildSkillPrompt } from './skills/index';
 import { getProviderConfig } from './utils/config';
 import { getSystemPrompt, getCompactPrompt } from './prompts/system';
 import { loadProjectConfig as loadAgentsConfig, autoDetectProject, createAgentsMd } from './utils/projectConfig';
+import { SkillDefinition } from './utils/settings';
 import { loadProjectState, saveProjectState, updateProjectTodos, loadProjectContext, saveProjectContext, ensureProjectDir } from './storage/projectState';
 import { runPreHooks, runPostHooks } from './hooks';
 import { LAIN_COLORS } from './cli/ui/colors';
-import { getInputQueue } from './cli/ui/queue';
 import { EventEmitter } from 'events';
 import fs from 'fs-extra';
 import * as path from 'path';
@@ -47,6 +47,7 @@ export class SpicaAgent extends EventEmitter {
   private _initPromise: Promise<void> | null = null;
   private _providerName?: string;
   private _initAbortController: AbortController | null = null;
+  private _cachedSkills: SkillDefinition[] = [];
 
   // 权限确认状态
   private permissionQueue: Array<{ reason: string; resolve: (approved: boolean) => void }> = [];
@@ -348,6 +349,38 @@ export class SpicaAgent extends EventEmitter {
     }
   }
 
+private matchSkill(prompt: string): SkillDefinition | null {
+    if (this._cachedSkills.length === 0) {
+      this._cachedSkills = listSkills(this.workspacePath);
+    }
+
+    const keywordMap = new Map([
+      ['brainstorming', ['create', 'build', 'implement', 'add', 'refactor', 'design', 'new feature']],
+      ['systematic-debugging', ['fix', 'bug', 'error', 'failure', 'not working', 'crash', 'test fail']],
+      ['test-driven-development', ['write test', 'add test', 'implement feature', 'need test']],
+      ['writing-plans', ['multi-step', 'plan', 'spec', 'requirements', 'before coding', 'strategy']],
+      ['verification-before-completion', ['complete', 'done', 'finished', 'verify', 'before commit']],
+      ['requesting-code-review', ['review', 'merge', 'pr', 'check code']],
+      ['receiving-code-review', ['feedback', 'review comment', 'suggestion', 'change requested']],
+    ]);
+
+    const promptLower = prompt.toLowerCase();
+    
+    for (const skill of this._cachedSkills) {
+      if (!skill.name) continue;
+      const skillKeywords = keywordMap.get(skill.name) || [];
+      if (skillKeywords.some(kw => promptLower.includes(kw))) {
+        return skill;
+      }
+      
+      if (skill.description && promptLower.includes(skill.description.toLowerCase().slice(0, 20))) {
+        return skill;
+      }
+    }
+
+    return null;
+  }
+
 // 判断错误是否可重试
   private isRetryableError(error: any): boolean {
     const message = error.message || '';
@@ -599,6 +632,13 @@ async init() {
       throw new Error('LLM client not initialized');
     }
 
+    const matchedSkill = this.matchSkill(prompt);
+    if (matchedSkill) {
+      const skillContent = buildSkillPrompt(matchedSkill, { input: prompt });
+      this.emit('skill_auto_triggered', { skill: matchedSkill.name, description: matchedSkill.description });
+      prompt = skillContent;
+    }
+
     // 🔒 自动checkpoint：在AI工作前创建备份点
     const checkpointHash = await this.createAutoCheckpoint(prompt);
     
@@ -687,19 +727,6 @@ async init() {
 
     while (!response.finished && iterations < maxIterations && !this.interruptFlag) {
       iterations++;
-
-      // 检查是否有待处理的新输入（在工具执行间隙检查队列）
-      const queue = getInputQueue();
-      if (queue.hasPending()) {
-        const mergedInput = queue.mergePending();
-        this.emit('pending_input_detected', { input: mergedInput });
-        // 把合并后的输入追加到对话中，继续处理
-        this.llm.addUserMessage(mergedInput);
-        // 重新生成响应，继续当前任务
-        this.emit('waiting_for_llm');  // 启动心跳
-        response = await this.llm.generateFromHistory(toolDefinitions);
-        continue;  // 继续循环处理新的响应
-      }
 
       if (this.interruptFlag) {
         break;

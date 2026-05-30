@@ -271,8 +271,15 @@ program
           return;
         }
 
-        if (!trimmed) {
-          
+        // CRITICAL FIX: 在处理前合并 queue（而不是结束后）
+        const queue = getInputQueue();
+        let finalInput = trimmed;
+        if (queue.hasPending() && !trimmed.startsWith('/')) {
+          finalInput = queue.mergePending() + '\n' + trimmed;
+          screen.appendScroll(LAIN_COLORS.muted(`[QUEUE] Merged ${queue.getStatus().total} inputs\n`));
+        }
+
+        if (!finalInput.trim()) {
           return;
         }
 
@@ -664,9 +671,7 @@ Start the analysis, execute step by step, then output the document.`;
               isProcessing = false;
               state.setProcessing(false);
               saveSession(process.cwd(), agent.getMessages());
-              await processQueue(agent);
-              displayStatusLine();  // 只在完成时显示一次
-
+              
               return;
             }
           }
@@ -679,7 +684,7 @@ Start the analysis, execute step by step, then output the document.`;
 
         // === 执行请求 ===
         // 先显示用户输入在输出区
-        screen.appendScroll(LAIN_COLORS.primary(`\n> ${trimmed}\n`));
+        screen.appendScroll(LAIN_COLORS.primary(`\n> ${finalInput.slice(0, 100)}${finalInput.length > 100 ? '...' : ''}\n`));
 
         isProcessing = true;
         state.setProcessing(true);
@@ -688,7 +693,7 @@ Start the analysis, execute step by step, then output the document.`;
         screen.appendScroll(LAIN_COLORS.muted('Processing... (ESC ESC to interrupt)\n'));
 
         try {
-          const result = await agent.runLoop(trimmed);
+          const result = await agent.runLoop(finalInput);
           stopHeartbeat();  // 成功完成后停止心跳（防止超时提示）
           if (state.isStreamingOutput()) {
             state.setStreamingOutput(false);
@@ -713,7 +718,6 @@ Start the analysis, execute step by step, then output the document.`;
         isProcessing = false;
         state.setProcessing(false);
         saveSession(process.cwd(), agent.getMessages());
-        await processQueue(agent);
       };
 
       // 帮助信息
@@ -742,40 +746,6 @@ Start the analysis, execute step by step, then output the document.`;
         screen.appendScroll(LAIN_COLORS.primary.bold('Skills:\n'));
         screen.appendScroll(LAIN_COLORS.muted('  /skills     List skills\n'));
         screen.appendScroll('\n');
-      };
-
-      // 处理队列中的输入
-      const processQueue = async (agent: SpicaAgent) => {
-        const queue = getInputQueue();
-        if (!queue.hasPending()) return;
-
-        // 先设置 isProcessing = true，防止在 mergePending() 期间新的输入触发新的 handleInput
-        isProcessing = true;
-        state.setProcessing(true);
-
-        screen.appendScroll(LAIN_COLORS.muted(`\n[QUEUE] Processing ${queue.getStatus().pending} inputs...\n`));
-        const mergedInput = queue.mergePending();
-
-        if (mergedInput) {
-          screen.appendScroll(LAIN_COLORS.muted(`\nCombined input:\n${mergedInput.slice(0, 100)}${mergedInput.length > 100 ? '...' : ''}\n`));
-          try {
-            await agent.runLoop(mergedInput);
-            stopHeartbeat();  // 成功完成后停止心跳
-            screen.setStreaming(false);
-            screen.appendScroll(LAIN_COLORS.success('\n[OK] Done\n'));
-          } catch (error: any) {
-            stopHeartbeat();  // 错误时停止心跳
-            screen.setStreaming(false);
-            screen.appendScroll(LAIN_COLORS.error(`\n[ERR] Error: ${error.message}\n`));
-          }
-          screen.restoreCursor();
-          screen.refreshInput();
-          saveSession(process.cwd(), agent.getMessages());
-        }
-
-        // 处理完成后设置为 false
-        isProcessing = false;
-        state.setProcessing(false);
       };
 
       // 保持进程运行
