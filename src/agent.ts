@@ -388,6 +388,7 @@ private matchSkill(prompt: string): SkillDefinition | null {
 
     // 不可重试的错误
     const nonRetryablePatterns = [
+      '400',  // 请求格式错误（如不支持的消息角色）
       '401',  // 认证失败
       '403',  // 权限不足
       '404',  // 资源不存在
@@ -460,6 +461,10 @@ private matchSkill(prompt: string): SkillDefinition | null {
     let lastError: any;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (this.interruptFlag) {
+        throw new Error('Interrupted by user');
+      }
+
       try {
         return await operation();
       } catch (error: any) {
@@ -467,6 +472,10 @@ private matchSkill(prompt: string): SkillDefinition | null {
 
         // 最后一次尝试不再重试
         if (attempt === maxRetries) {
+          break;
+        }
+
+        if (this.interruptFlag) {
           break;
         }
 
@@ -480,6 +489,10 @@ private matchSkill(prompt: string): SkillDefinition | null {
           throw error;
         }
 
+        if (this.interruptFlag) {
+          break;
+        }
+
         // 指数退避：1s, 2s, 4s, 8s, 16s, 32s, 60s...（最大60秒）
         const delay = Math.min(1000 * Math.pow(2, attempt), 60000);
         this.emit('retry_attempt', {
@@ -490,7 +503,17 @@ private matchSkill(prompt: string): SkillDefinition | null {
           error: error.message,
         });
 
-        await new Promise(resolve => setTimeout(resolve, delay));
+        const start = Date.now();
+        while (Date.now() - start < delay) {
+          if (this.interruptFlag) {
+            break;
+          }
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        if (this.interruptFlag) {
+          break;
+        }
       }
     }
 
