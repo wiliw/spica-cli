@@ -1129,11 +1129,15 @@ async init() {
     const recentMessages = allMessages.slice(-keepCount);
     const oldMessages = allMessages.slice(0, -keepCount);
 
+    const contextWindow = provider.getContextWindow();
+    // Adaptive truncation: 1% of context window, floor 500 chars
+    const maxContentLength = Math.max(500, Math.floor(contextWindow * 0.01));
+
     // 对 recentMessages 中的超长内容进行截断
     const truncatedRecent = recentMessages.map(m => {
-      // 截断 content（最多 1500 chars）
-      const truncatedContent = (m.content || '').length > 1500
-        ? (m.content || '').slice(0, 1500) + '...[truncated]'
+      // 截断 content（adaptive to context window）
+      const truncatedContent = (m.content || '').length > maxContentLength
+        ? (m.content || '').slice(0, maxContentLength) + '...[truncated]'
         : m.content;
 
       // 截断 toolCalls（最多保留 4 个，保留更多操作上下文）

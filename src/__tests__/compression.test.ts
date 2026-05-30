@@ -94,7 +94,9 @@ describe('Compression Integration', () => {
       // Find truncated message (should exist due to 5000 char content at end)
       const truncatedMsg = finalMessages.find(m => m.content?.includes('[truncated]'));
       expect(truncatedMsg).toBeDefined();
-      expect(truncatedMsg!.content!.length).toBe(1514);  // 1500 + "...[truncated]"
+      // Window is 1000, so maxContentLength = Math.max(500, Math.floor(1000 * 0.01)) = 500
+      const expectedLen = 500 + '...[truncated]'.length; // 514
+      expect(truncatedMsg!.content!.length).toBe(expectedLen);
     });
 
     it('should truncate multiple long messages when they are in recentMessages', async () => {
