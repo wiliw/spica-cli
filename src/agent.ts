@@ -999,9 +999,15 @@ async init() {
             
             if (this.llm) {
               const allMessages = this.llm.getMessages();
-              const cleanedMessages = allMessages.filter(m => 
-                m.role === 'user' || m.role === 'assistant' || m.role === 'system'
-              );
+              const cleanedMessages = allMessages.map(m => {
+                if (m.role === 'assistant' && m.toolCalls) {
+                  return { role: 'assistant', content: m.content || '' };
+                }
+                if (m.role === 'tool') {
+                  return null;
+                }
+                return m;
+              }).filter(m => m !== null) as ChatMessage[];
               this.llm.setMessages(cleanedMessages);
             }
             
