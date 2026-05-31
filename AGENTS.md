@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **Type**: CLI tool
-- **Purpose**: AI coding agent with multi-turn conversations, 24+ tools, extensible skills system, and session persistence
+- **Purpose**: AI coding agent with multi-turn conversations, 25 tools, extensible skills system, and session persistence
 - **Use case**: Developers who want an AI assistant to read/write/edit files, run shell commands, manage git, interact with GitHub, search web, and execute coding tasks
 
 ## Tech Stack
@@ -14,7 +14,7 @@
   - `node-pty` — PTY for interactive shell commands (requires native build tools)
   - `@modelcontextprotocol/sdk` — MCP protocol support
   - `execa` — Process execution
-- **Dev tools**: `tsx`, `vitest`, `typescript`
+- **Dev tools**: `tsx`, `vitest`, `typescript`, `eslint`
 
 ## Setup Requirements
 - Node.js 18+ required
@@ -28,7 +28,7 @@
 | `src/index.ts` | CLI entry point, command definitions, TUI setup, input loop |
 | `src/agent.ts` | Core SpicaAgent class — main orchestration, permission handling, event emission |
 | `src/core/` | EventBus, StateManager, ErrorHandler, SessionManager, LogManager, ProcessMonitor, RuntimeState |
-| `src/tools/index.ts` | 24 tool implementations (file, bash, git, web, etc.) + tool definitions |
+| `src/tools/index.ts` | 25 tool implementations (file, bash, git, web, etc.) + tool definitions |
 | `src/tools/subAgent.ts` | Parallel subagent task execution |
 | `src/llm/` | LLM client, FunctionCaller, RateLimiter, TokenCounter, provider implementations |
 | `src/llm/providers/` | OpenAI, Anthropic, OpenAICompatible, Local, BaseProvider |
@@ -42,6 +42,7 @@
 | `src/utils/` | Config, session, settings, history, logger, projectConfig |
 | `src/external/` | Reserved for external integrations (currently empty) |
 | `src/builtin-skills/superpowers/` | 14 built-in superpowers skills |
+| `src/__tests__/` | Test files (28 test files, 341 tests) |
 | `bin/spica` | CLI executable wrapper |
 | `docs/` | Documentation (MANUAL.md, CONFIGURATION.md, ARCHITECTURE.md, etc.) |
 
@@ -49,7 +50,7 @@
 - **Dev**: `npm run dev` (runs `tsx src/index.ts`)
 - **Build**: `npm run build` (creates `bin/spica` executable)
 - **Test (watch)**: `npm test` (vitest watch mode)
-- **Test (single run)**: `npm run test:run` — **329 tests, 329 passing**
+- **Test (single run)**: `npm run test:run` — **341 tests, all passing**
 - **Test single file**: `npx vitest run <file-pattern>`
 - **Type check**: `npx tsc --noEmit`
 - **Lint**: `npm run lint` (ESLint)
@@ -118,7 +119,7 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
 - Session persistence in `.spica/session.json`
 
 ### Testing
-- Tests in `src/**/__tests__/` (27 test files, 329 tests, 329 passing, 0 failing)
+- Tests in `src/**/__tests__/` (28 test files, 341 tests, all passing)
 - Run `npm run test:run` for single execution, `npx vitest run <pattern>` for a single file
 - Key test files:
   - `src/core/__tests__/EventBus.test.ts` — Event system tests
@@ -129,9 +130,9 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
   - `src/__tests__/queueDrain.test.ts` — Queue auto-drain tests
   - `src/__tests__/agent.test.ts` — Core agent workflow tests
   - `src/__tests__/tools.test.ts` — Tool implementation tests
-  - `src/__tests__/skillChain.test.ts` — Skill chain enforcement tests (5 tests)
+  - `src/__tests__/skillChain.test.ts` — Skill chain enforcement tests (7 tests)
 
-## Built-in Skills (14 superpowers + _shared templates)
+## Built-in Skills (14 superpowers)
 
 | Skill | Trigger |
 |-------|---------|
