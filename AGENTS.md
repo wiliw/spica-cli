@@ -32,7 +32,7 @@
 | `src/tools/subAgent.ts` | Parallel subagent task execution |
 | `src/llm/` | LLM client, FunctionCaller, RateLimiter, TokenCounter, provider implementations |
 | `src/llm/providers/` | OpenAI, Anthropic, OpenAICompatible, Local, BaseProvider |
-| `src/cli/` | CLI components: events, init, queueDrain, status, TUI |
+| `src/cli/` | CLI components: events, init, queueDrain, skillGate, status, TUI |
 | `src/cli/ui/` | TUI components: screenManager, colors, diff, fixedBox, input, queue, stringWidth, tuiInput |
 | `src/mcp/` | MCP (Model Context Protocol) client integration |
 | `src/skills/` | Skills system — install, uninstall, list, parse, build prompts |
@@ -49,7 +49,7 @@
 - **Dev**: `npm run dev` (runs `tsx src/index.ts`)
 - **Build**: `npm run build` (creates `bin/spica` executable)
 - **Test (watch)**: `npm test` (vitest watch mode)
-- **Test (single run)**: `npm run test:run` — **323 tests, 322 passing, 1 failing** (flaky ProcessMonitor ENOTEMPTY temp dir cleanup)
+- **Test (single run)**: `npm run test:run` — **329 tests, 329 passing**
 - **Test single file**: `npx vitest run <file-pattern>`
 - **Type check**: `npx tsc --noEmit`
 - **Lint**: `npm run lint` (ESLint)
@@ -61,7 +61,7 @@
 
 ### Main Modules
 1. **SpicaAgent** (`src/agent.ts`) — Central orchestrator managing LLM client, tools, permissions, todos, and workflow loop
-2. **Tools System** (`src/tools/index.ts`) — 24 tools for file ops, shell, git, GitHub, web, search; returns `{ success, output?, error?, diff?, syntaxErrors?, content? }`
+2. **Tools System** (`src/tools/index.ts`) — 25 tools for file ops, shell, git, GitHub, web, search, skills; returns `{ success, output?, error?, diff?, syntaxErrors?, content? }`
 3. **LLM Client** (`src/llm/`) — OpenAI-compatible client with streaming, function calling, rate limiting, and multi-provider support
 4. **CLI/TUI** (`src/cli/`) — Terminal UI with scroll regions, status bar, input handling, queue management
 
@@ -72,10 +72,11 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
 - **EventEmitter pattern**: Agent emits events (`stream`, `tool_call`, `tool_result`, etc.) consumed by TUI for updates
 - **Plugin architecture**: Tools are self-contained; MCP allows external tool servers
 - **Skills system**: User-defined prompt templates with restricted tool access
+- **Skill chain enforcement**: When a skill's content references another skill by name, `REQUIRED_SKILL` messages are automatically injected to force the agent to invoke the referenced skill. Implemented in `src/agent.ts` (injection logic) and `src/prompts/system.ts` (SKILL CHAIN RULE). Tested in `src/__tests__/skillChain.test.ts`.
 - **Hooks system**: Pre/Post tool use interception for security/logging
 - **Queue auto-drain**: After processing completes, `autoDrainQueue()` in `src/cli/queueDrain.ts` checks for queued input and automatically processes it (no need to send an extra message)
 
-### 24 Tools
+### 25 Tools
 | Category | Tools |
 |----------|-------|
 | File | `file_read`, `file_write`, `file_edit`, `file_multi_edit`, `file_exists`, `file_delete`, `file_copy`, `file_move` |
@@ -85,6 +86,7 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
 | Git | `git` |
 | GitHub | `gh` |
 | Web | `web_search`, `web_fetch` |
+| Skill | `skill` |
 | Other | `question`, `todo_write`, `todo_read`, `task`, `workspace`, `lint`, `test` |
 
 ## Development Notes
@@ -116,8 +118,7 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
 - Session persistence in `.spica/session.json`
 
 ### Testing
-- Tests in `src/**/__tests__/` (26 test files, 323 tests, 322 passing)
-- 1 known flaky test: `ProcessMonitor.test.ts` — ENOTEMPTY on `/tmp/spica-test-processes` rmdir
+- Tests in `src/**/__tests__/` (27 test files, 329 tests, 329 passing, 0 failing)
 - Run `npm run test:run` for single execution, `npx vitest run <pattern>` for a single file
 - Key test files:
   - `src/core/__tests__/EventBus.test.ts` — Event system tests
@@ -128,6 +129,7 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
   - `src/__tests__/queueDrain.test.ts` — Queue auto-drain tests
   - `src/__tests__/agent.test.ts` — Core agent workflow tests
   - `src/__tests__/tools.test.ts` — Tool implementation tests
+  - `src/__tests__/skillChain.test.ts` — Skill chain enforcement tests (5 tests)
 
 ## Built-in Skills (14 superpowers + _shared templates)
 
