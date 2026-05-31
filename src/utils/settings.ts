@@ -73,48 +73,9 @@ export interface Settings {
   };
 }
 
-// 内置 Provider 模板
-export const BUILTIN_PROVIDERS: Record<string, Partial<ProviderConfig>> = {
-  openai: {
-    name: 'OpenAI',
-    baseUrl: 'https://api.openai.com/v1',
-    description: 'OpenAI GPT models',
-  },
-  anthropic: {
-    name: 'Anthropic (OpenAI-compatible)',
-    baseUrl: 'https://api.anthropic.com/v1',
-    description: 'Claude models via OpenAI-compatible endpoint',
-  },
-  together: {
-    name: 'Together AI',
-    baseUrl: 'https://api.together.xyz/v1',
-    description: 'Open-source models (Llama, Mistral, etc)',
-  },
-  groq: {
-    name: 'Groq',
-    baseUrl: 'https://api.groq.com/openai/v1',
-    description: 'Fast inference (Llama, Mixtral)',
-  },
-  local: {
-    name: 'Local Model',
-    baseUrl: 'http://localhost:8000/v1',
-    description: 'Local models (llama.cpp, vLLM, etc)',
-  },
-  custom: {
-    name: 'Custom',
-    baseUrl: '',
-    description: 'Any OpenAI-compatible endpoint',
-  },
-};
+export const DEFAULT_BASE_URLS: Record<string, string> = {};
 
-const DEFAULT_MODELS: Record<string, string> = {
-  openai: 'gpt-4',
-  anthropic: 'claude-3-opus',
-  together: 'meta-llama/Llama-3-70b-chat-hf',
-  groq: 'llama-3-70b',
-  local: 'llama-3',
-  custom: 'gpt-4',
-};
+const DEFAULT_MODELS: Record<string, string> = {};
 
 // 默认 hooks
 const DEFAULT_HOOKS: Settings['hooks'] = {
@@ -288,39 +249,37 @@ export async function loadEffectiveSettings(workspacePath: string): Promise<Sett
 // Provider 相关函数
 export async function getProviderConfig(providerName?: string): Promise<ProviderConfig> {
   const settings = await loadGlobalSettings();
-  const name = providerName || settings.defaultProvider || 'openai';
+  const name = providerName || settings.defaultProvider || 'default';
 
-  const builtin = BUILTIN_PROVIDERS[name];
   const fileConfig = settings.providers?.[name];
 
-  // 环境变量优先
-  const envApiKey = process.env[`SPICA_${name.toUpperCase()}_API_KEY`] ||
-                    process.env.OPENAI_API_KEY ||
-                    process.env.ANTHROPIC_API_KEY ||
-                    process.env.TOGETHER_API_KEY ||
-                    process.env.GROQ_API_KEY;
+  const upperName = name.toUpperCase().replace(/-/g, '_');
+  const envApiKey = process.env[`SPICA_${upperName}_API_KEY`] ||
+                    process.env[`${upperName}_API_KEY`] ||
+                    process.env.OPENAI_API_KEY;
 
-  const envModel = process.env[`SPICA_${name.toUpperCase()}_MODEL`] ||
-                   process.env.OPENAI_MODEL ||
+  const envModel = process.env[`SPICA_${upperName}_MODEL`] ||
+                   process.env[`${upperName}_MODEL`] ||
                    process.env.MODEL;
 
-  const envBaseUrl = process.env[`SPICA_${name.toUpperCase()}_BASE_URL`] ||
+  const envBaseUrl = process.env[`SPICA_${upperName}_BASE_URL`] ||
+                     process.env[`${upperName}_BASE_URL`] ||
                      process.env.OPENAI_BASE_URL;
 
   const apiKey = envApiKey || fileConfig?.apiKey;
-  const model = envModel || fileConfig?.model || DEFAULT_MODELS[name] || 'gpt-4';
-  const baseUrl = envBaseUrl || fileConfig?.baseUrl || builtin?.baseUrl || 'https://api.openai.com/v1';
+  const model = envModel || fileConfig?.model || DEFAULT_MODELS[name] || 'gpt-4o';
+  const baseUrl = envBaseUrl || fileConfig?.baseUrl || DEFAULT_BASE_URLS[name] || 'https://api.openai.com/v1';
 
   if (!apiKey) {
-    throw new Error(`Provider '${name}' not configured. Run: spica providers set ${name} YOUR_API_KEY`);
+    throw new Error(`Provider '${name}' not configured. Run: spica providers set ${name} <api-key> --url <base-url> --model <model-name>`);
   }
 
   return {
-    name: builtin?.name || fileConfig?.name || name,
+    name: fileConfig?.name || name,
     apiKey,
     baseUrl,
     model,
-    description: builtin?.description || fileConfig?.description,
+    description: fileConfig?.description,
   };
 }
 
@@ -334,14 +293,11 @@ export async function setProviderConfig(
 
   if (!settings.providers) settings.providers = {};
 
-  const builtin = BUILTIN_PROVIDERS[name];
-
   settings.providers[name] = {
-    name: builtin?.name || name,
+    name,
     apiKey,
-    baseUrl: baseUrl || builtin?.baseUrl || '',
-    model: model || DEFAULT_MODELS[name] || 'gpt-4',
-    description: builtin?.description,
+    baseUrl: baseUrl || DEFAULT_BASE_URLS[name] || '',
+    model: model || DEFAULT_MODELS[name] || 'gpt-4o',
   };
 
   if (!settings.defaultProvider) {

@@ -4,11 +4,10 @@ import { SpicaAgent } from './agent';
 import {
   loadConfig,
   saveConfig,
-  setProviderConfig,
   getProviderConfig,
+  setProviderConfig,
   listProviders,
   setDefaultProvider,
-  BUILTIN_PROVIDERS,
 } from './utils/config';
 import { MCPServerConfig } from './utils/settings';
 import { loadSession, saveSession } from './utils/session';
@@ -75,8 +74,9 @@ process.on('SIGINT', () => {
 
 program
   .name('spica')
-  .description('AI coding agent')
-  .version('1.0.0');
+  .description('AI coding assistant - reads/writes files, runs commands, manages git\n\nStart interactive session: spica\nExecute single task: spica run "fix bug"\nConfigure providers: spica providers set deepseek sk-xxx --url https://api.deepseek.com/v1 --model deepseek-chat')
+  .version('1.0.0')
+  .addHelpText('after', '\nQuick start:\n  1. Configure a provider: spica providers set deepseek YOUR_KEY --url https://api.deepseek.com/v1 --model deepseek-chat\n  2. Start session: spica\n  3. Ask anything: "fix the login bug" or "add export feature"\n\nFor detailed help on each command: spica <command> --help');
 
 // 默认：持续对话模式（自动加载历史）
 program
@@ -122,21 +122,14 @@ program
       return;
     }
 
-    // 开始banner动画（并行）
-    const bannerPromise = BG.banner();
-
-    // TUI handler (defined before try to be accessible in catch)
-    let tuiHandler: TUIInputHandler | null = null;
-
     try {
       await agent.init();
 
-      // 停止banner动画
-      BG.stopBanner();
-      await bannerPromise;
-
-      // 清屏，准备设置滚动区域
-      screen.appendScroll(`${ESC}[2J${ESC}[1;1H`);
+      // 简单启动信息（无动画）
+      console.log();
+      console.log(LAIN_COLORS.primary('  spica - AI coding assistant'));
+      console.log(LAIN_COLORS.muted(`  Model: ${providerConfig.model} | Provider: ${providerName}`));
+      console.log();
 
       // TUI 输入处理（设置滚动区域）
       tuiHandler = new TUIInputHandler();
@@ -776,8 +769,9 @@ Start the analysis, execute step by step, then output the document.`;
 // Run command - 单次执行
 program
   .command('run <request>')
-  .description('Execute single coding task')
+  .description('Execute single coding task and exit (non-interactive mode)\n\nUse for quick fixes or one-time tasks')
   .option('-p, --provider <name>', 'Use specific provider')
+  .addHelpText('after', '\nExamples:\n  spica run "fix login bug"\n  spica run "add CSV export" -p deepseek\n  spica run "refactor user module"')
   .action(async (request: string, options: { provider?: string }) => {
     const config = await loadConfig();
     const providerName = options.provider || config.defaultProvider || 'openai';
@@ -813,12 +807,13 @@ program
 // Providers管理
 program
   .command('providers')
-  .description('Manage LLM providers')
-  .argument('[action]', 'list|set|add|show|default|remove')
+  .description('Manage LLM providers (AI model API configurations)')
+  .argument('[action]', 'set|show|default|remove')
   .argument('[name]', 'Provider name')
-  .argument('[value]', 'API key or URL')
-  .option('-u, --url <url>', 'Base URL for custom provider')
-  .option('-m, --model <model>', 'Model name')
+  .argument('[value]', 'API key')
+  .option('-u, --url <url>', 'API base URL (e.g. https://api.deepseek.com/v1)')
+  .option('-m, --model <model>', 'Model name (e.g. deepseek-chat, gpt-4o)')
+  .addHelpText('after', '\nExamples:\n  spica providers                              # List configured providers\n  spica providers set deepseek sk-xxx --url https://api.deepseek.com/v1 --model deepseek-chat\n  spica providers show deepseek                # Show deepseek config\n  spica providers default deepseek             # Set deepseek as default')
   .action(async (action?: string, name?: string, value?: string, options?: { url?: string; model?: string }) => {
     if (!action) {
       const configured = await listProviders();
@@ -834,49 +829,26 @@ program
         });
       }
 
-      console.log(LAIN_COLORS.primary.bold('\nBuilt-in providers:'));
-      Object.entries(BUILTIN_PROVIDERS).forEach(([key, config]) => {
-        const isConfigured = configured && configured.includes(key);
-        console.log(`  ${isConfigured ? '●' : ' '} ${key} - ${config.name}`);
-        if (config.description) {
-          console.log(LAIN_COLORS.muted(`      ${config.description}`));
-        }
-      });
-
       console.log(LAIN_COLORS.muted('\nUsage:'));
-      console.log(LAIN_COLORS.muted('  spica providers set <name> <api-key>   # 配置已有provider'));
-      console.log(LAIN_COLORS.muted('  spica providers add <name> <api-key> --url <url>  # 添加自定义provider'));
-      console.log(LAIN_COLORS.muted('  spica providers default <name>        # 设置默认provider'));
+      console.log(LAIN_COLORS.muted('  spica providers set <name> <api-key> --url <url> --model <model>'));
+      console.log(LAIN_COLORS.muted('  spica providers default <name>'));
+      console.log(LAIN_COLORS.muted('  spica providers show <name>'));
+      console.log(LAIN_COLORS.muted('\nExamples:'));
+      console.log(LAIN_COLORS.muted('  spica providers set openai sk-xxx --url https://api.openai.com/v1 --model gpt-4o'));
+      console.log(LAIN_COLORS.muted('  spica providers set deepseek sk-xxx --url https://api.deepseek.com/v1 --model deepseek-chat'));
       return;
     }
 
     switch (action) {
       case 'set':
-        if (!name || !value) {
-          console.log(LAIN_COLORS.warning('Usage: spica providers set <name> <api-key> [--url <url>] [--model <model>]'));
-          return;
-        }
-        await setProviderConfig(name, value, options?.url, options?.model);
-        console.log(LAIN_COLORS.success(`[OK] Provider '${name}' configured`));
-        if (options?.url) console.log(LAIN_COLORS.muted(`  URL: ${options.url}`));
-        if (options?.model) console.log(LAIN_COLORS.muted(`  Model: ${options.model}`));
-        break;
-
-      case 'add':
-        if (!name || !value) {
-          console.log(LAIN_COLORS.warning('Usage: spica providers add <name> <api-key> --url <url> [--model <model>]'));
-          console.log(LAIN_COLORS.muted('Example: spica providers add myapi sk-xxx --url https://api.example.com/v1 --model gpt-4'));
-          return;
-        }
-        if (!options?.url) {
-          console.log(LAIN_COLORS.error('Error: --url is required for custom provider'));
-          console.log(LAIN_COLORS.warning('Usage: spica providers add <name> <api-key> --url <url> [--model <model>]'));
+        if (!name || !value || !options?.url || !options?.model) {
+          console.log(LAIN_COLORS.warning('Usage: spica providers set <name> <api-key> --url <url> --model <model>'));
           return;
         }
         await setProviderConfig(name, value, options.url, options.model);
-        console.log(LAIN_COLORS.success(`[OK] Custom provider '${name}' added`));
+        console.log(LAIN_COLORS.success(`[OK] Provider '${name}' configured`));
         console.log(LAIN_COLORS.muted(`  URL: ${options.url}`));
-        console.log(LAIN_COLORS.muted(`  Model: ${options.model || 'gpt-4'}`));
+        console.log(LAIN_COLORS.muted(`  Model: ${options.model}`));
         break;
 
       case 'show':
@@ -938,9 +910,10 @@ program
 // Skills管理
 program
   .command('skills')
-  .description('Manage custom skills')
-  .argument('[action]', 'list|install|uninstall|packages')
-  .argument('[source]', 'URL or package name')
+  .description('Manage custom skills (extendable AI templates)')
+  .argument('[action]', 'list|install|uninstall')
+  .argument('[source]', 'Skill source (URL or path)')
+  .addHelpText('after', '\nExamples:\n  spica skills list            # List installed skills\n  spica skills install https://github.com/user/skill')
   .action(async (action?: string, source?: string) => {
     if (!action) {
       // 默认列出所有skills
@@ -1031,9 +1004,10 @@ program
 // MCP管理
 program
   .command('mcp')
-  .description('Manage MCP (Model Context Protocol) servers')
-  .argument('[action]', 'list|init|connect|disconnect|tools')
-  .argument('[server]', 'Server name (optional)')
+  .description('Manage MCP servers (external tool servers)')
+  .argument('[action]', 'list|add|remove')
+  .argument('[server]', 'Server name')
+  .addHelpText('after', '\nExamples:\n  spica mcp list              # List configured MCP servers')
   .action(async (action?: string, server?: string) => {
     const manager = getMCPManager();  // 定义在开头，所有case都能用
 

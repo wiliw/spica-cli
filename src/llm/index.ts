@@ -1,5 +1,5 @@
 import { OpenAICompatibleProvider } from './providers/OpenAICompatible';
-import { getProviderConfig, BUILTIN_PROVIDERS } from '../utils/config';
+import { getProviderConfig } from '../utils/config';
 import type { ToolDefinition, LLMResponse } from './providers/BaseProvider';
 
 export class LLMClient {
@@ -44,5 +44,4 @@ export class LLMClient {
   }
 }
 
-export { BUILTIN_PROVIDERS } from '../utils/config';
 export type { ProviderConfig } from '../utils/config';

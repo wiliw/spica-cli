@@ -159,15 +159,25 @@ export class LLMClient extends EventEmitter {
     }
   }
 
-  async continueWithAllToolResults(toolResults: Array<{ name: string; result: string; id?: string }>, tools?: ToolDefinition[]): Promise<LLMResponse> {
+  async continueWithAllToolResults(
+    toolResults: Array<{ name: string; result: string; id?: string }>,
+    tools?: ToolDefinition[],
+    postToolMessages?: ChatMessage[]
+  ): Promise<LLMResponse> {
     const toolsToUse = tools || this.tools;
     const lastMessage = this.provider.getMessages()[this.provider.getMessages().length - 1];
 
-    // 添加所有tool结果消息
+    // 1. 先添加所有 tool 结果消息（确保紧跟在 assistant tool_calls 后）
     for (const { name, result, id } of toolResults) {
-      // 优先使用传入的id，否则用name匹配（兼容旧调用）
       const toolCallId = id || lastMessage.toolCalls?.find(tc => tc.name === name)?.id || '';
       this.provider.addToolMessage(toolCallId, result);
+    }
+
+    // 2. 再添加 post-tool 消息（如 REQUIRED_SKILL）
+    if (postToolMessages && postToolMessages.length > 0) {
+      for (const msg of postToolMessages) {
+        this.provider.addMessage(msg);
+      }
     }
 
     // 提前创建AbortController

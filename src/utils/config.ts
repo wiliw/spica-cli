@@ -4,7 +4,6 @@
 import {
   loadGlobalSettings,
   saveGlobalSettings,
-  BUILTIN_PROVIDERS,
   ProviderConfig,
   getProviderConfig as settingsGetProviderConfig,
   setProviderConfig as settingsSetProviderConfig,
@@ -18,20 +17,8 @@ export interface Config {
   providers?: Record<string, ProviderConfig>;
 }
 
-// 导出内置 providers
-export { BUILTIN_PROVIDERS };
-
 // DEFAULT_MODELS（兼容层）
-const DEFAULT_MODELS: Record<string, string> = {
-  openai: 'gpt-4',
-  anthropic: 'claude-3-opus',
-  together: 'meta-llama/Llama-3-70b-chat-hf',
-  groq: 'llama-3-70b',
-  replicate: 'llama-3-70b',
-  azure: 'gpt-4',
-  local: 'llama-3',
-  custom: 'gpt-4',
-};
+const DEFAULT_MODELS: Record<string, string> = {};
 export { DEFAULT_MODELS };
 
 // 兼容层函数
@@ -84,12 +71,11 @@ export async function setConfigValue(key: string, value: string): Promise<void> 
     const [provider, field] = parts;
     if (!settings.providers) settings.providers = {};
     if (!settings.providers[provider]) {
-      const builtin = BUILTIN_PROVIDERS[provider];
       settings.providers[provider] = {
-        name: builtin?.name || provider,
+        name: provider,
         apiKey: '',
-        baseUrl: builtin?.baseUrl || '',
-        model: DEFAULT_MODELS[provider] || 'gpt-4',
+        baseUrl: '',
+        model: 'gpt-4o',
       };
     }
     if (field === 'apiKey') settings.providers[provider].apiKey = value;

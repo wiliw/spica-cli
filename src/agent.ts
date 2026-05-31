@@ -1040,16 +1040,15 @@ async init() {
           return `[STOPPED] Agent stopped due to critical error in ${criticalError.tool}.\nError: ${criticalError.error}\nSuggestion: ${criticalError.suggestion}\nPlease fix the issue and retry.`;
         }
 
-        // Skill chain: inject REQUIRED_SKILL AFTER tool messages are added
+        // Skill chain: collect referenced skills for post-tool injection
         const referencedSkills = toolResults
           .filter(t => t.referencedSkills && t.referencedSkills.length > 0)
           .flatMap(t => t.referencedSkills || []);
         
-        if (referencedSkills.length > 0) {
-          for (const refName of referencedSkills) {
-            this.llm!.addMessage({ role: 'system' as const, content: `REQUIRED_SKILL: ${refName}` });
-          }
-        }
+        const postToolMessages = referencedSkills.map(refName => ({
+          role: 'system' as const,
+          content: `REQUIRED_SKILL: ${refName}`
+        }));
 
         // 所有工具完成后，一次性发送所有结果给LLM继续生成
         if (toolResults.length > 0) {
@@ -1058,7 +1057,8 @@ async init() {
             response = await this.callLLMWithRetry(
               () => this.llm!.continueWithAllToolResults(
                 toolResults.map(t => ({ name: t.name, result: t.result, id: t.id })),
-                toolDefinitions
+                toolDefinitions,
+                postToolMessages  // 在 tool 消息之后添加
               ),
               'llm_continue'
             );

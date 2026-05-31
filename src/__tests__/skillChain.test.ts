@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { ChatMessage } from '../llm/providers/BaseProvider';
 
 function findSkillReferences(content: string, skillNames: string[], excludeName: string): string[] {
   const found: string[] = [];
@@ -52,6 +53,47 @@ describe('Skill Chain Enforcement', () => {
       const content = 'Just some text with no skill names.';
       const refs = findSkillReferences(content, allSkills, 'brainstorming');
       expect(refs).toEqual([]);
+    });
+  });
+
+  describe('Message Sequence for Tool Calls', () => {
+    it('should maintain correct message sequence: assistant(tool_calls) -> tool -> system(REQUIRED_SKILL)', () => {
+      const messages: ChatMessage[] = [
+        { role: 'user', content: 'test' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'skill', arguments: {} }] },
+        { role: 'tool', content: 'skill result', toolCallId: 'call_1' },
+        { role: 'system', content: 'REQUIRED_SKILL: next-skill' },
+      ];
+
+      const assistantWithToolCalls = messages.findIndex(m => 
+        m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0
+      );
+      expect(assistantWithToolCalls).toBe(1);
+
+      const nextMsg = messages[assistantWithToolCalls + 1];
+      expect(nextMsg.role).toBe('tool');
+      expect(nextMsg.toolCallId).toBe('call_1');
+
+      const afterTool = messages[assistantWithToolCalls + 2];
+      expect(afterTool.role).toBe('system');
+      expect(afterTool.content).toContain('REQUIRED_SKILL');
+    });
+
+    it('should NOT have REQUIRED_SKILL between assistant(tool_calls) and tool', () => {
+      const messages: ChatMessage[] = [
+        { role: 'user', content: 'test' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'skill', arguments: {} }] },
+        { role: 'tool', content: 'skill result', toolCallId: 'call_1' },
+        { role: 'system', content: 'REQUIRED_SKILL: next-skill' },
+      ];
+
+      const assistantWithToolCalls = messages.findIndex(m => 
+        m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0
+      );
+      
+      const nextMsg = messages[assistantWithToolCalls + 1];
+      expect(nextMsg.role).not.toBe('system');
+      expect(nextMsg.content || '').not.toContain('REQUIRED_SKILL');
     });
   });
 });
