@@ -956,19 +956,17 @@ async init() {
               this.emit('hook_log', { tool: tc.name, message: postHookMessage });
             }
 
-            // Skill chain: inject REQUIRED_SKILL for referenced skills
-            if (tc.name === 'skill' && result.success && result.referencedSkills?.length) {
-              for (const refName of result.referencedSkills) {
-                this.llm!.addMessage({ role: 'system' as const, content: `REQUIRED_SKILL: ${refName}` });
-              }
-            }
-
             // workspace切换处理
             if (tc.name === 'workspace' && result.success && tcArgs.path) {
               await this.switchWorkspace(tcArgs.path);
             }
 
-            return { name: tc.name, id: tc.id, result: result.content || result.output || result.error || '' };
+            return { 
+              name: tc.name, 
+              id: tc.id, 
+              result: result.content || result.output || result.error || '',
+              referencedSkills: tc.name === 'skill' && result.success ? result.referencedSkills : undefined
+            };
           } catch (toolError: any) {
             // 清除 AbortController
             this.clearToolAbortController(tc.name);
@@ -1001,6 +999,17 @@ async init() {
             suggestion: criticalError.suggestion,
           });
           return `[STOPPED] Agent stopped due to critical error in ${criticalError.tool}.\nError: ${criticalError.error}\nSuggestion: ${criticalError.suggestion}\nPlease fix the issue and retry.`;
+        }
+
+        // Skill chain: inject REQUIRED_SKILL AFTER tool messages are added
+        const referencedSkills = toolResults
+          .filter(t => t.referencedSkills && t.referencedSkills.length > 0)
+          .flatMap(t => t.referencedSkills || []);
+        
+        if (referencedSkills.length > 0) {
+          for (const refName of referencedSkills) {
+            this.llm!.addMessage({ role: 'system' as const, content: `REQUIRED_SKILL: ${refName}` });
+          }
         }
 
         // 所有工具完成后，一次性发送所有结果给LLM继续生成
