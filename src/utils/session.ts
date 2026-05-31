@@ -47,7 +47,7 @@ export function loadSession(workspacePath: string): SessionState | null {
       }
       return session;
     }
-  } catch (error) {
+  } catch {
     // 忽略读取错误
   }
 
@@ -133,7 +133,7 @@ export function saveSession(workspacePath: string, messages: ChatMessage[], sess
 
     // Also save to sessions history (archive)
     archiveSession(workspacePath, session);
-  } catch (error) {
+  } catch {
     // 忽略保存错误
   }
 }
@@ -150,7 +150,7 @@ function archiveSession(workspacePath: string, session: SessionState): void {
 
     // Clean up old sessions (keep max 10)
     cleanupOldSessions(sessionsDir, 10);
-  } catch (error) {
+  } catch {
     // 忽略归档错误
   }
 }
@@ -175,9 +175,9 @@ function cleanupOldSessions(sessionsDir: string, maxKeep: number): void {
         } catch {}
       });
     }
-  } catch (error) {
-    // 忽略清理错误
-  }
+} catch {
+      // 忽略清理错误
+    }
 }
 
 // List all archived sessions
@@ -206,7 +206,7 @@ export function listSessions(workspacePath: string): SessionMeta[] {
       .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
 
     return files;
-  } catch (error) {
+  } catch {
     return [];
   }
 }
@@ -223,7 +223,7 @@ export function loadSessionById(workspacePath: string, sessionId: string): Sessi
       }
       return session;
     }
-  } catch (error) {}
+  } catch {}
 
   return null;
 }
@@ -237,7 +237,7 @@ export function switchSession(workspacePath: string, sessionId: string): boolean
     const spicaDir = join(workspacePath, '.spica');
     fs.writeJsonSync(join(spicaDir, 'session.json'), session, { spaces: 2 });
     return true;
-  } catch (error) {
+  } catch {
     return false;
   }
 }
@@ -250,7 +250,7 @@ export function clearSession(workspacePath: string): void {
     if (fs.existsSync(sessionPath)) {
       fs.removeSync(sessionPath);
     }
-  } catch (error) {
+  } catch {
     // 忽略清除错误
   }
 }
@@ -264,7 +264,7 @@ export function deleteSession(workspacePath: string, sessionId: string): boolean
       fs.removeSync(sessionPath);
       return true;
     }
-  } catch (error) {}
+  } catch {}
 
   return false;
 }
@@ -286,7 +286,7 @@ export function renameSession(workspacePath: string, sessionId: string, newName:
       fs.writeJsonSync(join(workspacePath, SESSIONS_DIR, `${sessionId}.json`), session, { spaces: 2 });
       return true;
     }
-  } catch (error) {}
+  } catch {}
 
   return false;
 }
