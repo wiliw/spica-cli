@@ -705,29 +705,9 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
             inputs = fileContent.split('\n').filter(line => line.length > 0);
           }
 
-          // Detached session management actions
-          if (action === 'status') {
-            // Check session status
-            const listResult = await execa('tmux list-sessions -F "#{session_name}: #{session_attached}" 2>/dev/null || screen -ls 2>/dev/null', {
-              shell: true,
-              timeout: 5000,
-              reject: false,
-            });
-            const output = listResult.stdout || listResult.stderr || 'No active sessions';
-            return { success: true, output };
-          }
-
-          if (action === 'kill' && session) {
-            // Kill specific session
-            const killResult = await execa(`tmux kill-session -t ${session} 2>/dev/null || screen -S ${session} -X quit 2>/dev/null`, {
-              shell: true,
-              timeout: 5000,
-              reject: false,
-            });
-            return { success: true, output: `Session ${session} killed` };
-          }
           // 交互式 PTY 模式：AI 可以输入/输出
           if (interactive) {
+            const expect = (safeArgs.expect as Array<{ wait: string; input: string }>) || [];
             return await runInteractivePty(command, WORKSPACE, timeout, inputs, expect, maxOutputLength, outputFile, eventCallback);
           }
 
@@ -753,17 +733,6 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
           }
 
           let actualCommand = command;
-
-          if (useTTY) {
-            // 检测最佳 TTY 模拟方案
-            const platform = process.platform;
-
-            if (platform === 'linux' || platform === 'darwin') {
-              // 使用 script 模拟 TTY
-              const escapedCommand = command.replace(/"/g, '\\"').replace(/\$/g, '\\$');
-              actualCommand = `script -q -c "${escapedCommand}" /dev/null 2>&1`;
-            }
-          }
 
           // 创建 AbortController 用于卡住检测和中断（优先使用 agent 传入的 signal）
           const externalSignal = safeArgs._abortSignal as AbortSignal | undefined;
@@ -809,21 +778,9 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
 
             // 检查是否超时或被中断
             if (bashResult.timedOut || abortController.signal.aborted) {
-              if (!detached && !interactive) {
-                return {
-                  success: false,
-                  error: `Command timeout after ${timeout / 1000}s.`,
-                  timeoutContext: {
-                    commandType: command.split(' ')[0], // 命令类型
-                    hasOutput: (bashResult.stdout || bashResult.stderr).length > 0,
-                    suggestedTimeout: 300,
-                    suggestedMode: 'detached',
-                  },
-                };
-              }
               return {
                 success: false,
-                error: `Timeout after ${timeout / 1000}s.`,
+                error: `Command timeout after ${timeout / 1000}s. Try using detached=true for long-running commands.`,
               };
             }
             // 合并stdout和stderr显示完整输出
