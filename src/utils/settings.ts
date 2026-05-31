@@ -95,15 +95,9 @@ const DEFAULT_HOOKS: Settings['hooks'] = {
 
 let settingsCache: Settings | null = null;
 
-// 加载全局 settings
 export async function loadGlobalSettings(): Promise<Settings> {
-  if (settingsCache) {
-    return settingsCache;
-  }
-
   await fs.ensureDir(GLOBAL_DIR);
 
-  // 如果 settings.json 不存在，创建默认配置
   if (!await fs.pathExists(GLOBAL_SETTINGS_FILE)) {
     const defaultSettings: Settings = {
       defaultProvider: 'openai',
@@ -114,11 +108,11 @@ export async function loadGlobalSettings(): Promise<Settings> {
     return settingsCache;
   }
 
-  settingsCache = await fs.readJson(GLOBAL_SETTINGS_FILE) as Settings;
-  return settingsCache;
+  const loaded = await fs.readJson(GLOBAL_SETTINGS_FILE) as Settings;
+  settingsCache = loaded;
+  return loaded;
 }
 
-// 保存全局 settings
 export async function saveGlobalSettings(settings: Settings): Promise<void> {
   await fs.ensureDir(GLOBAL_DIR);
   await fs.writeJson(GLOBAL_SETTINGS_FILE, settings, { spaces: 2 });

@@ -1,1 +1,0 @@
-{"version":3,"file":"MessageList.d.ts","sourceRoot":"","sources":["../../../src/tui/components/MessageList.tsx"],"names":[],"mappings":"AAAA,OAAO,KAAK,MAAM,OAAO,CAAC;AAE1B,OAAO,EAAE,OAAO,EAAE,MAAM,mBAAmB,CAAC;AAE5C,UAAU,KAAK;IACb,QAAQ,EAAE,OAAO,EAAE,CAAC;CACrB;AAED,wBAAgB,WAAW,CAAC,EAAE,QAAQ,EAAE,EAAE,KAAK,qBA8C9C"}

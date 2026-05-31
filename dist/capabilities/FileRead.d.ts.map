@@ -1,1 +1,0 @@
-{"version":3,"file":"FileRead.d.ts","sourceRoot":"","sources":["../../src/capabilities/FileRead.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,UAAU,EAAE,gBAAgB,EAAE,cAAc,EAAE,cAAc,EAAE,MAAM,SAAS,CAAC;AAEvF,qBAAa,kBAAmB,YAAW,UAAU,CAAC,cAAc,EAAE,cAAc,CAAC;IACnF,IAAI,SAAe;IACnB,WAAW,SAA8B;IAEnC,OAAO,CAAC,MAAM,EAAE,cAAc,GAAG,OAAO,CAAC,gBAAgB,CAAC,cAAc,CAAC,CAAC;CAqBjF"}

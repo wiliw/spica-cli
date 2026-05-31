@@ -67,43 +67,31 @@ export const BG = {
     BG._bannerStopSignal = false;
 
     return new Promise<void>((resolve) => {
-      // 使用终端标准 cyan 颜色
-      const cyanBright = '\x1b[96m'; // bright cyan (cyanBright)
+      const cyanBright = '\x1b[96m';
+      const cyanNormal = '\x1b[36m';
 
-      // 打印 banner（1空行 + 5行 = 6行）
       process.stdout.write('\n');
       lines.forEach(line => process.stdout.write(cyanBright + line + reset + '\n'));
 
-      // 简单的呼吸动画（亮度变化）
-      const breathe = async () => {
-        const cyanNormal = '\x1b[36m'; // normal cyan
-        while (!BG._bannerStopSignal) {
-          // 渐暗
-          for (let i = 0; i < 3 && !BG._bannerStopSignal; i++) {
-            process.stdout.write(esc + '[5A');
-            lines.forEach(line => process.stdout.write(cyanNormal + line + reset + '\n'));
-            await new Promise(r => setTimeout(r, 200));
-            if (BG._bannerStopSignal) break;
-          }
-          // 渐亮
-          for (let i = 0; i < 3 && !BG._bannerStopSignal; i++) {
-            process.stdout.write(esc + '[5A');
-            lines.forEach(line => process.stdout.write(cyanBright + line + reset + '\n'));
-            await new Promise(r => setTimeout(r, 200));
-            if (BG._bannerStopSignal) break;
-          }
+      let frameCount = 0;
+      let color = cyanBright;
+
+      const animate = () => {
+        if (BG._bannerStopSignal) {
+          resolve();
+          return;
         }
 
-        // 停止后恢复亮色并空一行
+        frameCount++;
+        color = frameCount % 2 === 0 ? cyanBright : cyanNormal;
+        
         process.stdout.write(esc + '[5A');
-        lines.forEach(line => process.stdout.write(cyanBright + line + reset + '\n'));
-        process.stdout.write('\n');
+        lines.forEach(line => process.stdout.write(color + line + reset + '\n'));
 
-        resolve();
+        setTimeout(animate, 500);
       };
 
-      // 延迟后开始呼吸
-      setTimeout(breathe, 500);
+      setTimeout(animate, 500);
     });
   },
 

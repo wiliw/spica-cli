@@ -1,1 +1,0 @@
-{"version":3,"file":"FileSearch.d.ts","sourceRoot":"","sources":["../../src/capabilities/FileSearch.ts"],"names":[],"mappings":"AAEA,OAAO,EAAE,UAAU,EAAE,gBAAgB,EAAE,gBAAgB,EAAE,gBAAgB,EAAE,MAAM,SAAS,CAAC;AAE3F,qBAAa,oBAAqB,YAAW,UAAU,CAAC,gBAAgB,EAAE,gBAAgB,CAAC;IACzF,IAAI,SAAiB;IACrB,WAAW,SAA+C;IAEpD,OAAO,CAAC,MAAM,EAAE,gBAAgB,GAAG,OAAO,CAAC,gBAAgB,CAAC,gBAAgB,CAAC,CAAC;CA2CrF"}

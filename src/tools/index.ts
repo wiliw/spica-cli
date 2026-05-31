@@ -716,13 +716,12 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
             const sessionId = `spica_${Date.now()}`;
             const escapedCommand = command.replace(/'/g, "'\\''");
 
-            // 检测 tmux 是否可用
             const actualCommand = `tmux new-session -d -s ${sessionId} '${escapedCommand}' 2>/dev/null || screen -dmS ${sessionId} ${escapedCommand} 2>/dev/null || (${escapedCommand} &)`;
 
-            const bashResult = await execa(actualCommand, {
+            await execa(actualCommand, {
               shell: true,
               cwd: WORKSPACE,
-              timeout: 5000,  // 启动命令本身很快
+              timeout: 5000,
               reject: false,
             });
 
@@ -732,7 +731,7 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
             };
           }
 
-          let actualCommand = command;
+          const actualCommand = command;
 
           // 创建 AbortController 用于卡住检测和中断（优先使用 agent 传入的 signal）
           const externalSignal = safeArgs._abortSignal as AbortSignal | undefined;
