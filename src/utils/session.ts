@@ -62,34 +62,38 @@ function cleanMessages(messages: ChatMessage[]): ChatMessage[] {
     const m = messages[i];
     
     if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
-      // 检查这个assistant的tool_calls是否都有对应的tool响应
       const expectedIds = m.toolCalls.map(tc => tc.id);
       let j = i + 1;
       const foundIds: string[] = [];
+      
+      // Collect tool responses
       while (j < messages.length && messages[j].role === 'tool') {
         foundIds.push(messages[j].toolCallId || '');
         j++;
       }
       
-      const missing = expectedIds.filter(id => !foundIds.includes(id) || usedToolCallIds.has(id));
+      // Check if all tool calls have responses and none are reused
+      const missingOrReused = expectedIds.filter(id => 
+        !foundIds.includes(id) || usedToolCallIds.has(id)
+      );
       
-      if (missing.length === 0) {
-        // 完整配对，保留assistant和所有tool响应
+      if (missingOrReused.length === 0) {
+        // Complete pair - keep assistant with toolCalls and all tool responses
         result.push({ role: 'assistant', content: m.content || '', toolCalls: m.toolCalls });
         for (let k = i + 1; k < j; k++) {
           result.push(messages[k]);
           usedToolCallIds.add(messages[k].toolCallId || '');
         }
       } else {
-        // 不完整，只保留assistant纯文本
+        // Incomplete - strip toolCalls from assistant, keep only text
         result.push({ role: 'assistant', content: m.content || '' });
       }
-      i = j - 1; // 跳过已处理的tool消息
+      i = j - 1; // Skip processed tool messages
     } else if (m.role === 'tool') {
-      // 单独的tool消息（没有前面的assistant），跳过
+      // Orphaned tool message (no preceding assistant with toolCalls), skip
       continue;
     } else {
-      // user或纯文本assistant，保留
+      // user, system, or text-only assistant
       result.push({ role: m.role, content: m.content || '' });
     }
   }
@@ -97,17 +101,43 @@ function cleanMessages(messages: ChatMessage[]): ChatMessage[] {
   return result;
 }
 
-// Truncate messages before saving to prevent huge session files
+function truncateContent(content: string | undefined): string {
+  if (!content) return '';
+  if (content.length <= MAX_MESSAGE_LENGTH) return content;
+  return content.slice(0, MAX_MESSAGE_LENGTH) + '...[truncated]';
+}
+
 function truncateMessages(messages: ChatMessage[]): ChatMessage[] {
   const recent = messages.slice(-MAX_SESSION_MESSAGES);
 
-  return recent
-    .filter(m => m.role === 'user' || (m.role === 'assistant' && m.content && m.content.length > 0))
-    .map(m => ({
-      role: m.role,
-      content: (m.content || '').slice(0, MAX_MESSAGE_LENGTH) + 
-        ((m.content || '').length > MAX_MESSAGE_LENGTH ? '...[truncated]' : ''),
-    }));
+  const result: ChatMessage[] = [];
+  for (let i = 0; i < recent.length; i++) {
+    const m = recent[i];
+
+    if (m.role === 'tool') {
+      result.push({
+        role: m.role,
+        content: truncateContent(m.content),
+        toolCallId: m.toolCallId,
+      });
+    } else if (m.role === 'assistant') {
+      const msg: ChatMessage = {
+        role: m.role,
+        content: truncateContent(m.content),
+      };
+      if (m.toolCalls && m.toolCalls.length > 0) {
+        msg.toolCalls = m.toolCalls;
+      }
+      result.push(msg);
+    } else if (m.role === 'user' || m.role === 'system') {
+      result.push({
+        role: m.role,
+        content: truncateContent(m.content),
+      });
+    }
+  }
+
+  return result;
 }
 
 // Save current session
