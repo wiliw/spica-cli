@@ -122,14 +122,21 @@ program
       return;
     }
 
+    // 开始banner动画（并行）
+    const bannerPromise = BG.banner();
+
+    // TUI handler (defined before try to be accessible in catch)
+    let tuiHandler: TUIInputHandler | null = null;
+
     try {
       await agent.init();
 
-      // 简单启动信息（无动画）
-      console.log();
-      console.log(LAIN_COLORS.primary('  spica - AI coding assistant'));
-      console.log(LAIN_COLORS.muted(`  Model: ${providerConfig.model} | Provider: ${providerName}`));
-      console.log();
+      // 停止banner动画
+      BG.stopBanner();
+      await bannerPromise;
+
+      // 清屏，准备设置滚动区域
+      screen.appendScroll(`${ESC}[2J${ESC}[1;1H`);
 
       // TUI 输入处理（设置滚动区域）
       tuiHandler = new TUIInputHandler();
