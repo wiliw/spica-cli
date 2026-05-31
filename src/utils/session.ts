@@ -119,10 +119,11 @@ export function saveSession(workspacePath: string, messages: ChatMessage[], sess
 
     const truncated = truncateMessages(messages);
     const existingSession = loadSession(workspacePath);
+    const cleaned = cleanMessages(truncated);
 
     const session: SessionState = {
       workspacePath,
-      messages: truncated,
+      messages: cleaned,
       lastActivity: new Date().toISOString(),
       id: existingSession?.id || generateSessionId(),
       name: sessionName || existingSession?.name || `Session ${new Date().toLocaleDateString()}`,
