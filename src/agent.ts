@@ -10,7 +10,7 @@ import { SkillDefinition } from './utils/settings';
 import { loadProjectState, saveProjectState, updateProjectTodos, loadProjectContext, saveProjectContext, ensureProjectDir } from './storage/projectState';
 import { runPreHooks, runPostHooks } from './hooks';
 import { LAIN_COLORS } from './cli/ui/colors';
-import { classifyIntent } from './cli/skillGate';
+// classifyIntent merged into matchSkill — see enhanced matchSkill() below
 import { EventEmitter } from 'events';
 import fs from 'fs-extra';
 import * as path from 'path';
@@ -351,18 +351,40 @@ export class SpicaAgent extends EventEmitter {
     }
   }
 
+// Unified skill classifier: merges old matchSkill + classifyIntent patterns.
+// Returns the best-matching skill, or null if no skill applies.
 private matchSkill(prompt: string): SkillDefinition | null {
     if (this._cachedSkills.length === 0) {
       this._cachedSkills = listSkills(this.workspacePath);
     }
 
+    const p = prompt.toLowerCase().trim();
+    if (!p) return null;
+
+    // --- Negative patterns (pure info questions → no skill) ---
+    // "what is X" / "how does X work" — pure information, no skill needed
+    if (/^(what is|how does|who is|where is|when did)\b/.test(p)) return null;
+    // "explain X" without creation/fix keywords → pure info
+    const hasActionWord = /\b(create|add|build|make|implement|write|fix|debug|bug|error|broken|change|modify|update|remove|delete|refactor|design)\b/.test(p);
+    if (/^explain\b/.test(p) && !hasActionWord) return null;
+
+    // --- Composite brainstorming patterns ---
+    if ((p.includes('how to make') && p.includes('better')) ||
+        (p.includes('how to improve')) ||
+        p.includes('could we') ||
+        p.includes('should we') ||
+        p.includes('what would you change')) {
+      return this._cachedSkills.find(s => s.name === 'brainstorming') || null;
+    }
+
+    // --- Keyword map (ordered: more specific first) ---
     const keywordMap = new Map([
       ['brainstorming', ['create', 'build', 'implement', 'add', 'refactor', 'design', 'new feature', 'remove', 'delete', 'change', 'modify', 'update']],
       ['systematic-debugging', ['fix', 'bug', 'error', 'failure', 'not working', 'crash', 'test fail', 'broken', 'debug']],
       ['test-driven-development', ['write test', 'add test', 'implement feature', 'need test']],
       ['writing-plans', ['multi-step', 'plan', 'spec', 'requirements', 'before coding', 'strategy']],
       ['verification-before-completion', ['complete', 'done', 'finished', 'verify', 'before commit']],
-      ['requesting-code-review', ['review', 'merge', 'pr', 'check code']],
+      ['requesting-code-review', ['review', 'merge', 'pr', 'check code', 'look over']],
       ['receiving-code-review', ['feedback', 'review comment', 'suggestion', 'change requested']],
       ['using-superpowers', ['skill', 'capability', 'ability', 'what can you', 'help']],
       ['using-git-worktrees', ['worktree', 'isolate', 'branch']],
@@ -373,16 +395,24 @@ private matchSkill(prompt: string): SkillDefinition | null {
       ['writing-skills', ['write skill', 'create skill', 'new skill']],
     ]);
 
-    const promptLower = prompt.toLowerCase();
+    // Composite Tier 2: creation verb + target noun → brainstorming
+    const creationVerbs = ['create', 'add', 'build', 'make', 'implement', 'write'];
+    const targetNouns = ['feature', 'component', 'module', 'system', 'function', 'class', 'file', 'something', 'thing'];
+    const hasCreationVerb = creationVerbs.some(v => p.includes(v));
+    const hasTargetNoun = targetNouns.some(n => p.includes(n));
+    if (hasCreationVerb && hasTargetNoun) {
+      const brainstorming = this._cachedSkills.find(s => s.name === 'brainstorming');
+      if (brainstorming) return brainstorming;
+    }
     
     for (const skill of this._cachedSkills) {
       if (!skill.name) continue;
       const skillKeywords = keywordMap.get(skill.name) || [];
-      if (skillKeywords.some(kw => promptLower.includes(kw))) {
+      if (skillKeywords.some(kw => p.includes(kw))) {
         return skill;
       }
       
-      if (skill.description && promptLower.includes(skill.description.toLowerCase().slice(0, 20))) {
+      if (skill.description && p.includes(skill.description.toLowerCase().slice(0, 20))) {
         return skill;
       }
     }
@@ -677,10 +707,9 @@ async init() {
       prompt = skillContent;
     }
 
-    // Inject REQUIRED_SKILL as system message if classifier detects a skill
-    const classifiedSkill = classifyIntent(prompt);
-    if (classifiedSkill && (!matchedSkill || matchedSkill.name !== classifiedSkill)) {
-      this.llm.addMessage({ role: 'system' as const, content: `REQUIRED_SKILL: ${classifiedSkill}` });
+    // Inject REQUIRED_SKILL to force agent to call the matched skill tool
+    if (matchedSkill) {
+      this.llm.addMessage({ role: 'system' as const, content: `REQUIRED_SKILL: ${matchedSkill.name}` });
     }
 
     // 🔒 自动checkpoint：在AI工作前创建备份点

@@ -24,16 +24,9 @@ If task has 3+ steps → Use todowrite tool to create task list BEFORE starting.
 Before edit: file_read first. Discovery pattern: glob/grep → file_read (parallel).
 
 **Gate 4: Self-Review (POST-CODE)**
-After file_write/edit/delete → MUST run 5-point checklist:
-
-1. Type check: npx tsc --noEmit (fix errors)
-2. Tests: npm run test:run (fix NEW failures, pre-existing OK)
-   If fail → invoke skill(name="systematic-debugging")
-3. Integration: Check import/export/call completeness
-4. Edge cases: Empty input? null? Errors?
-5. Docs: AGENTS.md update needed?
-
-Fix failures BEFORE claiming Done.
+After file_write/edit/delete → run lint + test + verify completeness.
+If tests fail → invoke skill(name="systematic-debugging").
+Fix failures BEFORE claiming Done. Full checklist: skill(name="verification-before-completion").
 
 **Gate 5: Verification (COMPLETION)**
 Before saying "Done": All tests pass? Build succeeds? Task criteria met?
@@ -59,16 +52,6 @@ export function buildSkillsSection(skillsMetadata: string): string {
   return `
 ## Available Skills
 ${skillsMetadata}
-
-<SKILL-RULE>
-**MANDATORY**: Before responding to ANY user request:
-1. Read the skill descriptions above
-2. If ANY skill matches (even partially), invoke the skill tool with its name
-3. Follow the skill's instructions exactly
-4. Only proceed with direct action if NO skill applies
-
-Do NOT skip this check. Do NOT assume "this is too simple". Check first.
-</SKILL-RULE>
 `;
 }
 
