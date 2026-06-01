@@ -58,6 +58,10 @@ describe('getSystemPrompt learnings', () => {
   });
 
   it('does not crash on permission errors', () => {
+    if (process.platform === 'win32') {
+      // chmod does not work on Windows, skip this test
+      return;
+    }
     fs.mkdirpSync(path.join(tmpDir, '.spica', 'learnings'));
     fs.writeFileSync(path.join(tmpDir, '.spica', 'learnings', '2026-01-01-ok.md'), 'ok');
     // Make the dir unreadable

@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "npm run build:cli",
-    "build:cli": "PWD=$(pwd) && cat > bin/spica << EOF\n#!/usr/bin/env -S npx tsx\nimport('${PWD}/src/index.ts');\nEOF\nchmod +x bin/spica",
+    "build:cli": "node scripts/build-bin.js",
     "test": "vitest",
     "test:run": "vitest run",
     "lint": "eslint src/**/*.ts",

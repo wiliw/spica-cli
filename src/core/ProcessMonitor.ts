@@ -1,7 +1,9 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execSync } from 'child_process';
 import fs from 'fs-extra';
 import path from 'path';
 import { randomUUID } from 'crypto';
+
+const isWindows = globalThis.process.platform === 'win32';
 
 export enum ProcessStatus {
   RUNNING = 'running',
@@ -114,13 +116,26 @@ export class ProcessMonitor {
 
       stored.info.status = ProcessStatus.KILLED;
       stored.info.endTime = new Date();
-      process.kill('SIGTERM');
 
-      setTimeout(() => {
-        if (stored.info.status === ProcessStatus.KILLED) {
-          process.kill('SIGKILL');
+      if (isWindows) {
+        // Windows: kill via taskkill (SIGTERM not supported)
+        try {
+          process.kill();
+        } catch {
+          // Fallback: taskkill
+          try {
+            execSync(`taskkill /PID ${process.pid} /T /F`, { stdio: 'ignore' });
+          } catch {}
         }
-      }, 5000);
+      } else {
+        process.kill('SIGTERM');
+
+        setTimeout(() => {
+          if (stored.info.status === ProcessStatus.KILLED) {
+            process.kill('SIGKILL');
+          }
+        }, 5000);
+      }
     });
   }
 
