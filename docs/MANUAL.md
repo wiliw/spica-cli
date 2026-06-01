@@ -105,16 +105,6 @@ spica mcp tools
 
 ---
 
-## Environment Variables
-
-```bash
-export OPENAI_API_KEY=sk-xxx
-export OPENAI_BASE_URL=https://api.openai.com/v1
-export OPENAI_MODEL=gpt-4o
-```
-
----
-
 ## Local Models
 
 ```bash

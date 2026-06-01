@@ -88,14 +88,6 @@ spica remove <name>
 }
 ```
 
-### 环境变量（可选）
-
-```bash
-export OPENAI_API_KEY=sk-xxx...
-export OPENAI_BASE_URL=https://api.openai.com/v1
-export OPENAI_MODEL=gpt-4o
-```
-
 ---
 
 ## Skills配置
