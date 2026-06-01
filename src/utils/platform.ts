@@ -1,6 +1,7 @@
 import os from 'os';
 import path from 'path';
 import fs from 'fs-extra';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 
 const isWindows = process.platform === 'win32';
 
@@ -56,4 +57,11 @@ export function getBashOrFallback(): { shell: string; args: string[] } {
 
 export function supportsTmux(): boolean {
   return !isWindows;
+}
+
+export function getProxyAgent(): HttpsProxyAgent<string> | undefined {
+  const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy ||
+                   process.env.HTTP_PROXY || process.env.http_proxy;
+  if (!proxyUrl) return undefined;
+  return new HttpsProxyAgent(proxyUrl);
 }

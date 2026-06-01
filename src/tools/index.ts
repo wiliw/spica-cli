@@ -7,17 +7,10 @@ import { SpicaAgent } from '../agent';
 import { SubAgentTask, getSubAgentConfig, isToolAllowed, summarizeResult } from './subAgent';
 import { computeDiff, formatDiff, generateEditDiff } from '../cli/ui/diff';
 import { getMCPManager } from '../mcp/client';
-import { getBashPath, supportsTmux } from '../utils/platform';
+import { getBashPath, supportsTmux, getProxyAgent } from '../utils/platform';
 import axios from 'axios';
 
 const isWindows = process.platform === 'win32';
-
-let pty: typeof import('node-pty') | null = null;
-try {
-  pty = await import('node-pty');
-} catch {
-  // node-pty not available (common on Windows without native build tools)
-}
 
 // WORKSPACE 可以通过 setWorkspace 函数更新
 let WORKSPACE = process.cwd();
@@ -1023,6 +1016,7 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
           // Tavily API (preferred if configured)
           if (engine === 'tavily' && tavilyApiKey) {
             try {
+              const proxyAgent = getProxyAgent();
               const tavilyResp = await axios.post('https://api.tavily.com/search', {
                 api_key: tavilyApiKey,
                 query: safeArgs.query,
@@ -1031,6 +1025,7 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
               }, {
                 timeout: timeoutMs,
                 signal: abortController.signal,
+                ...(proxyAgent ? { httpsAgent: proxyAgent, proxy: false } : {}),
               });
 
               const data = tavilyResp.data;
@@ -1045,6 +1040,7 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
 
           // DuckDuckGo HTML (default, free)
           const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(safeArgs.query)}`;
+          const proxyAgent = getProxyAgent();
 
           const searchResp = await axios.get(searchUrl, {
             timeout: Math.min(timeoutMs, 15000),
@@ -1054,6 +1050,7 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
               'Accept': 'text/html',
             },
             maxRedirects: 5,
+            ...(proxyAgent ? { httpsAgent: proxyAgent, proxy: false } : {}),
           });
 
           if (abortController.signal.aborted) {
@@ -1126,6 +1123,7 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
         }
 
         try {
+          const proxyAgent = getProxyAgent();
           const fetchResp = await axios.get(url, {
             timeout: timeoutMs,
             signal: abortController.signal,
@@ -1137,6 +1135,7 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
             },
             maxRedirects: 10,
             responseType: 'text',
+            ...(proxyAgent ? { httpsAgent: proxyAgent, proxy: false } : {}),
           });
 
           // 检查是否被中断
@@ -1882,13 +1881,15 @@ async function runInteractivePty(
   outputFile?: string,
   eventCallback?: (event: string, data: any) => void
 ): Promise<ToolResult> {
+  let pty: typeof import('node-pty');
+  try {
+    pty = await import('node-pty');
+  } catch {
+    return { success: false, error: 'node-pty not available. Install with: npm install node-pty (requires native build tools).' };
+  }
+
   return new Promise((resolve) => {
     // 创建 PTY（通过 shell 执行，支持 cd、&& 等语法）
-    if (!pty) {
-      resolve({ success: false, error: 'node-pty not available. Install with: npm install node-pty (requires native build tools).' });
-      return;
-    }
-
     const bashPath = getBashPath();
     const shell = bashPath || (isWindows ? process.env.COMSPEC || 'cmd.exe' : '/bin/bash');
     const shellArgs = bashPath ? ['-c', command] : (isWindows ? ['/c', command] : ['-c', command]);
