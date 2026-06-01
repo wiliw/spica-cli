@@ -87,7 +87,7 @@ npx tsc --noEmit: 无错误
 - CLI入口
 - 全局状态管理 (currentAgent, globalProviderConfig, globalIsProcessing, globalBypassMode...)
 - 交互循环 (300+行)
-- 命令处理 (8个命令处理器: run, providers, skills, mcp...)
+- 命令处理 (8个命令处理器: run, set, use, list, skills, mcp...)
 - 事件监听 (setupAgentEvents 80+行)
 - 状态显示
 
@@ -220,7 +220,7 @@ src/
 │   ├── interactive.ts # 交互循环
 │   ├── commands/     # 命令处理器
 │   │   ├── run.ts
-│   │   ├── providers.ts
+│   │   ├── set, use, list.ts
 │   │   ├── skills.ts
 │   │   └── mcp.ts
 │   └── ui/           # UI组件 ✓
@@ -245,7 +245,7 @@ src/
 │
 ├── llm/              # Infrastructure层
 │   ├── LLMClient.ts
-│   ├── providers/
+│   ├── set, use, list/
 │   └── TokenCounter.ts
 │
 ├── storage/          # 持久化层 ✓
