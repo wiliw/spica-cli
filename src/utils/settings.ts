@@ -114,6 +114,13 @@ export async function loadGlobalSettings(): Promise<Settings> {
 
 export async function saveGlobalSettings(settings: Settings): Promise<void> {
   await fs.ensureDir(GLOBAL_DIR);
+
+  // 记录保存操作的来源（调试用）
+  const caller = new Error().stack?.split('\n')[2] || 'unknown';
+  const auditPath = join(GLOBAL_DIR, 'settings_audit.log');
+  const entry = `[${new Date().toISOString()}] saveGlobalSettings called from: ${caller}\n`;
+  await fs.appendFile(auditPath, entry);
+
   await fs.writeJson(GLOBAL_SETTINGS_FILE, settings, { spaces: 2 });
 
   if (process.platform !== 'win32') {
