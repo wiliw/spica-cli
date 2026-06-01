@@ -13,17 +13,11 @@ const state = getRuntimeState();
 function buildStatusText(
   agent: SpicaAgent,
   model: string | undefined,
-  mode: string,
+  bypassMode: boolean,
   tokenCounter: TokenCounter
 ): string {
-  const modeColors: Record<string, string> = {
-    plan: '\x1b[36m', build: '\x1b[32m', bypass: '\x1b[33m',
-  };
-  const modeLabels: Record<string, string> = {
-    plan: 'PLAN', build: 'BUILD', bypass: 'PASS',
-  };
-  const mc = modeColors[mode] || '\x1b[32m';
-  const ml = modeLabels[mode] || 'BUILD';
+  const modeLabel = bypassMode ? 'BYPASS' : 'STRICT';
+  const modeColor = bypassMode ? '\x1b[33m' : '\x1b[32m';
 
   const messages = agent.getMessages();
   const usedTokens = tokenCounter.estimateMessages(messages);
@@ -33,7 +27,7 @@ function buildStatusText(
   const maxK = contextWindow >= 1000 ? `${Math.floor(contextWindow / 1000)}k` : String(contextWindow);
   const pctColor = percent >= 80 ? '\x1b[31m' : percent >= 60 ? '\x1b[33m' : '\x1b[32m';
 
-  return `${model || '?'} | ${mc}${ml}\x1b[0m | ${pctColor}${percent}%\x1b[0m ${usedK}/${maxK}`;
+  return `${model || '?'} | ${modeColor}${modeLabel}\x1b[0m | ${pctColor}${percent}%\x1b[0m ${usedK}/${maxK}`;
 }
 
 function formatArgs(args: Record<string, any>): string {
@@ -237,30 +231,22 @@ export function setupAgentEvents(
     screen.appendScroll(COLORS.file(`\n[DIR] Workspace: ${data.path}\n`));
   });
 
-  agent.on('mode_changed', (data: { mode: string }) => {
-    state.setAgentMode(data.mode as any);
-    const modeMessages: Record<string, string> = {
-      plan:   '[PLAN] Read-only mode (no file changes)',
-      build:  '[BUILD] Permission mode (ask before writes)',
-      bypass: '[BYPASS] Auto-approve mode (5min timeout)',
-    };
-    const modeColors: Record<string, Function> = {
-      plan:   COLORS.secondary,
-      build:  COLORS.success,
-      bypass: COLORS.bypass,
-    };
-    const color = modeColors[data.mode] || COLORS.success;
-    const msg = modeMessages[data.mode] || modeMessages.build;
+  agent.on('bypass_changed', (data: { enabled: boolean }) => {
+    state.setBypassMode(data.enabled);
+    const msg = data.enabled
+      ? '[BYPASS] Auto-approve mode activated'
+      : '[STRICT] Permission mode activated';
+    const color = data.enabled ? COLORS.warning : COLORS.success;
     screen.appendScroll(color(`\n${msg}\n`));
     if (model && tokenCounter) {
-      screen.setStatus(buildStatusText(agent, model, data.mode, tokenCounter));
+      screen.setStatus(buildStatusText(agent, model, data.enabled, tokenCounter));
     }
   });
 
   // 工具执行完成后刷新状态栏（更新上下文占用）
   agent.on('tool_result', () => {
     if (model && tokenCounter) {
-      screen.setStatus(buildStatusText(agent, model, state.getAgentMode(), tokenCounter));
+      screen.setStatus(buildStatusText(agent, model, state.isBypassMode(), tokenCounter));
     }
   });
 

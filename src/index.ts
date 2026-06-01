@@ -8,6 +8,7 @@ import {
   setProviderConfig,
   listProviders,
   setDefaultProvider,
+  GLOBAL_SETTINGS_FILE,
 } from './utils/settings';
 import { MCPServerConfig } from './utils/settings';
 import { loadSession, saveSession } from './utils/session';
@@ -21,7 +22,6 @@ import { TUIInputHandler } from './cli/ui/tuiInput';
 import { setupAgentEvents, formatRunStats } from './cli/events';
 import { displayStatusLine } from './cli/status';
 import { getRuntimeState, resetRuntimeState } from './core/RuntimeState';
-import { FileCompleter } from './cli/ui/fileCompleter';
 
 import { getScreenManager } from './cli/ui/screenManager';
 import { TokenCounter } from './llm/TokenCounter';
@@ -134,10 +134,6 @@ program
       tuiHandler.start();
       tuiStarted = true;
 
-      // @ 文件引用搜索
-      const fileCompleter = new FileCompleter(process.cwd());
-      screen.setFileCompleter(fileCompleter);
-
       // 自动加载历史
       if (!options.fresh) {
         const session = loadSession(process.cwd());
@@ -151,10 +147,10 @@ program
 
       // Tab 补全命令列表
         const BASE_COMMANDS = [
-          '/help', '/h', '/status', '/bypass', '/strict', '/plan', '/build',
+          '/help', '/h', '/status', '/bypass', '/strict',
           '/queue', '/q', '/undo', '/clear', '/reset',
           '/skills', '/skill-add', '/skill-remove', '/skill-edit',
-          '/history', '/compact', '/init', '/think',
+          '/history', '/compact', '/init',
         ];
       const getCommands = () => {
         const skills = listSkills(process.cwd());
@@ -166,12 +162,6 @@ program
       });
 
       // 显示状态栏（简洁版）
-      const modeLabels: Record<string, { color: string; label: string }> = {
-        plan:   { color: '\x1b[36m', label: 'PLAN' },
-        build:  { color: '\x1b[32m', label: 'BUILD' },
-        bypass: { color: '\x1b[33m', label: 'PASS' },
-      };
-
       // 获取上下文窗口大小
       const provider = agent.getLLM()?.getProvider();
       const contextWindow = provider?.getContextWindow() || 128000;
@@ -179,9 +169,6 @@ program
       tokenCounter.setContextWindow(contextWindow);
 
       const updateStatusBar = () => {
-        const mode = state.getAgentMode();
-        const ml = modeLabels[mode] || modeLabels.build;
-
         // 计算上下文占用
         const messages = agent.getMessages();
         const usedTokens = tokenCounter.estimateMessages(messages);
@@ -191,8 +178,9 @@ program
 
         // 颜色：绿色 <60%，黄色 60-80%，红色 >80%
         const pctColor = percent >= 80 ? '\x1b[31m' : percent >= 60 ? '\x1b[33m' : '\x1b[32m';
+        const modeLabel = state.isBypassMode() ? '\x1b[33mBYPASS\x1b[0m' : '\x1b[32mSTRICT\x1b[0m';
 
-        screen.setStatus(`${providerConfig.model} | ${ml.color}${ml.label}\x1b[0m | ${pctColor}${percent}%\x1b[0m ${usedK}/${maxK}`);
+        screen.setStatus(`${providerConfig.model} | ${modeLabel} | ${pctColor}${percent}%\x1b[0m ${usedK}/${maxK}`);
       };
       updateStatusBar();
 
@@ -200,21 +188,6 @@ program
       screen.setVerboseToggleCallback(() => {
         const newMode = state.toggleVerboseMode();
         screen.appendScroll(COLORS.secondary(`\n[MODE] ${newMode ? 'Verbose' : 'Compact'} display enabled\n`));
-        updateStatusBar();
-        screen.restoreCursor();
-        screen.refreshInput();
-      });
-
-      // 设置 Tab 模式切换回调（空输入时 Tab 循环 plan→build→bypass）
-      screen.setModeCycleCallback(() => {
-        const newMode = state.cycleAgentMode();
-        agent.setAgentMode(newMode);
-        const modeMessages: Record<string, string> = {
-          plan:   '[PLAN] Read-only mode (no file changes)',
-          build:  '[BUILD] Permission mode (ask before writes)',
-          bypass: '[BYPASS] Auto-approve mode (5min timeout)',
-        };
-        screen.appendScroll(COLORS.secondary(`\n${modeMessages[newMode]}\n`));
         updateStatusBar();
         screen.restoreCursor();
         screen.refreshInput();
@@ -427,44 +400,23 @@ program
             return;
           }
 
-          // 权限模式 (plan / build / bypass)
-          if (cmd === 'plan') {
-            agent.setAgentMode('plan');
-            state.setAgentMode('plan');
-            screen.appendScroll(COLORS.secondary('\n[PLAN] Read-only mode activated\n'));
-            return;
-          }
-          if (cmd === 'build') {
-            agent.setAgentMode('build');
-            state.setAgentMode('build');
-            screen.appendScroll(COLORS.success('\n[BUILD] Permission mode activated\n'));
-            return;
-          }
+          // 权限模式 (bypass / strict)
           if (cmd === 'bypass') {
-            agent.setAgentMode('bypass');
-            state.setAgentMode('bypass');
-            screen.appendScroll(COLORS.warning('\n[BYPASS] Auto-approve mode (5min timeout)\n'));
+            agent.setBypassPermissions(true);
+            state.setBypassMode(true);
+            screen.appendScroll(COLORS.warning('\n[BYPASS] Auto-approve mode activated\n'));
             return;
           }
           if (cmd === 'strict') {
-            agent.setAgentMode('build');
-            state.setAgentMode('build');
-            screen.appendScroll(COLORS.success('\n[BUILD] Permission mode activated\n'));
-            return;
-          }
-
-          // 思考过程显示切换
-          if (cmd === 'think') {
-            const show = state.toggleShowThinking();
-            screen.appendScroll(show
-              ? COLORS.secondary('\n[THINK] Thinking display ON\n')
-              : COLORS.muted('\n[THINK] Thinking display OFF\n'));
+            agent.setBypassPermissions(false);
+            state.setBypassMode(false);
+            screen.appendScroll(COLORS.success('\n[STRICT] Permission mode activated\n'));
             return;
           }
 
           // 状态
           if (cmd === 'status') {
-            const mode = state.getAgentMode();
+            const mode = state.isBypassMode() ? 'BYPASS' : 'STRICT';
             const msgs = agent.getMessages().length;
             const queue = getInputQueue();
             const queueStatus = queue.getStatus();
@@ -808,12 +760,9 @@ Start the analysis, execute step by step, then output the document.`;
         screen.appendScroll(COLORS.muted('  /undo       Remove last input\n'));
         screen.appendScroll('\n');
         screen.appendScroll(COLORS.primary.bold('Mode:\n'));
-        screen.appendScroll(COLORS.muted('  /plan       Read-only (no file changes)\n'));
-        screen.appendScroll(COLORS.muted('  /build      Ask permission (default)\n'));
-        screen.appendScroll(COLORS.muted('  /bypass     Auto-approve (5min)\n'));
-        screen.appendScroll(COLORS.muted('  /think      Toggle thinking display\n'));
+        screen.appendScroll(COLORS.muted('  /bypass     Auto-approve all permissions\n'));
+        screen.appendScroll(COLORS.muted('  /strict     Ask permission (default)\n'));
         screen.appendScroll(COLORS.muted('  /status     Show status\n'));
-        screen.appendScroll(COLORS.muted('  Tab         Cycle mode (empty input)\n'));
         screen.appendScroll('\n');
         screen.appendScroll(COLORS.primary.bold('Skills:\n'));
         screen.appendScroll(COLORS.muted('  /skills     List skills\n'));
@@ -1102,7 +1051,6 @@ program
 
       case 'init':
         // 写入 settings.json
-        const { loadGlobalSettings, saveGlobalSettings, GLOBAL_SETTINGS_FILE } = await import('./utils/settings');
         const currentSettings = await loadGlobalSettings();
 
         if ((currentSettings.mcp?.servers?.length ?? 0) > 0) {
@@ -1286,7 +1234,7 @@ async function runSimpleMode(agent: SpicaAgent, fresh?: boolean): Promise<void> 
           const messages = agent.getMessages();
           console.log(COLORS.primary(`\n[Status]`));
           console.log(`  Messages: ${messages.length}`);
-          console.log(`  Mode: ${state.getAgentMode()}`);
+          console.log(`  Mode: ${state.isBypassMode() ? 'BYPASS' : 'STRICT'}`);
         } else {
           console.log(COLORS.warning(`Unknown command: ${trimmed}`));
         }

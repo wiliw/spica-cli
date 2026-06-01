@@ -60,19 +60,15 @@ describe('TUI Interaction Tests', () => {
       expect(state.isProcessing()).toBe(false);
     });
 
-    it('should track agent mode', () => {
+    it('should track bypass mode', () => {
       const state = getRuntimeState();
-      expect(state.getAgentMode()).toBe('build');
+      expect(state.isBypassMode()).toBe(false);
 
-      state.setAgentMode('plan');
-      expect(state.getAgentMode()).toBe('plan');
-      expect(state.isPlanMode()).toBe(true);
-
-      state.setAgentMode('bypass');
+      state.setBypassMode(true);
       expect(state.isBypassMode()).toBe(true);
 
-      state.setAgentMode('build');
-      expect(state.isBuildMode()).toBe(true);
+      state.setBypassMode(false);
+      expect(state.isBypassMode()).toBe(false);
     });
 
     it('should track streaming state', () => {

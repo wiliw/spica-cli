@@ -57,20 +57,7 @@ export class SpicaAgent extends EventEmitter {
   private permissionQueue: Array<{ reason: string; resolve: (approved: boolean) => void }> = [];
   private permissionPending = false;
   private permissionResolve: ((approved: boolean) => void) | null = null;
-  private agentMode: 'plan' | 'build' | 'bypass' = 'build';
-  private bypassTimer: NodeJS.Timeout | null = null;
-  private static readonly BYPASS_TIMEOUT_MS = 5 * 60 * 1000; // 5 分钟自动恢复
-
-  // Plan 模式只读工具白名单
-  private static readonly PLAN_MODE_TOOLS = new Set([
-    'file_read', 'file_exists',
-    'glob', 'grep',
-    'directory_list',
-    'web_search', 'web_fetch',
-    'question', 'skill',
-    'todo_write', 'todo_read',
-    'task', 'workspace',
-  ]);
+  private bypassPermissions = false;
 
   // 工具级 AbortController（用于中断单个工具）
   private toolAbortControllers: Map<string, AbortController> = new Map();
@@ -115,11 +102,6 @@ export class SpicaAgent extends EventEmitter {
   // 权限检查
   private checkNeedsPermission(toolName: string, args: Record<string, any>): string | null {
     const safeArgs = args || {};
-
-    // Plan 模式：拦截所有写操作工具
-    if (this.agentMode === 'plan' && !SpicaAgent.PLAN_MODE_TOOLS.has(toolName)) {
-      return `[Plan Mode] Tool "${toolName}" is blocked (read-only mode)`;
-    }
 
     if (toolName === 'file_delete') {
       return `Delete: ${safeArgs.path || 'unknown'}`;
@@ -188,7 +170,7 @@ export class SpicaAgent extends EventEmitter {
   // 等待权限确认（串行处理）
   async waitForPermission(reason: string): Promise<boolean> {
     // 如果bypass模式开启，自动批准
-    if (this.agentMode === 'bypass') {
+    if (this.bypassPermissions) {
       this.auditLog('BYPASS_APPROVED', reason);
       this.emit('permission_bypassed', { reason });
       return true;
@@ -298,36 +280,14 @@ export class SpicaAgent extends EventEmitter {
     return this.pendingInput;
   }
 
-  // 设置 Agent 模式 (plan/build/bypass)
-  setAgentMode(mode: 'plan' | 'build' | 'bypass'): void {
-    if (this.bypassTimer) {
-      clearTimeout(this.bypassTimer);
-      this.bypassTimer = null;
-    }
-
-    this.agentMode = mode;
-    this.emit('mode_changed', { mode });
-
-    if (mode === 'bypass') {
-      this.bypassTimer = setTimeout(() => {
-        this.agentMode = 'build';
-        this.bypassTimer = null;
-        this.emit('mode_changed', { mode: 'build' });
-        this.emit('bypass_auto_reverted', { reason: 'Timeout: 5 minutes elapsed' });
-      }, SpicaAgent.BYPASS_TIMEOUT_MS);
-    }
+  // 设置 Bypass 模式
+  setBypassPermissions(enabled: boolean): void {
+    this.bypassPermissions = enabled;
+    this.emit('bypass_changed', { enabled });
   }
 
   get isBypassPermissions(): boolean {
-    return this.agentMode === 'bypass';
-  }
-
-  get isPlanMode(): boolean {
-    return this.agentMode === 'plan';
-  }
-
-  get currentMode(): 'plan' | 'build' | 'bypass' {
-    return this.agentMode;
+    return this.bypassPermissions;
   }
 
   setToolWhitelist(allowedTools: string[]): void {
@@ -645,33 +605,6 @@ async init() {
       await initMCP();
     } catch (error) {
       console.log('MCP init skipped (no config or servers unavailable)');
-    }
-
-    // 加载自定义工具 (.spica/tools/)
-    try {
-      const { getCustomToolManager } = await import('./custom-tools');
-      const customToolManager = getCustomToolManager();
-      const count = await customToolManager.loadFromDir(path.join(this.workspacePath, '.spica', 'tools'));
-      if (count > 0) {
-        this.emit('custom_tools_loaded', { count });
-      }
-    } catch (error) {
-      // Custom tools loading failure should not block agent init
-    }
-
-    // 加载插件 (~/.spica/plugins/ + .spica/plugins/)
-    try {
-      const { getPluginManager } = await import('./plugins');
-      const pluginManager = getPluginManager();
-      const globalPlugins = path.join(os.homedir(), '.spica', 'plugins');
-      const projectPlugins = path.join(this.workspacePath, '.spica', 'plugins');
-      await pluginManager.loadFromDir(globalPlugins);
-      const projectCount = await pluginManager.loadFromDir(projectPlugins);
-      if (projectCount > 0 || pluginManager.count() > 0) {
-        this.emit('plugins_loaded', { count: pluginManager.count() });
-      }
-    } catch (error) {
-      // Plugin loading failure should not block agent init
     }
 
     const config = await getProviderConfig(this._providerName);

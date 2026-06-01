@@ -2,13 +2,11 @@
 
 import { SpicaAgent } from '../agent';
 
-export type AgentMode = 'plan' | 'build' | 'bypass';
-
 interface RuntimeState {
   agent: SpicaAgent | null;
   providerConfig: any;
   isProcessing: boolean;
-  agentMode: AgentMode;
+  bypassMode: boolean;
   connectionErrorShown: boolean;
   streamingOutput: boolean;
   permissionDialogActive: boolean;
@@ -21,7 +19,7 @@ class RuntimeStateManager {
     agent: null,
     providerConfig: null,
     isProcessing: false,
-    agentMode: 'build',
+    bypassMode: false,
     connectionErrorShown: false,
     streamingOutput: false,
     permissionDialogActive: false,
@@ -60,32 +58,13 @@ class RuntimeStateManager {
     return this.state.isProcessing;
   }
 
-  // Agent Mode (plan / build / bypass)
-  setAgentMode(mode: AgentMode): void {
-    this.state.agentMode = mode;
-  }
-
-  getAgentMode(): AgentMode {
-    return this.state.agentMode;
-  }
-
-  isPlanMode(): boolean {
-    return this.state.agentMode === 'plan';
-  }
-
-  isBuildMode(): boolean {
-    return this.state.agentMode === 'build';
+  // Bypass Mode
+  setBypassMode(bypass: boolean): void {
+    this.state.bypassMode = bypass;
   }
 
   isBypassMode(): boolean {
-    return this.state.agentMode === 'bypass';
-  }
-
-  cycleAgentMode(): AgentMode {
-    const order: AgentMode[] = ['plan', 'build', 'bypass'];
-    const idx = order.indexOf(this.state.agentMode);
-    this.state.agentMode = order[(idx + 1) % 3];
-    return this.state.agentMode;
+    return this.state.bypassMode;
   }
 
   // Connection Error
@@ -129,7 +108,7 @@ class RuntimeStateManager {
     return this.state.verboseMode;
   }
 
-  // Thinking 显示模式
+  // Thinking 显示模式（Ctrl+O 切换）
   setShowThinking(show: boolean): void {
     this.state.showThinking = show;
   }
@@ -156,7 +135,7 @@ class RuntimeStateManager {
       agent: null,
       providerConfig: null,
       isProcessing: false,
-      agentMode: 'build',
+      bypassMode: false,
       connectionErrorShown: false,
       streamingOutput: false,
       permissionDialogActive: false,

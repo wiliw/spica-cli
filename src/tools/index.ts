@@ -7,9 +7,7 @@ import { SpicaAgent } from '../agent';
 import { SubAgentTask, getSubAgentConfig, isToolAllowed, summarizeResult } from './subAgent';
 import { computeDiff, formatDiff, generateEditDiff } from '../cli/ui/diff';
 import { getMCPManager } from '../mcp/client';
-import { getBashPath, supportsTmux, getProxyAgent } from '../utils/platform';
-import { getCustomToolManager } from '../custom-tools';
-import { getPluginManager } from '../plugins';
+import { getBashPath, supportsTmux } from '../utils/platform';
 import axios from 'axios';
 
 const isWindows = process.platform === 'win32';
@@ -450,9 +448,7 @@ export function getAllToolDefinitions(): ToolDefinition[] {
     description: `[MCP] ${t.description}`,
     parameters: t.inputSchema,
   }));
-  const customTools = getCustomToolManager().getToolDefinitions();
-  const pluginTools = getPluginManager().getToolDefinitions();
-  return [...TOOLS_DEFINITIONS, ...mcpConverted, ...customTools, ...pluginTools];
+  return [...TOOLS_DEFINITIONS, ...mcpConverted];
 }
 
 export interface ToolEventCallback {
@@ -1145,7 +1141,6 @@ export async function executeTool(
           // Tavily API (preferred if configured)
           if (engine === 'tavily' && tavilyApiKey) {
             try {
-              const proxyAgent = getProxyAgent();
               const tavilyResp = await axios.post('https://api.tavily.com/search', {
                 api_key: tavilyApiKey,
                 query: safeArgs.query,
@@ -1154,7 +1149,6 @@ export async function executeTool(
               }, {
                 timeout: timeoutMs,
                 signal: abortController.signal,
-                ...(proxyAgent ? { httpsAgent: proxyAgent, proxy: false } : {}),
               });
 
               const data = tavilyResp.data;
@@ -1169,7 +1163,6 @@ export async function executeTool(
 
           // DuckDuckGo HTML (default, free)
           const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(safeArgs.query)}`;
-          const proxyAgent = getProxyAgent();
 
           const searchResp = await axios.get(searchUrl, {
             timeout: Math.min(timeoutMs, 15000),
@@ -1179,7 +1172,6 @@ export async function executeTool(
               'Accept': 'text/html',
             },
             maxRedirects: 5,
-            ...(proxyAgent ? { httpsAgent: proxyAgent, proxy: false } : {}),
           });
 
           if (abortController.signal.aborted) {
@@ -1258,7 +1250,6 @@ export async function executeTool(
         }
 
         try {
-          const proxyAgent = getProxyAgent();
           const fetchResp = await axios.get(url, {
             timeout: timeoutMs,
             signal: abortController.signal,
@@ -1270,7 +1261,6 @@ export async function executeTool(
             },
             maxRedirects: 10,
             responseType: 'text',
-            ...(proxyAgent ? { httpsAgent: proxyAgent, proxy: false } : {}),
           });
 
           // 检查是否被中断
@@ -1726,17 +1716,7 @@ export async function executeTool(
       }
 
       default:
-        // ① Custom Tools
-        const customMgr = getCustomToolManager();
-        if (customMgr.hasTool(name)) {
-          return await customMgr.execute(name, safeArgs, WORKSPACE);
-        }
-        // ② Plugin Tools
-        const pluginMgr = getPluginManager();
-        if (pluginMgr.hasTool(name)) {
-          return await pluginMgr.executeTool(name, safeArgs, WORKSPACE);
-        }
-        // ③ MCP 工具（格式：servername/toolname）
+        // MCP 工具（格式：servername/toolname）
         if (name.includes('/')) {
           const mcpManager = getMCPManager();
           if (mcpManager.hasTool(name)) {
