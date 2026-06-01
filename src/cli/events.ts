@@ -63,7 +63,13 @@ export function setupAgentEvents(
 ): void {
   // 追踪 reasoning 状态
   let reasoningStarted = false;
-  let justSwitchedFromReasoning = false;  // 只在切换时换行一次
+  let justSwitchedFromReasoning = false;
+
+  // 每次新对话开始时重置 reasoning 状态
+  agent.on('waiting_for_llm', () => {
+    reasoningStarted = false;
+    justSwitchedFromReasoning = false;
+  });
 
   agent.on('connection_error', (data: any) => {
     state.setConnectionErrorShown(true);
