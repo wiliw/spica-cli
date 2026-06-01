@@ -9,6 +9,7 @@ import { computeDiff, formatDiff, generateEditDiff } from '../cli/ui/diff';
 import { getMCPManager } from '../mcp/client';
 import { getBashPath, supportsTmux, getProxyAgent } from '../utils/platform';
 import { getCustomToolManager } from '../custom-tools';
+import { getPluginManager } from '../plugins';
 import axios from 'axios';
 
 const isWindows = process.platform === 'win32';
@@ -441,7 +442,7 @@ name: 'bash',
   },
 ];
 
-// 获取所有工具定义（内置 + MCP动态 + 自定义工具）
+// 获取所有工具定义（内置 + MCP动态 + 自定义工具 + 插件）
 export function getAllToolDefinitions(): ToolDefinition[] {
   const mcpTools = getMCPManager().getToolDefinitions();
   const mcpConverted: ToolDefinition[] = mcpTools.map(t => ({
@@ -450,7 +451,8 @@ export function getAllToolDefinitions(): ToolDefinition[] {
     parameters: t.inputSchema,
   }));
   const customTools = getCustomToolManager().getToolDefinitions();
-  return [...TOOLS_DEFINITIONS, ...mcpConverted, ...customTools];
+  const pluginTools = getPluginManager().getToolDefinitions();
+  return [...TOOLS_DEFINITIONS, ...mcpConverted, ...customTools, ...pluginTools];
 }
 
 export interface ToolEventCallback {
@@ -1729,7 +1731,12 @@ export async function executeTool(
         if (customMgr.hasTool(name)) {
           return await customMgr.execute(name, safeArgs, WORKSPACE);
         }
-        // ② MCP 工具（格式：servername/toolname）
+        // ② Plugin Tools
+        const pluginMgr = getPluginManager();
+        if (pluginMgr.hasTool(name)) {
+          return await pluginMgr.executeTool(name, safeArgs, WORKSPACE);
+        }
+        // ③ MCP 工具（格式：servername/toolname）
         if (name.includes('/')) {
           const mcpManager = getMCPManager();
           if (mcpManager.hasTool(name)) {

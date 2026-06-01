@@ -15,6 +15,7 @@ import { COLORS } from './cli/ui/colors';
 import { EventEmitter } from 'events';
 import fs from 'fs-extra';
 import * as path from 'path';
+import os from 'os';
 import simpleGit from 'simple-git';
 import type { ChatMessage } from './llm/providers/BaseProvider';
 
@@ -656,6 +657,21 @@ async init() {
       }
     } catch (error) {
       // Custom tools loading failure should not block agent init
+    }
+
+    // 加载插件 (~/.spica/plugins/ + .spica/plugins/)
+    try {
+      const { getPluginManager } = await import('./plugins');
+      const pluginManager = getPluginManager();
+      const globalPlugins = path.join(os.homedir(), '.spica', 'plugins');
+      const projectPlugins = path.join(this.workspacePath, '.spica', 'plugins');
+      await pluginManager.loadFromDir(globalPlugins);
+      const projectCount = await pluginManager.loadFromDir(projectPlugins);
+      if (projectCount > 0 || pluginManager.count() > 0) {
+        this.emit('plugins_loaded', { count: pluginManager.count() });
+      }
+    } catch (error) {
+      // Plugin loading failure should not block agent init
     }
 
     const config = await getProviderConfig(this._providerName);
