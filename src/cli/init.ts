@@ -3,7 +3,7 @@
 import fs from 'fs-extra';
 import { join } from 'path';
 import { autoDetectProject, generateAgentsMd, ProjectConfig, loadProjectConfig } from '../utils/projectConfig';
-import { LAIN_COLORS } from './ui/colors';
+import { COLORS } from './ui/colors';
 
 export interface InitOptions {
   force?: boolean;      // 强制完全覆盖（否则合并更新）
@@ -12,25 +12,25 @@ export interface InitOptions {
 
 // 执行 init 命令
 export async function runInit(workspace: string, options: InitOptions = {}): Promise<void> {
-  console.log(LAIN_COLORS.primary('\n[INIT] Analyzing codebase...'));
+  console.log(COLORS.primary('\n[INIT] Analyzing codebase...'));
 
   // 1. 检测项目基本信息
   const basicConfig = autoDetectProject(workspace);
-  console.log(LAIN_COLORS.muted(`  Detected: ${basicConfig.type} / ${basicConfig.language}`));
+  console.log(COLORS.muted(`  Detected: ${basicConfig.type} / ${basicConfig.language}`));
   if (basicConfig.framework) {
-    console.log(LAIN_COLORS.muted(`  Framework: ${basicConfig.framework}`));
+    console.log(COLORS.muted(`  Framework: ${basicConfig.framework}`));
   }
 
   // 2. 分析代码架构
   const architecture = await analyzeArchitecture(workspace);
   if (architecture.mainEntry) {
-    console.log(LAIN_COLORS.muted(`  Entry: ${architecture.mainEntry}`));
+    console.log(COLORS.muted(`  Entry: ${architecture.mainEntry}`));
   }
   if (architecture.modules.length > 0) {
-    console.log(LAIN_COLORS.muted(`  Modules: ${architecture.modules.slice(0, 5).join(', ')}`));
+    console.log(COLORS.muted(`  Modules: ${architecture.modules.slice(0, 5).join(', ')}`));
   }
   if (architecture.patterns.length > 0) {
-    console.log(LAIN_COLORS.muted(`  Patterns: ${architecture.patterns.join(', ')}`));
+    console.log(COLORS.muted(`  Patterns: ${architecture.patterns.join(', ')}`));
   }
 
   // 3. 加载现有配置
@@ -59,13 +59,13 @@ export async function runInit(workspace: string, options: InitOptions = {}): Pro
   await fs.writeFile(agentsPath, content);
 
   const action = exists ? (options.force ? 'Overwritten' : 'Updated') : 'Created';
-  console.log(LAIN_COLORS.success(`\n[OK] ${action} AGENTS.md`));
-  console.log(LAIN_COLORS.muted(`  Path: ${agentsPath}`));
+  console.log(COLORS.success(`\n[OK] ${action} AGENTS.md`));
+  console.log(COLORS.muted(`  Path: ${agentsPath}`));
 
   // 默认显示内容摘要
   const lines = content.split('\n');
-  console.log(LAIN_COLORS.muted(`  Lines: ${lines.length}`));
-  console.log(LAIN_COLORS.primary('\n--- Content preview ---'));
+  console.log(COLORS.muted(`  Lines: ${lines.length}`));
+  console.log(COLORS.primary('\n--- Content preview ---'));
   console.log(content);
 }
 

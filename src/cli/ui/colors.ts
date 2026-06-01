@@ -134,24 +134,24 @@ export const LAIN_COLORS = COLORS;
 
 // 格式化函数
 export const format = {
-  prompt: () => LAIN_COLORS.prompt('>'),
-  success: (text: string) => LAIN_COLORS.success(text),
-  error: (text: string) => LAIN_COLORS.error(text),
-  warning: (text: string) => LAIN_COLORS.warning(text),
-  toolCall: (name: string) => LAIN_COLORS.tool(`→ ${name}`),
+  prompt: () => COLORS.prompt('>'),
+  success: (text: string) => COLORS.success(text),
+  error: (text: string) => COLORS.error(text),
+  warning: (text: string) => COLORS.warning(text),
+  toolCall: (name: string) => COLORS.tool(`→ ${name}`),
   toolResult: (name: string, success: boolean, output: string) => {
-    const icon = success ? LAIN_COLORS.success('✓') : LAIN_COLORS.error('✗');
+    const icon = success ? COLORS.success('✓') : COLORS.error('✗');
     return `${icon} ${name}: ${output}`;
   },
-  reasoning: (content: string) => LAIN_COLORS.reasoning(content),
-  diffFile: (path: string) => LAIN_COLORS.file(`📄 ${path}`),
-  diffAdd: (line: string) => LAIN_COLORS.diffAdd(`+ ${line}`),
-  diffRemove: (line: string) => LAIN_COLORS.diffRemove(`- ${line}`),
+  reasoning: (content: string) => COLORS.reasoning(content),
+  diffFile: (path: string) => COLORS.file(`📄 ${path}`),
+  diffAdd: (line: string) => COLORS.diffAdd(`+ ${line}`),
+  diffRemove: (line: string) => COLORS.diffRemove(`- ${line}`),
   permissionBox: (reason: string) => {
-    const border = LAIN_COLORS.permissionBorder;
-    const title = LAIN_COLORS.permissionTitle;
-    const text = LAIN_COLORS.permissionText;
-    const dimBorder = LAIN_COLORS.muted('─'.repeat(50));
+    const border = COLORS.permissionBorder;
+    const title = COLORS.permissionTitle;
+    const text = COLORS.permissionText;
+    const dimBorder = COLORS.muted('─'.repeat(50));
     return `
 ${border('═'.repeat(50))}
 ${title('  ⚠  PERMISSION REQUIRED')}
@@ -161,21 +161,21 @@ ${dimBorder}
 `;
   },
   status: (bypass: boolean, msgs: number, workspace: string) => {
-    const mode = bypass ? LAIN_COLORS.warning('BYPASS') : LAIN_COLORS.success('STRICT');
+    const mode = bypass ? COLORS.warning('BYPASS') : COLORS.success('STRICT');
     return `
-${LAIN_COLORS.primary.bold('Current Status:')}
+${COLORS.primary.bold('Current Status:')}
   Permission mode: ${mode}
   Messages in context: ${msgs}
   Workspace: ${workspace}
 `;
   },
-  muted: (text: string) => LAIN_COLORS.muted(text),
-  dim: (text: string) => LAIN_COLORS.dim(text),
+  muted: (text: string) => COLORS.muted(text),
+  dim: (text: string) => COLORS.dim(text),
   // 表格格式化（支持中英文对齐）
   tableRow: (columns: string[], widths: number[]) => {
     return columns.map((col, i) => {
       const padded = padRight(col, widths[i] || 10);
-      return LAIN_COLORS.muted(padded);
+      return COLORS.muted(padded);
     }).join(' | ');
   },
   // 状态表格
@@ -183,7 +183,7 @@ ${LAIN_COLORS.primary.bold('Current Status:')}
     const maxLabelWidth = Math.max(...items.map(i => getStringWidth(i.label))) + 2;
     return items.map(i => {
       const label = padRight(i.label + ':', maxLabelWidth);
-      return `  ${LAIN_COLORS.muted(label)} ${LAIN_COLORS.primary(i.value)}`;
+      return `  ${COLORS.muted(label)} ${COLORS.primary(i.value)}`;
     }).join('\n');
   },
 };

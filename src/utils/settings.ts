@@ -78,7 +78,7 @@ export const DEFAULT_BASE_URLS: Record<string, string> = {};
 
 const DEFAULT_MODELS: Record<string, string> = {};
 
-// 默认 hooks
+// 默认安全 hooks（运行时使用，不写入配置文件）
 const DEFAULT_HOOKS: Settings['hooks'] = {
   PreToolUse: [
     {
@@ -100,10 +100,8 @@ export async function loadGlobalSettings(): Promise<Settings> {
   await fs.ensureDir(GLOBAL_DIR);
 
   if (!await fs.pathExists(GLOBAL_SETTINGS_FILE)) {
-    const defaultSettings: Settings = {
-      defaultProvider: 'openai',
-      hooks: DEFAULT_HOOKS,
-    };
+    // 不写入任何默认值 - 用户通过 spica set/use 命令配置
+    const defaultSettings: Settings = {};
     await fs.writeJson(GLOBAL_SETTINGS_FILE, defaultSettings, { spaces: 2 });
     settingsCache = defaultSettings;
     return settingsCache;
@@ -227,7 +225,7 @@ export async function loadEffectiveSettings(workspacePath: string): Promise<Sett
   const projectSkills = loadProjectSkills(workspacePath);
   const effectiveSkills = projectSkills || global.skills;
 
-  // 项目 hooks 追加全局
+  // 项目 hooks 追加全局（如果没有配置，使用默认安全 hooks）
   const projectHooks = loadProjectHooks(workspacePath);
   let effectiveHooks = global.hooks || DEFAULT_HOOKS;
 
