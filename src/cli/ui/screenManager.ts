@@ -1,4 +1,4 @@
-import { LAIN_COLORS } from './colors';
+import { COLORS } from './colors';
 import fs from 'fs';
 
 const ESC = '\x1b';
