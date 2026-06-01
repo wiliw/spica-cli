@@ -74,9 +74,9 @@ process.on('SIGINT', () => {
 
 program
   .name('spica')
-  .description('AI coding assistant - reads/writes files, runs commands, manages git\n\nStart interactive session: spica\nExecute single task: spica run "fix bug"\nConfigure providers: spica providers set deepseek sk-xxx --url https://api.deepseek.com/v1 --model deepseek-chat')
+  .description('AI coding assistant')
   .version('1.0.0')
-  .addHelpText('after', '\nQuick start:\n  1. Configure a provider: spica providers set deepseek YOUR_KEY --url https://api.deepseek.com/v1 --model deepseek-chat\n  2. Start session: spica\n  3. Ask anything: "fix the login bug" or "add export feature"\n\nFor detailed help on each command: spica <command> --help');
+  .addHelpText('after', '\nCommands:\n  spica                    Start session\n  spica run "task"         Execute one task\n  spica set name url key model  Add provider\n  spica use name           Switch provider\n  spica list               List providers\n  spica remove name...     Remove providers');
 
 // 默认：持续对话模式（自动加载历史）
 program
@@ -97,17 +97,7 @@ program
       state.setProviderConfig(providerConfig);
     } catch (error: any) {
       console.log('');
-      console.log(LAIN_COLORS.error(`Provider "${providerName}" not configured.`));
-      console.log('');
-      console.log(LAIN_COLORS.primary.bold('Quick Setup:'));
-      console.log(LAIN_COLORS.muted('  1. Set API key:'));
-      console.log(LAIN_COLORS.muted(`     spica providers set ${providerName} YOUR_API_KEY`));
-      console.log('');
-      console.log(LAIN_COLORS.muted('  2. Or use environment variable:'));
-      console.log(LAIN_COLORS.muted(`     export OPENAI_API_KEY=sk-xxx`));
-      console.log('');
-      console.log(LAIN_COLORS.muted('Available providers: openai, anthropic, together, groq, local'));
-      console.log(LAIN_COLORS.muted('Run `spica providers` for more info'));
+      console.log(LAIN_COLORS.error(error.message));
       console.log('');
       return;
     }
@@ -759,9 +749,11 @@ Start the analysis, execute step by step, then output the document.`;
       });
 
     } catch (error: any) {
+      // 停止banner动画
+      BG.stopBanner();
       if (!state.isConnectionErrorShown()) {
         if (tuiHandler) {
-          
+
           screen.appendScroll(LAIN_COLORS.error(`\nError: ${error.message}\n`));
         } else {
           console.log(LAIN_COLORS.error(`Error: ${error.message}`));
@@ -811,107 +803,81 @@ program
     state.setConnectionErrorShown(false);  // 重置
   });
 
-// Providers管理
+// Provider commands
 program
-  .command('providers')
-  .description('Manage LLM providers (AI model API configurations)')
-  .argument('[action]', 'set|show|default|remove')
-  .argument('[name]', 'Provider name')
-  .argument('[value]', 'API key')
-  .option('-u, --url <url>', 'API base URL (e.g. https://api.deepseek.com/v1)')
-  .option('-m, --model <model>', 'Model name (e.g. deepseek-chat, gpt-4o)')
-  .addHelpText('after', '\nExamples:\n  spica providers                              # List configured providers\n  spica providers set deepseek sk-xxx --url https://api.deepseek.com/v1 --model deepseek-chat\n  spica providers show deepseek                # Show deepseek config\n  spica providers default deepseek             # Set deepseek as default')
-  .action(async (action?: string, name?: string, value?: string, options?: { url?: string; model?: string }) => {
-    if (!action) {
-      const configured = await listProviders();
-      const defaultProvider = (await loadConfig()).defaultProvider;
+  .command('set <name> <url> <apiKey> <model>')
+  .description('Add or update a provider')
+  .action(async (name, url, apiKey, model) => {
+    await setProviderConfig(name, apiKey, url, model);
+    console.log(LAIN_COLORS.success(`[OK] ${name}`));
+  });
 
-      console.log(LAIN_COLORS.primary.bold('Configured providers:'));
-      if (configured.length === 0) {
-        console.log(LAIN_COLORS.muted('  (none)'));
-      } else {
-        configured.forEach(p => {
-          const isDefault = p === defaultProvider;
-          console.log(`  ${isDefault ? LAIN_COLORS.success('●') : '○'} ${p}${isDefault ? LAIN_COLORS.success(' (default)') : ''}`);
-        });
-      }
+program
+  .command('use <name>')
+  .description('Switch default provider')
+  .action(async (name) => {
+    try {
+      await setDefaultProvider(name);
+      console.log(LAIN_COLORS.success(`[OK] using ${name}`));
+    } catch (e: any) {
+      console.log(LAIN_COLORS.error(e.message));
+    }
+  });
 
-      console.log(LAIN_COLORS.muted('\nUsage:'));
-      console.log(LAIN_COLORS.muted('  spica providers set <name> <api-key> --url <url> --model <model>'));
-      console.log(LAIN_COLORS.muted('  spica providers default <name>'));
-      console.log(LAIN_COLORS.muted('  spica providers show <name>'));
-      console.log(LAIN_COLORS.muted('\nExamples:'));
-      console.log(LAIN_COLORS.muted('  spica providers set openai sk-xxx --url https://api.openai.com/v1 --model gpt-4o'));
-      console.log(LAIN_COLORS.muted('  spica providers set deepseek sk-xxx --url https://api.deepseek.com/v1 --model deepseek-chat'));
+program
+  .command('list')
+  .description('List providers')
+  .action(async () => {
+    const providers = await listProviders();
+    const defaultProvider = (await loadConfig()).defaultProvider;
+    providers.forEach(p => {
+      const mark = p === defaultProvider ? '●' : '○';
+      console.log(`${mark} ${p}`);
+    });
+  });
+
+program
+  .command('show [name]')
+  .description('Show provider config')
+  .action(async (name) => {
+    name = name || (await loadConfig()).defaultProvider;
+    if (!name) return console.log('No default provider');
+    try {
+      const c = await getProviderConfig(name);
+      console.log(`name:   ${c.name}`);
+      console.log(`url:    ${c.baseUrl}`);
+      console.log(`key:    ${c.apiKey.slice(0,8)}...`);
+      console.log(`model:  ${c.model}`);
+    } catch (e: any) {
+      console.log(LAIN_COLORS.error(e.message));
+    }
+  });
+
+program
+  .command('remove [names...]')
+  .description('Remove providers (use --all to remove all)')
+  .option('-a, --all', 'Remove all')
+  .action(async (names, opts) => {
+    const config = await loadConfig();
+    if (opts.all) {
+      const all = Object.keys(config.providers || {});
+      config.providers = {};
+      config.defaultProvider = undefined;
+      await saveConfig(config);
+      console.log(LAIN_COLORS.success(`[OK] removed: ${all.join(', ')}`));
       return;
     }
-
-    switch (action) {
-      case 'set':
-        if (!name || !value || !options?.url || !options?.model) {
-          console.log(LAIN_COLORS.warning('Usage: spica providers set <name> <api-key> --url <url> --model <model>'));
-          return;
-        }
-        await setProviderConfig(name, value, options.url, options.model);
-        console.log(LAIN_COLORS.success(`[OK] Provider '${name}' configured`));
-        console.log(LAIN_COLORS.muted(`  URL: ${options.url}`));
-        console.log(LAIN_COLORS.muted(`  Model: ${options.model}`));
-        break;
-
-      case 'show':
-        if (!name) name = (await loadConfig()).defaultProvider || 'openai';
-        try {
-          const config = await getProviderConfig(name);
-          console.log(LAIN_COLORS.primary.bold(`\nProvider: ${config.name}`));
-          console.log(LAIN_COLORS.muted('─'.repeat(40)));
-          console.log(`  API Key: ${config.apiKey.substring(0, 10)}...${config.apiKey.length > 20 ? config.apiKey.slice(-4) : ''}`);
-          console.log(`  Base URL: ${config.baseUrl}`);
-          console.log(`  Model: ${config.model}`);
-          if (config.description) {
-            console.log(LAIN_COLORS.muted(`  Description: ${config.description}`));
-          }
-        } catch (error: any) {
-          console.log(LAIN_COLORS.error(error.message));
-          console.log(LAIN_COLORS.warning(`Configure it first: spica providers set ${name} YOUR_API_KEY`));
-        }
-        break;
-
-      case 'default':
-        if (!name) {
-          const config = await loadConfig();
-          console.log(`Current default: ${config.defaultProvider || 'openai'}`);
-          return;
-        }
-        try {
-          await setDefaultProvider(name);
-          console.log(LAIN_COLORS.success(`[OK] Default provider set to '${name}'`));
-        } catch (error: any) {
-          console.log(LAIN_COLORS.error(error.message));
-          console.log(LAIN_COLORS.warning(`Configure it first: spica providers set ${name} YOUR_API_KEY`));
-        }
-        break;
-
-      case 'remove':
-        if (!name) {
-          console.log(LAIN_COLORS.warning('Usage: spica providers remove <name>'));
-          return;
-        }
-        const config = await loadConfig();
-        if (config.providers?.[name]) {
-          delete config.providers[name];
-          if (config.defaultProvider === name) {
-            config.defaultProvider = Object.keys(config.providers || {})[0] || 'openai';
-          }
-          await saveConfig(config);
-          console.log(LAIN_COLORS.success(`[OK] Provider '${name}' removed`));
-        } else {
-          console.log(LAIN_COLORS.error(`Provider '${name}' not found in configured providers`));
-        }
-        break;
-
-      default:
-        console.log(LAIN_COLORS.warning('Available actions: list, set, add, show, default, remove'));
+    if (!names.length) return console.log('Usage: remove <names...> or --all');
+    for (const n of names) {
+      if (config.providers?.[n]) {
+        delete config.providers[n];
+        if (config.defaultProvider === n) config.defaultProvider = undefined;
+        console.log(LAIN_COLORS.success(`[OK] ${n}`));
+      } else {
+        console.log(LAIN_COLORS.error(`[ERR] ${n} not found`));
+      }
     }
+    await saveConfig(config);
   });
 
 // Skills管理
@@ -1225,6 +1191,8 @@ async function runSimpleMode(agent: SpicaAgent, fresh?: boolean): Promise<void> 
     });
 
   } catch (error: any) {
+    // 停止banner动画（如果正在运行）
+    BG.stopBanner();
     console.log(LAIN_COLORS.error(`Error: ${error.message}`));
     process.exit(1);
   }

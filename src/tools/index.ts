@@ -1035,11 +1035,11 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
           const curlProxy = proxyUrl ? `--proxy "${proxyUrl}"` : '';
 
           const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(safeArgs.query)}`;
-          const curlCmd = `curl -sL ${curlProxy} -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -H "Accept: text/html" "${searchUrl}" --max-time ${timeoutMs / 1000}`;
+          const curlCmd = `curl -sL ${curlProxy} -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -H "Accept: text/html" "${searchUrl}" --connect-timeout 5 --max-time ${Math.min(timeoutMs / 1000, 15)}`;
 
           const searchResult = await execa(curlCmd, {
             shell: true,
-            timeout: timeoutMs,
+            timeout: Math.min(timeoutMs, 15000),
             reject: false,
             cancelSignal: abortController.signal,
           });
@@ -1048,15 +1048,16 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
             return { success: false, error: 'Tool execution aborted by user (ESC ESC).' };
           }
 
-          if (searchResult.stdout.length === 0) {
+          // Return success even if no results - let agent decide what to do
+          const html = searchResult.stdout || '';
+          if (html.length === 0 || searchResult.stderr) {
             return {
-              success: false,
-              error: searchResult.stderr || 'Search failed: No results. Try setting HTTPS_PROXY or TAVILY_API_KEY.'
+              success: true,
+              output: `Web search temporarily unavailable (${searchResult.stderr || 'network issue'}). Agent should proceed with available information.`,
             };
           }
 
           // Parse HTML to extract results
-          const html = searchResult.stdout;
           const results: string[] = [];
 
           // DuckDuckGo HTML format

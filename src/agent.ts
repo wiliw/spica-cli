@@ -469,7 +469,7 @@ private matchSkill(prompt: string): SkillDefinition | null {
       '403', 'Forbidden', 'permission denied',
       'ECONNREFUSED', 'ENOTFOUND', 'network error', 'no network',
       'aborted by user',
-      'API连接失败',
+      'API connection failed',
     ];
 
     for (const pattern of criticalPatterns) {
@@ -478,14 +478,10 @@ private matchSkill(prompt: string): SkillDefinition | null {
       }
     }
 
-    // Web工具的特殊处理：如果代理/网络失败，停止
+    // Web工具的特殊处理：如果代理/网络失败，继续尝试其他方案
     if (toolName === 'web_search' || toolName === 'web_fetch') {
-      if (error.includes('HTTPS_PROXY') || error.includes('No results') || error.includes('No content')) {
-        // 如果提示设置代理，说明网络环境有问题
-        if (error.includes('HTTPS_PROXY') || error.includes('failed')) {
-          return true;
-        }
-      }
+      // 网络问题不应该停止整个任务，让agent尝试其他方案
+      return false;
     }
 
     return false;
@@ -603,7 +599,7 @@ async init() {
         provider: this._providerName,
         model: config.model,
       });
-      throw new Error(`API连接失败: ${connectionResult.type}\n${connectionResult.hint}\n详情: ${connectionResult.error}`);
+      throw new Error(`API connection failed: ${connectionResult.type}\n${connectionResult.hint}\nDetails: ${connectionResult.error}`);
     }
 
     ensureProjectDir(this.workspacePath);
@@ -817,7 +813,7 @@ async init() {
       this.emit('error_suggestion', {
         tool: 'llm_generate',
         error: llmError.message,
-        suggestion: '网络或API临时错误。请检查网络连接，稍后重试。'
+        suggestion: 'Network or API temporary error. Check network connection and retry later.'
       });
       return `LLM request failed (retried 10 times): ${llmError.message}. Check API config and network.`;
     }
@@ -827,9 +823,9 @@ async init() {
       this.emit('error_suggestion', {
         tool: 'llm_generate',
         error: 'LLM returned undefined',
-        suggestion: 'LLM返回异常，请重试'
+        suggestion: 'LLM returned exception, please retry'
       });
-      return 'LLM返回异常，请重试';
+      return 'LLM returned exception, please retry';
     }
 
     let iterations = 0;
@@ -951,7 +947,7 @@ async init() {
                   success: false,
                   error: `Tool execution aborted (stuck or interrupted). Try: detached=true, shorter timeout, or interactive mode.`,
                 });
-                return { name: tc.name, id: tc.id, result: `工具被中断，需要尝试其他方案`, isCritical: true };
+                return { name: tc.name, id: tc.id, result: `Tool interrupted, need to try other approaches`, isCritical: true };
               }
 
               // 检查是否是关键错误（应该停止整个生成）
@@ -963,7 +959,7 @@ async init() {
                   success: false,
                   error: result.error,
                 });
-                return { name: tc.name, id: tc.id, result: `关键错误: ${result.error}`, isCritical: true };
+                return { name: tc.name, id: tc.id, result: `Critical error: ${result.error}`, isCritical: true };
               }
 
               this.emit('error_suggestion', {
@@ -1064,9 +1060,9 @@ async init() {
             );
           } catch (llmError: any) {
             const isRetryable = this.isRetryableError(llmError);
-            const suggestionText = isRetryable 
-              ? '网络或API临时错误（已重试10次），工具执行结果已保存。可尝试继续对话或重新发送请求。'
-              : `错误不可重试，需要用户处理: ${llmError.message}`;
+            const suggestionText = isRetryable
+              ? 'Network or API temporary error (retried 10 times), tool results saved. Try continuing conversation or resend request.'
+              : `Error not retryable, user needs to handle: ${llmError.message}`;
             
             this.emit('error_suggestion', {
               tool: 'llm_continue',

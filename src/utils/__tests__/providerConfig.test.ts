@@ -53,15 +53,15 @@ describe('Provider Configuration', () => {
   });
 
   it('should list configured providers', async () => {
-    await setProviderConfig('deepseek', 'key1', 'url1', 'model1');
-    await setProviderConfig('openai', 'key2', 'url2', 'model2');
+    await setProviderConfig('deepseek', 'key1', 'https://api.deepseek.com/v1', 'model1');
+    await setProviderConfig('openai', 'key2', 'https://api.openai.com/v1', 'model2');
     const providers = await listProviders();
     expect(providers).toContain('deepseek');
     expect(providers).toContain('openai');
   });
 
   it('should set default provider', async () => {
-    await setProviderConfig('deepseek', 'test-key', 'url', 'model');
+    await setProviderConfig('deepseek', 'test-key', 'https://api.deepseek.com/v1', 'model');
     await setDefaultProvider('deepseek');
     process.env.SPICA_DEEPSEEK_API_KEY = 'test-key';
     const config = await getProviderConfig();

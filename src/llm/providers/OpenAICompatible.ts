@@ -2,25 +2,25 @@ import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { BaseProvider, ToolDefinition, LLMResponse, LLMProviderConfig, ChatMessage, ToolCall } from './BaseProvider';
 
-// 错误类型和提示
+// Error types and hints
 const ERROR_MESSAGES: Record<string, { type: string; hint: string }> = {
-  // 网络错误
-  ECONNREFUSED: { type: '连接被拒绝', hint: '请检查API地址是否正确，或服务器是否在线' },
-  ENOTFOUND: { type: '域名无法解析', hint: '请检查API地址是否正确' },
-  ETIMEDOUT: { type: '连接超时', hint: '网络不稳定或服务器响应慢，请稍后重试' },
-  ECONNRESET: { type: '连接被重置', hint: '网络不稳定，请稍后重试' },
-  ENETUNREACH: { type: '网络不可达', hint: '请检查网络连接' },
-  EHOSTUNREACH: { type: '主机不可达', hint: '请检查网络连接或防火墙设置' },
+  // Network errors
+  ECONNREFUSED: { type: 'Connection refused', hint: 'Check if API URL is correct and server is online' },
+  ENOTFOUND: { type: 'Domain not found', hint: 'Check if API URL is correct' },
+  ETIMEDOUT: { type: 'Connection timeout', hint: 'Network unstable or server slow, try again later' },
+  ECONNRESET: { type: 'Connection reset', hint: 'Network unstable, try again later' },
+  ENETUNREACH: { type: 'Network unreachable', hint: 'Check network connection' },
+  EHOSTUNREACH: { type: 'Host unreachable', hint: 'Check network connection or firewall settings' },
 
-  // HTTP状态码
-  '401': { type: '认证失败', hint: 'API Key 无效或已过期，请检查配置' },
-  '402': { type: '余额不足', hint: 'API额度已用尽，请充值或更换账户' },
-  '403': { type: '权限不足', hint: '没有访问此模型的权限' },
-  '404': { type: '资源不存在', hint: '模型名称错误或API地址不正确' },
-  '429': { type: '请求过于频繁', hint: '请等待一段时间后重试' },
-  '500': { type: '服务器内部错误', hint: 'API服务暂时不可用，请稍后重试' },
-  '502': { type: '服务器网关错误', hint: 'API服务暂时不可用，请稍后重试' },
-  '503': { type: '服务暂时不可用', hint: 'API服务维护或过载，请稍后重试' },
+  // HTTP status codes
+  '401': { type: 'Authentication failed', hint: 'API Key invalid or expired, check configuration' },
+  '402': { type: 'Insufficient balance', hint: 'API quota exhausted, recharge or switch account' },
+  '403': { type: 'Permission denied', hint: 'No access to this model' },
+  '404': { type: 'Resource not found', hint: 'Model name error or incorrect API URL' },
+  '429': { type: 'Rate limited', hint: 'Wait for a while before retrying' },
+  '500': { type: 'Server internal error', hint: 'API service temporarily unavailable, try again later' },
+  '502': { type: 'Gateway error', hint: 'API service temporarily unavailable, try again later' },
+  '503': { type: 'Service unavailable', hint: 'API service maintenance or overload, try again later' },
 };
 
 // 模型上下文窗口大小（默认值，可从API获取）
@@ -55,21 +55,21 @@ function parseError(error: any): { type: string; message: string; hint: string }
     };
   }
 
-  // 网络相关错误
+  // Network related errors
   if (message.includes('network') || message.includes('connection') || message.includes('socket')) {
     return {
-      type: '网络错误',
+      type: 'Network error',
       message: message,
-      hint: '请检查网络连接和API地址',
+      hint: 'Check network connection and API URL',
     };
   }
 
-  // 超时
+  // Timeout
   if (message.includes('timeout') || message.includes('timed out')) {
     return {
-      type: '请求超时',
+      type: 'Request timeout',
       message: message,
-      hint: '服务器响应慢或网络不稳定',
+      hint: 'Server slow or network unstable',
     };
   }
 
@@ -78,15 +78,15 @@ function parseError(error: any): { type: string; message: string; hint: string }
     return {
       type: 'API错误',
       message: message,
-      hint: '请检查API配置是否正确',
+      hint: 'Check if API configuration is correct',
     };
   }
 
   // 其他错误
   return {
-    type: '未知错误',
+    type: 'Unknown error',
     message: message,
-    hint: '请查看错误详情或联系支持',
+    hint: 'Check error details or contact support',
   };
 }
 

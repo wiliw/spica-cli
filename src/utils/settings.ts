@@ -262,7 +262,21 @@ export async function getProviderConfig(providerName?: string): Promise<Provider
 
   const apiKey = envApiKey || fileConfig?.apiKey;
   const model = envModel || fileConfig?.model || DEFAULT_MODELS[name] || 'gpt-4o';
-  const baseUrl = envBaseUrl || fileConfig?.baseUrl || DEFAULT_BASE_URLS[name] || 'https://api.openai.com/v1';
+
+  // Validate baseUrl - must be a valid URL
+  let baseUrl = envBaseUrl || fileConfig?.baseUrl;
+
+  // Check if baseUrl is a valid URL format (if provided)
+  if (baseUrl && baseUrl.trim() !== '') {
+    try {
+      new URL(baseUrl);
+    } catch {
+      throw new Error(`Provider '${name}' has invalid baseUrl '${baseUrl}'. Fix with: spica providers set ${name} <api-key> --url https://api.example.com/v1 --model <model>`);
+    }
+  } else {
+    // Use default if not provided
+    baseUrl = DEFAULT_BASE_URLS[name] || 'https://api.openai.com/v1';
+  }
 
   if (!apiKey) {
     throw new Error(`Provider '${name}' not configured. Run: spica providers set ${name} <api-key> --url <base-url> --model <model-name>`);

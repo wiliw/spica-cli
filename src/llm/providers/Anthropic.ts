@@ -29,9 +29,9 @@ export class AnthropicProvider extends BaseProvider {
       return { success: response.ok };
     } catch (error: any) {
       if (signal?.aborted) {
-        return { success: false, type: '中断', error: 'User interrupted', hint: '用户取消' };
+        return { success: false, type: 'Interrupted', error: 'User interrupted', hint: 'User cancelled' };
       }
-      return { success: false, type: '连接错误', error: error.message, hint: '检查API配置' };
+      return { success: false, type: 'Connection error', error: error.message, hint: 'Check API configuration' };
     }
   }
 
