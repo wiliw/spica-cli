@@ -76,7 +76,7 @@ export function setupAgentEvents(
     if (reasoningStarted && !justSwitchedFromReasoning) {
       justSwitchedFromReasoning = true;
       if (state.isShowThinking()) {
-        screen.appendScroll('\n' + COLORS.muted('---\n'));
+        screen.appendScroll('\n' + COLORS.muted('[out]\n'));
       } else {
         screen.appendScroll('\n');
       }
@@ -95,15 +95,14 @@ export function setupAgentEvents(
     if (!reasoningStarted) {
       reasoningStarted = true;
       justSwitchedFromReasoning = false;
-      screen.appendScroll('\n');
       if (state.isShowThinking()) {
-        screen.appendScroll(COLORS.reasoning('[THINKING]\n'));
+        screen.appendScroll('\n' + COLORS.muted('[think]\n'));
         if (!state.isStreamingOutput()) {
           state.setStreamingOutput(true);
           screen.setStreaming(true);
         }
       } else {
-        screen.appendScroll(COLORS.muted('[thinking]\n'));
+        screen.appendScroll(COLORS.muted('[thinking]'));
       }
     }
 
