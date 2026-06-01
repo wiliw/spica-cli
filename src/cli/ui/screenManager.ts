@@ -1,4 +1,5 @@
 import { LAIN_COLORS } from './colors';
+import { isCJK } from './stringWidth';
 import fs from 'fs';
 
 const ESC = '\x1b';
@@ -45,32 +46,11 @@ export class ScreenManager {
     };
   }
 
-  // CJK 字符范围（East Asian Wide）
-  // 参考: https://unicode.org/reports/tr11/
-  private isCJKChar(char: string): boolean {
-    const code = char.charCodeAt(0);
-    // CJK 统一汉字: U+4E00 - U+9FFF
-    // CJK 扩展 A: U+3400 - U+4DBF
-    // CJK 兼容汉字: U+F900 - U+FAFF
-    // CJK 统一汉字扩展 B-F 需要代理对处理，暂不支持
-    // 日文假名: U+3040 - U+30FF (Hiragana + Katakana)
-    // 韩文字母: U+AC00 - U+D7AF (Hangul Syllables)
-    // 全角符号: U+FF00 - U+FFEF (Halfwidth and Fullwidth Forms)
-    return (
-      (code >= 0x4E00 && code <= 0x9FFF) ||
-      (code >= 0x3400 && code <= 0x4DBF) ||
-      (code >= 0xF900 && code <= 0xFAFF) ||
-      (code >= 0x3040 && code <= 0x30FF) ||
-      (code >= 0xAC00 && code <= 0xD7AF) ||
-      (code >= 0xFF00 && code <= 0xFFEF)
-    );
-  }
-
   // 计算单个字符的显示宽度
   private getCharDisplayWidth(char: string): number {
     if (char === '\n') return 0;  // 换行符不占横向宽度
     if (char === '\t') return 8;  // Tab 宽度 8（或可配置）
-    if (this.isCJKChar(char)) return 2;  // CJK 字符宽度 2
+    if (isCJK(char)) return 2;  // CJK 字符宽度 2
     return 1;  // 其他字符（包括 Unicode 符号如 ● ✓ ✗）宽度 1
   }
 

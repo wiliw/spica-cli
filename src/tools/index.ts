@@ -703,7 +703,7 @@ export async function executeTool(
         if (!command) {
           return { success: false, error: 'Command is required' };
         }
-const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
+        const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
         const detached = safeArgs.detached === true;
         const interactive = safeArgs.interactive === true;
         const autoRetry = safeArgs.autoRetry !== false;
@@ -714,6 +714,24 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
 
         // 卡住检测阈值（默认30秒，可通过 stuckWarning 参数调整）
         const stuckWarningMs = (safeArgs.stuckWarning as number) || 60000;
+
+        // Shell 注入检测 — 阻止高危 metacharacters
+        const injectionPatterns = [
+          { pattern: /\$\(/, name: 'command substitution $(...)' },
+          { pattern: /`[^`]+`/, name: 'backtick command substitution' },
+          { pattern: /\/dev\/tcp\//, name: 'bash network connection' },
+          { pattern: /\|\s*(bash|sh|zsh|python|perl|ruby)\b/, name: 'piping to shell interpreter' },
+          { pattern: /mkfifo/, name: 'named pipe creation' },
+          { pattern: /\bnc\s+-[el]/, name: 'netcat listener' },
+        ];
+        for (const { pattern, name } of injectionPatterns) {
+          if (pattern.test(command)) {
+            return {
+              success: false,
+              error: `Blocked: command contains ${name}. This pattern is not allowed for security reasons.`,
+            };
+          }
+        }
 
         try {
           // Read inputs from file if provided

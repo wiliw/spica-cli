@@ -2,13 +2,13 @@
 import { Command } from 'commander';
 import { SpicaAgent } from './agent';
 import {
-  loadConfig,
-  saveConfig,
+  loadGlobalSettings,
+  saveGlobalSettings,
   getProviderConfig,
   setProviderConfig,
   listProviders,
   setDefaultProvider,
-} from './utils/config';
+} from './utils/settings';
 import { MCPServerConfig } from './utils/settings';
 import { loadSession, saveSession } from './utils/session';
 import { parseSkillInput, getSkill, buildSkillPrompt, listSkills, installSkill, uninstallSkill, listInstalledPackages, saveSkill, deleteSkill } from './skills';
@@ -84,7 +84,7 @@ program
   .option('-p, --provider <name>', 'Use specific provider')
   .option('--no-tui', 'Run in non-interactive mode (no TUI, simple output)')
   .action(async (options: { fresh?: boolean; provider?: string; noTui?: boolean }) => {
-    const config = await loadConfig();
+    const config = await loadGlobalSettings();
     const providerName = options.provider || config.defaultProvider || 'openai';
 
     // 检测是否支持交互式终端
@@ -770,7 +770,7 @@ program
   .option('-p, --provider <name>', 'Use specific provider')
   .addHelpText('after', '\nExamples:\n  spica run "fix login bug"\n  spica run "add CSV export" -p deepseek\n  spica run "refactor user module"')
   .action(async (request: string, options: { provider?: string }) => {
-    const config = await loadConfig();
+    const config = await loadGlobalSettings();
     const providerName = options.provider || config.defaultProvider || 'openai';
 
     let providerConfig;
@@ -827,7 +827,7 @@ program
   .description('List providers')
   .action(async () => {
     const providers = await listProviders();
-    const defaultProvider = (await loadConfig()).defaultProvider;
+    const defaultProvider = (await loadGlobalSettings()).defaultProvider;
     providers.forEach(p => {
       const mark = p === defaultProvider ? '●' : '○';
       console.log(`${mark} ${p}`);
@@ -838,7 +838,7 @@ program
   .command('show [name]')
   .description('Show provider config')
   .action(async (name) => {
-    name = name || (await loadConfig()).defaultProvider;
+    name = name || (await loadGlobalSettings()).defaultProvider;
     if (!name) return console.log('No default provider');
     try {
       const c = await getProviderConfig(name);
@@ -856,12 +856,12 @@ program
   .description('Remove providers (use --all to remove all)')
   .option('-a, --all', 'Remove all')
   .action(async (names, opts) => {
-    const config = await loadConfig();
+    const config = await loadGlobalSettings();
     if (opts.all) {
       const all = Object.keys(config.providers || {});
       config.providers = {};
       config.defaultProvider = undefined;
-      await saveConfig(config);
+      await saveGlobalSettings(config);
       console.log(COLORS.success(`[OK] removed: ${all.join(', ')}`));
       return;
     }
@@ -875,7 +875,7 @@ program
         console.log(COLORS.error(`[ERR] ${n} not found`));
       }
     }
-    await saveConfig(config);
+    await saveGlobalSettings(config);
   });
 
 // Skills管理

@@ -3,6 +3,7 @@
 import fs from 'fs-extra';
 import { join } from 'path';
 import type { ChatMessage } from '../llm/providers/BaseProvider';
+import { cleanMessages } from './messageCleaner';
 
 // Session size limits (prevent huge session files that cause API timeouts)
 const MAX_SESSION_MESSAGES = 50;  // 最多保存50条消息
@@ -52,53 +53,6 @@ export function loadSession(workspacePath: string): SessionState | null {
   }
 
   return null;
-}
-
-function cleanMessages(messages: ChatMessage[]): ChatMessage[] {
-  const result: ChatMessage[] = [];
-  const usedToolCallIds = new Set<string>();
-
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    
-    if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
-      const expectedIds = m.toolCalls.map(tc => tc.id);
-      let j = i + 1;
-      const foundIds: string[] = [];
-      
-      // Collect tool responses
-      while (j < messages.length && messages[j].role === 'tool') {
-        foundIds.push(messages[j].toolCallId || '');
-        j++;
-      }
-      
-      // Check if all tool calls have responses and none are reused
-      const missingOrReused = expectedIds.filter(id => 
-        !foundIds.includes(id) || usedToolCallIds.has(id)
-      );
-      
-      if (missingOrReused.length === 0) {
-        // Complete pair - keep assistant with toolCalls and all tool responses
-        result.push({ role: 'assistant', content: m.content || '', toolCalls: m.toolCalls });
-        for (let k = i + 1; k < j; k++) {
-          result.push(messages[k]);
-          usedToolCallIds.add(messages[k].toolCallId || '');
-        }
-      } else {
-        // Incomplete - strip toolCalls from assistant, keep only text
-        result.push({ role: 'assistant', content: m.content || '' });
-      }
-      i = j - 1; // Skip processed tool messages
-    } else if (m.role === 'tool') {
-      // Orphaned tool message (no preceding assistant with toolCalls), skip
-      continue;
-    } else {
-      // user, system, or text-only assistant
-      result.push({ role: m.role, content: m.content || '' });
-    }
-  }
-
-  return result;
 }
 
 function truncateContent(content: string | undefined): string {

@@ -3,10 +3,11 @@ import { TokenCounter } from './llm/TokenCounter';
 import { executeTool, getAllToolDefinitions, setWorkspace, getWorkspace } from './tools/index';
 import { initMCP, shutdownMCP } from './mcp/client';
 import { initSkills, listSkills, getSkill, buildSkillPrompt } from './skills/index';
-import { getProviderConfig } from './utils/config';
+import { getProviderConfig } from './utils/settings';
 import { getSystemPrompt, getCompactPrompt } from './prompts/system';
 import { loadProjectConfig as loadAgentsConfig, autoDetectProject, createAgentsMd } from './utils/projectConfig';
 import { SkillDefinition } from './utils/settings';
+import { cleanMessages } from './utils/messageCleaner';
 import { loadProjectState, saveProjectState, updateProjectTodos, loadProjectContext, saveProjectContext, ensureProjectDir } from './storage/projectState';
 import { runPreHooks, runPostHooks } from './hooks';
 import { COLORS } from './cli/ui/colors';
@@ -56,6 +57,8 @@ export class SpicaAgent extends EventEmitter {
   private permissionPending = false;
   private permissionResolve: ((approved: boolean) => void) | null = null;
   private bypassPermissions = false;  // 跳过权限请求模式
+  private bypassTimer: NodeJS.Timeout | null = null;
+  private static readonly BYPASS_TIMEOUT_MS = 5 * 60 * 1000; // 5 分钟自动恢复
 
   // 工具级 AbortController（用于中断单个工具）
   private toolAbortControllers: Map<string, AbortController> = new Map();
@@ -169,6 +172,7 @@ export class SpicaAgent extends EventEmitter {
   async waitForPermission(reason: string): Promise<boolean> {
     // 如果bypass模式开启，自动批准
     if (this.bypassPermissions) {
+      this.auditLog('BYPASS_APPROVED', reason);
       this.emit('permission_bypassed', { reason });
       return true;
     }
@@ -186,6 +190,20 @@ export class SpicaAgent extends EventEmitter {
     }
 
     return promise;
+  }
+
+  // 危险操作审计日志
+  private auditLog(action: string, detail: string): void {
+    try {
+      const logDir = path.join(this.workspacePath, '.spica');
+      fs.ensureDirSync(logDir);
+      const logPath = path.join(logDir, 'audit.log');
+      const timestamp = new Date().toISOString();
+      const entry = `[${timestamp}] ${action}: ${detail}\n`;
+      fs.appendFileSync(logPath, entry);
+    } catch {
+      // 审计日志失败不应阻塞正常操作
+    }
   }
 
   // 处理权限队列
@@ -206,6 +224,7 @@ export class SpicaAgent extends EventEmitter {
       if (request.resolve) {
         request.resolve(approved);
       }
+      this.auditLog(approved ? 'USER_APPROVED' : 'USER_DENIED', request.reason);
       this.emit('permission_result', { approved });
     }
     this.permissionPending = false;
@@ -262,10 +281,24 @@ export class SpicaAgent extends EventEmitter {
     return this.pendingInput;
   }
 
-  // 设置bypass模式
+  // 设置bypass模式（5 分钟后自动恢复为 strict）
   setBypassPermissions(enabled: boolean): void {
+    if (this.bypassTimer) {
+      clearTimeout(this.bypassTimer);
+      this.bypassTimer = null;
+    }
+
     this.bypassPermissions = enabled;
     this.emit('bypass_changed', { enabled });
+
+    if (enabled) {
+      this.bypassTimer = setTimeout(() => {
+        this.bypassPermissions = false;
+        this.bypassTimer = null;
+        this.emit('bypass_changed', { enabled: false });
+        this.emit('bypass_auto_reverted', { reason: 'Timeout: 5 minutes elapsed' });
+      }, SpicaAgent.BYPASS_TIMEOUT_MS);
+    }
   }
 
   get isBypassPermissions(): boolean {
@@ -696,44 +729,7 @@ async init() {
   }
 
   private cleanMessagesForLLM(messages: ChatMessage[]): ChatMessage[] {
-    const result: ChatMessage[] = [];
-    const usedToolCallIds = new Set<string>();
-
-    for (let i = 0; i < messages.length; i++) {
-      const m = messages[i];
-
-      if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
-        const expectedIds = m.toolCalls.map(tc => tc.id);
-        let j = i + 1;
-        const foundIds: string[] = [];
-
-        while (j < messages.length && messages[j].role === 'tool') {
-          foundIds.push(messages[j].toolCallId || '');
-          j++;
-        }
-
-        const missingOrReused = expectedIds.filter(id =>
-          !foundIds.includes(id) || usedToolCallIds.has(id)
-        );
-
-        if (missingOrReused.length === 0) {
-          result.push({ role: 'assistant', content: m.content || '', toolCalls: m.toolCalls });
-          for (let k = i + 1; k < j; k++) {
-            result.push(messages[k]);
-            usedToolCallIds.add(messages[k].toolCallId || '');
-          }
-        } else {
-          result.push({ role: 'assistant', content: m.content || '' });
-        }
-        i = j - 1;
-      } else if (m.role === 'tool') {
-        continue;
-      } else {
-        result.push({ role: m.role, content: m.content || '' });
-      }
-    }
-
-    return result;
+    return cleanMessages(messages);
   }
 
   async runLoop(prompt: string, maxIterations = 50): Promise<string> {

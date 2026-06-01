@@ -2,7 +2,7 @@
 // 中文字符宽度为2，英文为1，用于终端对齐
 
 // 判断是否是CJK字符（中日韩）
-function isCJK(char: string): boolean {
+export function isCJK(char: string): boolean {
   const codePoint = char.codePointAt(0);
   if (!codePoint) return false;
 

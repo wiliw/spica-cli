@@ -122,6 +122,12 @@ export async function saveGlobalSettings(settings: Settings): Promise<void> {
     await fs.chmod(GLOBAL_DIR, 0o700);
   }
 
+  // 确保 .gitignore 保护 settings.json（防止意外提交 API keys）
+  const gitignorePath = join(GLOBAL_DIR, '.gitignore');
+  if (!await fs.pathExists(gitignorePath)) {
+    await fs.writeFile(gitignorePath, '# Protect API keys from accidental commit\nsettings.json\naudit.log\n', 'utf-8');
+  }
+
   settingsCache = settings;
 }
 
