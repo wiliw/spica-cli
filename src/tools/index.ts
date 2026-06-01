@@ -479,16 +479,35 @@ export async function executeTool(
         const writePath = resolvePath(safeArgs.path);
         await fs.ensureDir(dirname(writePath));
 
+        // 备份旧文件（如果存在）到 .spica/backups/
+        let oldContentForBackup = '';
+        try {
+          oldContentForBackup = await fs.readFile(writePath, 'utf-8');
+          if (oldContentForBackup !== safeArgs.content) {
+            const backupDir = join(WORKSPACE, '.spica', 'backups');
+            await fs.ensureDir(backupDir);
+            const timestamp = Date.now();
+            const safeName = safeArgs.path.replace(/[\/\\]/g, '_');
+            const backupPath = join(backupDir, `${timestamp}-${safeName}`);
+            await fs.writeFile(backupPath, oldContentForBackup, 'utf-8');
+          }
+        } catch {
+          // 新文件，无需备份
+        }
+
         // 读取旧内容（如果存在）生成实际diff
         let diff = '';
         try {
-          const oldContent = await fs.readFile(writePath, 'utf-8');
-          if (oldContent !== safeArgs.content) {
-            const diffLines = computeDiff(oldContent, safeArgs.content);
-            diff = formatDiff(diffLines, 3);
+          if (oldContentForBackup) {
+            if (oldContentForBackup !== safeArgs.content) {
+              const diffLines = computeDiff(oldContentForBackup, safeArgs.content);
+              diff = formatDiff(diffLines, 3);
+            }
+          } else {
+            const diffLines = computeDiff('', safeArgs.content);
+            diff = formatDiff(diffLines, 2);
           }
         } catch {
-          // 新文件：生成全新增的diff
           const diffLines = computeDiff('', safeArgs.content);
           diff = formatDiff(diffLines, 2);
         }
@@ -1108,6 +1127,12 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
         const timeoutMs = (safeArgs.timeout || 30) * 1000;
         const url = safeArgs.url as string;
 
+        try {
+          validateUrl(url);
+        } catch (e: any) {
+          return { success: false, error: e.message };
+        }
+
         // 创建 AbortController（支持 ESC ESC 中断）
         const externalSignal = safeArgs._abortSignal as AbortSignal | undefined;
         const abortController = externalSignal ? new AbortController() : new AbortController();
@@ -1216,13 +1241,15 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
 
         switch (action) {
           case 'pr_view': {
-            const ghResult = await execa(`gh pr view ${args.number || ''}`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            const ghArgs = ['pr', 'view'];
+            if (args.number) ghArgs.push(String(args.number));
+            const ghResult = await execa('gh', ghArgs, { cwd: WORKSPACE, timeout, reject: false });
             return { success: ghResult.exitCode === 0, output: ghResult.stdout || ghResult.stderr };
           }
           case 'pr_list': {
             const state = args.state || 'open';
             const limit = args.limit || 20;
-            const ghResult = await execa(`gh pr list --state ${state} --limit ${limit}`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            const ghResult = await execa('gh', ['pr', 'list', '--state', state, '--limit', String(limit)], { cwd: WORKSPACE, timeout, reject: false });
             return { success: ghResult.exitCode === 0, output: ghResult.stdout || 'No PRs found' };
           }
           case 'pr_create': {
@@ -1231,38 +1258,45 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
             const base = args.base || 'main';
             const head = args.head || '';
             if (!title) return { success: false, error: 'Title required' };
-            const ghResult = await execa(`gh pr create --title "${title}" --body "${body}" --base ${base} ${head ? `--head ${head}` : ''}`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            const ghArgs = ['pr', 'create', '--title', title, '--body', body, '--base', base];
+            if (head) ghArgs.push('--head', head);
+            const ghResult = await execa('gh', ghArgs, { cwd: WORKSPACE, timeout, reject: false });
             return { success: ghResult.exitCode === 0, output: ghResult.stdout || ghResult.stderr };
           }
           case 'issue_list': {
             const state = args.state || 'open';
             const limit = args.limit || 20;
-            const label = args.label ? `--label "${args.label}"` : '';
-            const ghResult = await execa(`gh issue list --state ${state} --limit ${limit} ${label}`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            const ghArgs = ['issue', 'list', '--state', state, '--limit', String(limit)];
+            if (args.label) ghArgs.push('--label', args.label);
+            const ghResult = await execa('gh', ghArgs, { cwd: WORKSPACE, timeout, reject: false });
             return { success: ghResult.exitCode === 0, output: ghResult.stdout || 'No issues found' };
           }
           case 'issue_view': {
-            const ghResult = await execa(`gh issue view ${args.number || ''}`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            const ghArgs = ['issue', 'view'];
+            if (args.number) ghArgs.push(String(args.number));
+            const ghResult = await execa('gh', ghArgs, { cwd: WORKSPACE, timeout, reject: false });
             return { success: ghResult.exitCode === 0, output: ghResult.stdout || ghResult.stderr };
           }
           case 'issue_create': {
             const title = args.title || '';
             const body = args.body || '';
             if (!title) return { success: false, error: 'Title required' };
-            const ghResult = await execa(`gh issue create --title "${title}" --body "${body}"`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            const ghResult = await execa('gh', ['issue', 'create', '--title', title, '--body', body], { cwd: WORKSPACE, timeout, reject: false });
             return { success: ghResult.exitCode === 0, output: ghResult.stdout || ghResult.stderr };
           }
           case 'repo_view': {
-            const ghResult = await execa(`gh repo view`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            const ghResult = await execa('gh', ['repo', 'view'], { cwd: WORKSPACE, timeout, reject: false });
             return { success: ghResult.exitCode === 0, output: ghResult.stdout || 'Not in a GitHub repository' };
           }
           case 'run_list': {
             const limit = args.limit || 10;
-            const ghResult = await execa(`gh run list --limit ${limit}`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            const ghResult = await execa('gh', ['run', 'list', '--limit', String(limit)], { cwd: WORKSPACE, timeout, reject: false });
             return { success: ghResult.exitCode === 0, output: ghResult.stdout || 'No workflow runs found' };
           }
           case 'run_view': {
-            const ghResult = await execa(`gh run view ${args.number || ''}`, { shell: true, cwd: WORKSPACE, timeout, reject: false });
+            const ghArgs = ['run', 'view'];
+            if (args.number) ghArgs.push(String(args.number));
+            const ghResult = await execa('gh', ghArgs, { cwd: WORKSPACE, timeout, reject: false });
             return { success: ghResult.exitCode === 0, output: ghResult.stdout || ghResult.stderr };
           }
           default:
@@ -1555,7 +1589,45 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
 }
 
 function resolvePath(path: string): string {
-  return isAbsolute(path) ? path : pathResolve(WORKSPACE, path);
+  const resolved = isAbsolute(path) ? path : pathResolve(WORKSPACE, path);
+  if (!resolved.startsWith(WORKSPACE) && !resolved.startsWith(pathResolve(WORKSPACE))) {
+    throw new Error(`Access denied: path "${path}" is outside workspace`);
+  }
+  return resolved;
+}
+
+function validateUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid URL: ${url}`);
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  // Block localhost
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '0.0.0.0') {
+    throw new Error(`Access denied: requests to localhost are not allowed`);
+  }
+
+  // Block private IP ranges (10.x, 172.16-31.x, 192.168.x)
+  const ipMatch = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipMatch) {
+    const [, a, b] = ipMatch.map(Number);
+    if (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) {
+      throw new Error(`Access denied: requests to private IP ranges are not allowed`);
+    }
+    // Block cloud metadata endpoint
+    if (a === 169 && b === 254) {
+      throw new Error(`Access denied: requests to link-local addresses are not allowed`);
+    }
+  }
+
+  // Block non-http protocols
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error(`Access denied: only http/https URLs are allowed`);
+  }
 }
 
 async function detectProjectType(workspace: string): Promise<string> {

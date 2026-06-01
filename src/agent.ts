@@ -112,7 +112,10 @@ export class SpicaAgent extends EventEmitter {
       const dangerousPatterns = [
         { pattern: 'rm -rf', name: '删除整个目录' },
         { pattern: 'rm /*', name: '删除根目录' },
+        { pattern: 'rm -r /', name: '递归删除根目录' },
         { pattern: 'chmod 777', name: '开放所有权限' },
+        { pattern: 'chmod -R 777', name: '递归开放所有权限' },
+        { pattern: 'chown ', name: '修改文件所有者' },
         { pattern: 'sudo ', name: '使用sudo权限' },
         { pattern: 'dd if=', name: '磁盘操作' },
         { pattern: 'mkfs', name: '格式化磁盘' },
@@ -121,6 +124,14 @@ export class SpicaAgent extends EventEmitter {
         { pattern: 'git push --force', name: '强制推送' },
         { pattern: 'git reset --hard', name: '硬重置（已保护）' },
         { pattern: 'git clean -fd', name: '删除未跟踪文件' },
+        { pattern: ':(){ :|:& };:', name: 'Fork 炸弹' },
+        { pattern: 'wget ', name: '远程下载（可能下载恶意脚本）' },
+        { pattern: 'curl ', name: '远程请求（可能下载恶意脚本）' },
+        { pattern: 'shutdown', name: '关机' },
+        { pattern: 'reboot', name: '重启' },
+        { pattern: 'init 0', name: '关机' },
+        { pattern: 'mkswap', name: '格式化交换分区' },
+        { pattern: 'fdisk', name: '磁盘分区操作' },
       ];
 
       for (const { pattern, name } of dangerousPatterns) {

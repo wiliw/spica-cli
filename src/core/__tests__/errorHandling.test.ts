@@ -1,4 +1,3 @@
-// Error handling tests - simplified without importing classes
 describe('Error Handling Tests', () => {
   describe('Error Types', () => {
     it('should classify network errors', () => {
@@ -31,43 +30,14 @@ describe('Error Handling Tests', () => {
     });
   });
 
-  describe('Error Recovery', () => {
-    it('should handle session recovery', () => {
-      // Session truncation handles large sessions
-      expect(true).toBe(true);
-    });
-
-    it('should handle context compression', () => {
-      // Compression reduces message count
-      expect(true).toBe(true);
-    });
-
-    it('should handle interrupt gracefully', () => {
-      // Interrupt stops current operation
-      expect(true).toBe(true);
-    });
-  });
-
   describe('Edge Cases', () => {
-    it('should handle null error', () => {
-      // Null errors should not crash
-      expect(true).toBe(true);
-    });
-
-    it('should handle undefined error', () => {
-      // Undefined errors should not crash
-      expect(true).toBe(true);
-    });
-
     it('should handle circular reference', () => {
-      // Circular objects should not crash
       const circular: any = { a: 1 };
       circular.self = circular;
       expect(circular.self).toBe(circular);
     });
 
     it('should handle extremely long error message', () => {
-      // Long messages should be truncated
       const longMessage = 'A'.repeat(100000);
       const truncated = longMessage.slice(0, 500);
       expect(truncated.length).toBe(500);

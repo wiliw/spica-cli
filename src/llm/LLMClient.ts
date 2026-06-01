@@ -68,6 +68,10 @@ export class LLMClient extends EventEmitter {
 
   async generate(prompt: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
     // 提前创建AbortController，支持中断rate limiter等待
+    // 如果有旧的 controller，先 abort 避免竞态
+    if (this.abortController) {
+      this.abortController.abort();
+    }
     this.abortController = new AbortController();
     const toolsToUse = tools || this.tools;
 
@@ -102,6 +106,9 @@ export class LLMClient extends EventEmitter {
 
   // 直接生成（不使用历史消息，用于摘要等）
   async generateDirect(prompt: string): Promise<LLMResponse> {
+    if (this.abortController) {
+      this.abortController.abort();
+    }
     this.abortController = new AbortController();
 
     try {

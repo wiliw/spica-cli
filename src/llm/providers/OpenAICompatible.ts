@@ -223,7 +223,7 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
         const parsedToolCalls: ToolCall[] = toolCalls.map(tc => ({
           id: tc.id,
           name: tc.name || '',
-          arguments: tc.arguments ? JSON.parse(tc.arguments) : {},
+          arguments: tc.arguments ? ((): Record<string, any> => { try { return JSON.parse(tc.arguments); } catch { return {}; } })() : {},
         }));
 
         this.messages.push({
@@ -380,7 +380,7 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
         const parsedToolCalls: ToolCall[] = toolCalls.map(tc => ({
           id: tc.id,
           name: tc.name || '',
-          arguments: tc.arguments ? JSON.parse(tc.arguments) : {},
+          arguments: tc.arguments ? ((): Record<string, any> => { try { return JSON.parse(tc.arguments); } catch { return {}; } })() : {},
         }));
 
         this.messages.push({
@@ -513,7 +513,7 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
         const parsedToolCalls: ToolCall[] = toolCalls.map(tc => ({
           id: tc.id,
           name: tc.name || '',
-          arguments: tc.arguments ? JSON.parse(tc.arguments) : {},
+          arguments: tc.arguments ? ((): Record<string, any> => { try { return JSON.parse(tc.arguments); } catch { return {}; } })() : {},
         }));
 
         this.messages.push({

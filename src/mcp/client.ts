@@ -65,10 +65,18 @@ export class MCPManager extends EventEmitter {
 
     if (config.command) {
       // Stdio模式 - StdioClientTransport 会自动启动进程
+      // 过滤敏感环境变量，防止 API keys 等泄露给 MCP 子进程
+      const SENSITIVE_PATTERN = /api[_-]?key|token|secret|password|credential|auth/i;
+      const safeEnv: Record<string, string> = {};
+      for (const [key, value] of Object.entries(process.env)) {
+        if (SENSITIVE_PATTERN.test(key) || SENSITIVE_PATTERN.test(value || '')) continue;
+        safeEnv[key] = value as string;
+      }
+
       transport = new StdioClientTransport({
         command: config.command,
         args: config.args || [],
-        env: { ...process.env, ...config.env } as Record<string, string>,
+        env: { ...safeEnv, ...config.env } as Record<string, string>,
         stderr: 'pipe',  // 捕获stderr
       });
 

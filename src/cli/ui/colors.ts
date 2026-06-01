@@ -129,6 +129,9 @@ export const BG = {
   },
 };
 
+// 兼容别名（旧代码引用 LAIN_COLORS）
+export const LAIN_COLORS = COLORS;
+
 // 格式化函数
 export const format = {
   prompt: () => LAIN_COLORS.prompt('>'),

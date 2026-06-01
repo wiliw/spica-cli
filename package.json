@@ -44,11 +44,14 @@
     "unicorn-magic": "^0.4.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/fs-extra": "^11.0.4",
     "@types/node": "^20.12.12",
     "@types/prompts": "^2.4.9",
+    "eslint": "^10.4.1",
     "tsx": "^4.21.1",
     "typescript": "^5.4.5",
+    "typescript-eslint": "^8.60.0",
     "vitest": "^1.6.0"
   }
 }

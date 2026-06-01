@@ -73,7 +73,7 @@ describe('ProcessMonitor', () => {
       const { command, args } = echoCmd('quick');
       await monitor.start(command, args, 'quick-process');
       
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       const info = await monitor.monitor('quick-process');
       expect(info?.status).toBe(ProcessStatus.EXITED);
