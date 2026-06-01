@@ -116,8 +116,12 @@ export async function loadGlobalSettings(): Promise<Settings> {
 export async function saveGlobalSettings(settings: Settings): Promise<void> {
   await fs.ensureDir(GLOBAL_DIR);
   await fs.writeJson(GLOBAL_SETTINGS_FILE, settings, { spaces: 2 });
-  await fs.chmod(GLOBAL_SETTINGS_FILE, 0o600);
-  await fs.chmod(GLOBAL_DIR, 0o700);
+
+  if (process.platform !== 'win32') {
+    await fs.chmod(GLOBAL_SETTINGS_FILE, 0o600);
+    await fs.chmod(GLOBAL_DIR, 0o700);
+  }
+
   settingsCache = settings;
 }
 

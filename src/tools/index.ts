@@ -1,6 +1,5 @@
 import fs from 'fs-extra';
 import { execa } from 'execa';
-import * as pty from 'node-pty';
 import simpleGit from 'simple-git';
 import { resolve as pathResolve, isAbsolute, dirname, join } from 'path';
 import fastGlob from 'fast-glob';
@@ -8,6 +7,17 @@ import { SpicaAgent } from '../agent';
 import { SubAgentTask, getSubAgentConfig, isToolAllowed, summarizeResult } from './subAgent';
 import { computeDiff, formatDiff, generateEditDiff } from '../cli/ui/diff';
 import { getMCPManager } from '../mcp/client';
+import { getBashPath, supportsTmux } from '../utils/platform';
+import axios from 'axios';
+
+const isWindows = process.platform === 'win32';
+
+let pty: typeof import('node-pty') | null = null;
+try {
+  pty = await import('node-pty');
+} catch {
+  // node-pty not available (common on Windows without native build tools)
+}
 
 // WORKSPACE 可以通过 setWorkspace 函数更新
 let WORKSPACE = process.cwd();
@@ -713,6 +723,22 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
 
           // 分离模式：使用 tmux 运行（用户可 attach 查看）
           if (detached) {
+            if (isWindows) {
+              // Windows: 使用 start /B 在后台运行
+              const escapedCmd = command.replace(/"/g, '\\"');
+              const actualCommand = `start /B cmd /c "${escapedCmd}"`;
+              await execa(actualCommand, {
+                shell: true,
+                cwd: WORKSPACE,
+                timeout: 5000,
+                reject: false,
+              });
+              return {
+                success: true,
+                output: `Started in detached mode (Windows background).\nCommand: ${command}\n\nNote: Process runs in background. Use Task Manager to monitor.`,
+              };
+            }
+
             const sessionId = `spica_${Date.now()}`;
             const escapedCommand = command.replace(/'/g, "'\\''");
 
@@ -996,64 +1022,49 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
         try {
           // Tavily API (preferred if configured)
           if (engine === 'tavily' && tavilyApiKey) {
-            const tavilyUrl = 'https://api.tavily.com/search';
-            const tavilyBody = JSON.stringify({
-              api_key: tavilyApiKey,
-              query: safeArgs.query,
-              search_depth: 'basic',
-              max_results: 10,
-            });
+            try {
+              const tavilyResp = await axios.post('https://api.tavily.com/search', {
+                api_key: tavilyApiKey,
+                query: safeArgs.query,
+                search_depth: 'basic',
+                max_results: 10,
+              }, {
+                timeout: timeoutMs,
+                signal: abortController.signal,
+              });
 
-            const tavilyCmd = `curl -sL -X POST "${tavilyUrl}" -H "Content-Type: application/json" -d '${tavilyBody}' --max-time ${timeoutMs / 1000}`;
-
-            const tavilyResult = await execa(tavilyCmd, {
-              shell: true,
-              timeout: timeoutMs,
-              reject: false,
-              cancelSignal: abortController.signal,
-            });
-
-            if (abortController.signal.aborted) {
-              return { success: false, error: 'Tool execution aborted by user (ESC ESC).' };
-            }
-
-            if (tavilyResult.stdout) {
-              try {
-                const data = JSON.parse(tavilyResult.stdout);
-                if (data.results && data.results.length > 0) {
-                  const results = data.results.map((r: any) => `- ${r.title}\n  ${r.url}\n  ${r.content?.slice(0, 100) || ''}`);
-                  return { success: true, output: `Tavily搜索结果 (${results.length}个):\n\n${results.join('\n\n')}` };
-                }
-              } catch {
-                // JSON parse failed, fallback to DuckDuckGo
+              const data = tavilyResp.data;
+              if (data.results && data.results.length > 0) {
+                const results = data.results.map((r: any) => `- ${r.title}\n  ${r.url}\n  ${r.content?.slice(0, 100) || ''}`);
+                return { success: true, output: `Tavily搜索结果 (${results.length}个):\n\n${results.join('\n\n')}` };
               }
+            } catch {
+              // Tavily failed, fallback to DuckDuckGo
             }
           }
 
           // DuckDuckGo HTML (default, free)
-          const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.https_proxy;
-          const curlProxy = proxyUrl ? `--proxy "${proxyUrl}"` : '';
-
           const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(safeArgs.query)}`;
-          const curlCmd = `curl -sL ${curlProxy} -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" -H "Accept: text/html" "${searchUrl}" --connect-timeout 5 --max-time ${Math.min(timeoutMs / 1000, 15)}`;
 
-          const searchResult = await execa(curlCmd, {
-            shell: true,
+          const searchResp = await axios.get(searchUrl, {
             timeout: Math.min(timeoutMs, 15000),
-            reject: false,
-            cancelSignal: abortController.signal,
+            signal: abortController.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Accept': 'text/html',
+            },
+            maxRedirects: 5,
           });
 
           if (abortController.signal.aborted) {
             return { success: false, error: 'Tool execution aborted by user (ESC ESC).' };
           }
 
-          // Return success even if no results - let agent decide what to do
-          const html = searchResult.stdout || '';
-          if (html.length === 0 || searchResult.stderr) {
+          const html = searchResp.data || '';
+          if (typeof html !== 'string' || html.length === 0) {
             return {
               success: true,
-              output: `Web search temporarily unavailable (${searchResult.stderr || 'network issue'}). Agent should proceed with available information.`,
+              output: `Web search temporarily unavailable. Agent should proceed with available information.`,
             };
           }
 
@@ -1089,7 +1100,7 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
 
           return { success: true, output };
         } catch (searchError: any) {
-          if (abortController.signal.aborted || searchError.message?.includes('abort')) {
+          if (abortController.signal.aborted || searchError.code === 'ERR_CANCELED' || searchError.message?.includes('abort')) {
             return { success: false, error: 'Tool execution aborted by user (ESC ESC).' };
           }
           return { success: false, error: searchError.message };
@@ -1099,18 +1110,6 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
       case 'web_fetch': {
         const timeoutMs = (safeArgs.timeout || 30) * 1000;
         const url = safeArgs.url as string;
-
-        // 尝试使用代理环境变量
-        const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.https_proxy;
-        const curlProxy = proxyUrl ? `--proxy "${proxyUrl}"` : '';
-
-        // 添加更好的 headers 避免被拦截
-        const curlCmd = `curl -sL ${curlProxy} \
-          -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-          -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
-          -H "Accept-Language: en-US,en;q=0.5" \
-          -H "Cache-Control: no-cache" \
-          "${url}"`;
 
         // 创建 AbortController（支持 ESC ESC 中断）
         const externalSignal = safeArgs._abortSignal as AbortSignal | undefined;
@@ -1127,11 +1126,17 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
         }
 
         try {
-          const fetchResult = await execa(curlCmd, {
-            shell: true,
+          const fetchResp = await axios.get(url, {
             timeout: timeoutMs,
-            reject: false,
-            cancelSignal: abortController.signal,
+            signal: abortController.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.5',
+              'Cache-Control': 'no-cache',
+            },
+            maxRedirects: 10,
+            responseType: 'text',
           });
 
           // 检查是否被中断
@@ -1142,14 +1147,13 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
             };
           }
 
-          if (fetchResult.stdout.length === 0) {
+          const html = fetchResp.data || '';
+          if (typeof html !== 'string' || html.length === 0) {
             return {
               success: false,
-              error: fetchResult.stderr || 'Fetch failed: No content. Try setting HTTPS_PROXY environment variable.'
+              error: 'Fetch failed: No content received.'
             };
           }
-
-          const html = fetchResult.stdout;
 
           // 检查是否被拦截 (Cloudflare 等)
           if (html.includes('Just a moment') || html.includes('Checking your browser') || html.includes('cf-browser-verification')) {
@@ -1159,7 +1163,7 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
             };
           }
 
-          // 尝试提取主要内容（简化 HTML）
+          // 提取主要内容（简化 HTML）
           let content = html;
 
           // 移除 script, style, nav, footer, header 等无关内容
@@ -1192,7 +1196,7 @@ const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
           return { success: true, output };
         } catch (fetchError: any) {
           // 检查是否是中断导致的错误
-          if (abortController.signal.aborted || fetchError.message?.includes('abort')) {
+          if (abortController.signal.aborted || fetchError.code === 'ERR_CANCELED' || fetchError.message?.includes('abort')) {
             return { success: false, error: 'Tool execution aborted by user (ESC ESC).' };
           }
           return { success: false, error: fetchError.message };
@@ -1626,14 +1630,14 @@ async function runSyntaxCheck(filePath: string): Promise<SyntaxCheckResult> {
       case 'typescript': {
         // TypeScript: 优先使用项目级别的 tsc
         if (isProjectFile) {
-          // 在项目目录下运行 tsc，只检查这个文件
-          const checkResult = await execa(`npx tsc --noEmit --skipLibCheck 2>&1 | grep -E "(error|${filePath})" | head -20`, {
+          // 在项目目录下运行 tsc
+          const checkResult = await execa('npx tsc --noEmit --skipLibCheck', {
             shell: true,
             cwd: WORKSPACE,
             timeout: 30000,
             reject: false,
           });
-          const output = checkResult.stdout;
+          const output = (checkResult.stdout || '') + '\n' + (checkResult.stderr || '');
           if (output.trim()) {
             const lines = output.split('\n').filter(l => l.includes('error'));
             for (const line of lines) {
@@ -1731,7 +1735,11 @@ async function runSyntaxCheck(filePath: string): Promise<SyntaxCheckResult> {
       }
 
       case 'shell': {
-        // Shell: 使用 bash -n 进行语法检查
+        // Shell: 使用 bash -n 进行语法检查（Windows 下跳过）
+        if (isWindows) {
+          result.warnings.push('Shell syntax check not available on Windows');
+          break;
+        }
         const shellCheck = await execa(`bash -n "${absolutePath}" 2>&1`, {
           shell: true,
           cwd: WORKSPACE,
@@ -1876,7 +1884,16 @@ async function runInteractivePty(
 ): Promise<ToolResult> {
   return new Promise((resolve) => {
     // 创建 PTY（通过 shell 执行，支持 cd、&& 等语法）
-    const ptyProcess = pty.spawn('/bin/bash', ['-c', command], {
+    if (!pty) {
+      resolve({ success: false, error: 'node-pty not available. Install with: npm install node-pty (requires native build tools).' });
+      return;
+    }
+
+    const bashPath = getBashPath();
+    const shell = bashPath || (isWindows ? process.env.COMSPEC || 'cmd.exe' : '/bin/bash');
+    const shellArgs = bashPath ? ['-c', command] : (isWindows ? ['/c', command] : ['-c', command]);
+
+    const ptyProcess = pty.spawn(shell, shellArgs, {
       name: 'xterm-color',
       cols: 80,
       rows: 30,
