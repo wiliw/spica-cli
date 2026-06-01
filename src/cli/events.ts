@@ -72,10 +72,14 @@ export function setupAgentEvents(
 
   agent.on('stream', (data: any) => {
 
-    // 从 reasoning 切换到 stream 时，只换行一次
+    // 从 reasoning 切换到 stream 时，加分隔线
     if (reasoningStarted && !justSwitchedFromReasoning) {
       justSwitchedFromReasoning = true;
-      screen.appendScroll('\n');
+      if (state.isShowThinking()) {
+        screen.appendScroll('\n' + COLORS.muted('---\n'));
+      } else {
+        screen.appendScroll('\n');
+      }
     }
 
     // 设置流式状态（防止输入刷新干扰输出）
@@ -404,5 +408,5 @@ export function formatRunStats(
   // 格式化 token 数
   const fmt = (t: number) => t >= 1000 ? `${(t / 1000).toFixed(1)}k` : String(t);
 
-  return `⏱ ${elapsed} | 📥 ${fmt(inputTokens)} in | 📤 ${fmt(outputTokens)} out | 🔧 ${toolCallCount} tools | 📦 ${fmt(usedTokens)}/${fmt(contextWindow)} ctx`;
+  return `${elapsed} | ${fmt(inputTokens)} in | ${fmt(outputTokens)} out | ${toolCallCount} tools | ${fmt(usedTokens)}/${fmt(contextWindow)} ctx`;
 }
