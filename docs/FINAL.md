@@ -5,7 +5,7 @@
 **OpenAI API 兼容，支持所有第三方模型：**
 
 - ✅ 统一 OpenAI API format
-- ✅ 6个内置 provider（OpenAI, Anthropic, Together, Groq, Local, Custom）
+- ✅ 无内置 provider，用户自行配置
 - ✅ 自定义 provider 支持
 - ✅ 本地模型支持（llama.cpp, vLLM, Ollama）
 - ✅ Function calling 全支持
@@ -35,7 +35,7 @@
 
 ```bash
 # 配置 provider
-spica providers set openai sk-xxx...
+spica set openai sk-xxx...
 
 # 启动交互模式
 spica
@@ -61,14 +61,14 @@ spica -p together run "快速任务"
 
 ```bash
 # 查看 providers
-spica providers
+spica list
 
 # 配置 provider
-spica providers set openai sk-xxx...
-spica providers set together xxx... -m llama-3-70b
+spica set openai sk-xxx...
+spica set together xxx... -m llama-3-70b
 
 # 设置默认
-spica providers default openai
+spica use openai
 
 # 管理 Skills
 spica skills

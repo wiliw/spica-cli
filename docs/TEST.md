@@ -8,11 +8,11 @@
 cd ~/development/spica/spica-cli
 
 # 设置 provider
-spica providers set openai YOUR_REAL_API_KEY
+spica set openai YOUR_REAL_API_KEY
 
 # 查看
-spica providers
-spica providers show openai
+spica list
+spica show openai
 ```
 
 ### 2. 启动交互模式
@@ -63,7 +63,7 @@ npm run lint
 
 ```bash
 # Provider 配置验证
-spica providers
+spica list
 # 输出：
 # Configured Providers:
 #   openai (default) ✓

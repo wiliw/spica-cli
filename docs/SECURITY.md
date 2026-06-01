@@ -66,7 +66,7 @@ export OPENAI_API_KEY=sk-xxx...
 **立即处理：**
 1. 删除泄露的 API key
 2. 在提供商后台吊销旧 key，生成新 key
-3. 更新配置：`spica providers set openai NEW_KEY`
+3. 更新配置：`spica set openai NEW_KEY`
 4. 如果使用了环境变量，检查 shell history 并清理
 
 ---

@@ -87,11 +87,9 @@ spica run "build app"
 如果不想每次设置环境变量：
 
 ```bash
-spica providers set custom YOUR_KEY \
-  -b https://api.together.xyz/v1 \
-  -m llama-3-70b
+spica set custom https://api.together.xyz/v1 YOUR_KEY llama-3-70b
+spica use custom
 
-# 使用
 spica run "build app"
 ```
 

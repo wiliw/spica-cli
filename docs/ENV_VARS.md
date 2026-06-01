@@ -181,7 +181,7 @@ cd ~/development/spica/spica-cli
 **方式 2：配置文件**
 
 ```bash
-./bin/spica providers set together YOUR_KEY \
+./bin/spica set together YOUR_KEY \
   -m meta-llama/Llama-3-70b-chat-hf
 
 # 使用
@@ -244,5 +244,5 @@ export TOGETHER_MODEL=llama-3-70b
 export OPENAI_MODEL=gpt-4-turbo
 
 cd ~/development/spica/spica-cli
-./bin/spica providers show openai
+./bin/spica show openai
 ```

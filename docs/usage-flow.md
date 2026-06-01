@@ -4,7 +4,7 @@
 
 ```bash
 # 配置 provider
-spica providers set openai sk-xxx...
+spica set openai sk-xxx...
 
 # 启动交互模式
 spica
@@ -49,8 +49,8 @@ spica run "build app" -p together
 
 # 管理 providers
 spica providers                  # 列出所有
-spica providers set openai sk-xxx...  # 设置
-spica providers default openai   # 设置默认
+spica set openai sk-xxx...  # 设置
+spica use openai   # 设置默认
 
 # 管理 skills
 spica skills                     # 列出 skills
@@ -65,7 +65,7 @@ spica mcp                        # 查看 MCP 状态
 
 **完整流程：**
 
-1. `spica providers set openai sk-xxx...` → 配置 API
+1. `spica set openai sk-xxx...` → 配置 API
 2. `spica` → 启动交互模式
 3. 输入任务 → AI 自动执行
 4. 继续对话 → 多轮交互

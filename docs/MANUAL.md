@@ -34,11 +34,19 @@ npm link  # 全局安装（可选）
 ### 配置
 
 ```bash
-# 设置 API 密钥
-spica providers set openai sk-your-key
+# 设置 provider
+spica set <name> <url> <apiKey> <model>
+
+# 示例
+spica set deepseek https://api.deepseek.com/v1 sk-xxx deepseek-chat
+
+# 切换默认
+spica use deepseek
 
 # 或使用环境变量
 export OPENAI_API_KEY=sk-your-key
+export OPENAI_BASE_URL=https://api.openai.com/v1
+export OPENAI_MODEL=gpt-4o
 ```
 
 ### 使用
@@ -66,14 +74,12 @@ spica run "任务"   # 单次执行
 ### Providers 管理
 
 ```bash
-spica providers                    # 列出所有 providers
-spica providers set <name> <key>   # 设置 provider API密钥
-spica providers set <name> model <model>  # 设置模型
-spica providers set <name> baseUrl <url>  # 设置 API 地址
-spica providers add <name> <key> --url <url> --model <model>  # 添加自定义 provider
-spica providers default <name>     # 设置默认 provider
-spica providers show <name>        # 显示 provider 详情
-spica providers remove <name>      # 删除 provider
+spica set <name> <url> <apiKey> <model>  # 添加/更新 provider
+spica use <name>                         # 切换默认 provider
+spica list                               # 列出所有
+spica show [name]                        # 显示详情
+spica remove <names...>                  # 删除
+spica remove --all                       # 删除全部
 ```
 
 ### Skills 管理
@@ -609,7 +615,7 @@ spica --fresh   # 启动时清空
 ### Q: 如何切换模型？
 
 ```bash
-spica providers set openai model gpt-4-turbo
+spica set openai https://api.openai.com/v1 YOUR_KEY gpt-4-turbo
 spica -p together run "任务"   # 使用其他 provider
 ```
 

@@ -56,7 +56,7 @@ spica-cli/
 
 **1. 配置：**
 ```bash
-spica providers set openai sk-xxx...
+spica set openai sk-xxx...
 ```
 
 **2. 交互模式：**

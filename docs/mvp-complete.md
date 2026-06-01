@@ -6,7 +6,7 @@
 - ✅ LLM 客户端（API 调用 + Function Calling + 流式输出）
 - ✅ 24 种工具（file_write, file_read, file_edit, bash, git, gh, web_search, web_fetch 等）
 - ✅ CLI 命令（spica, spica run, spica providers, spica skills, spica mcp）
-- ✅ 配置管理（providers set/get/default）
+- ✅ 配置管理（spica set/use/list）
 - ✅ Agent 核心（交互循环 + 工具执行 + 权限控制）
 - ✅ Todo 追踪和进度显示
 - ✅ Skills 系统（14 个 superpowers）
@@ -41,8 +41,8 @@ spica-cli/
 
 ```bash
 # 配置功能
-spica providers set openai test-key
-spica providers
+spica set openai test-key
+spica list
 
 # CLI 帮助
 spica --help
@@ -53,7 +53,7 @@ spica run --help
 
 **1. 配置 API key：**
 ```bash
-spica providers set openai YOUR_API_KEY
+spica set openai YOUR_API_KEY
 ```
 
 **2. 交互模式：**

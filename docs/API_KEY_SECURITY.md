@@ -191,7 +191,7 @@ await fs.chmod(CONFIG_FILE, 0o600);  // ← 权限保护（但不够）
 # Windows: Credential Manager
 
 # 配置时保存到密钥环
-./bin/spica providers set openai YOUR_KEY
+./bin/spica set openai YOUR_KEY
 # API key 存入系统密钥环（加密）
 
 # 运行时从密钥环读取

@@ -135,7 +135,7 @@ npm install
 npm run build
 
 # 配置API
-spica providers set openai sk-your-key
+spica set openai sk-your-key
 
 # 启动交互模式
 spica
