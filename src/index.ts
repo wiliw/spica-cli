@@ -14,7 +14,7 @@ import { loadSession, saveSession } from './utils/session';
 import { parseSkillInput, getSkill, buildSkillPrompt, listSkills, installSkill, uninstallSkill, listInstalledPackages, saveSkill, deleteSkill } from './skills';
 import { runInit } from './cli/init';
 import { getMCPManager, generateExampleConfig, shutdownMCP } from './mcp/client';
-import { LAIN_COLORS, format, BG } from './cli/ui/colors';
+import { COLORS, format, BG } from './cli/ui/colors';
 import { getInputQueue, clearInputQueue } from './cli/ui/queue';
 import { autoDrainQueue } from './cli/queueDrain';
 import { TUIInputHandler } from './cli/ui/tuiInput';
@@ -45,7 +45,7 @@ process.on('SIGINT', () => {
   interruptCount++;
   if (interruptCount >= 3) {
     if (tuiStarted) screen.end();
-    console.log(LAIN_COLORS.error('\n[FORCE EXIT]'));
+    console.log(COLORS.error('\n[FORCE EXIT]'));
     process.exit(0);
   }
 
@@ -59,12 +59,12 @@ process.on('SIGINT', () => {
     state.getAgent()!.interrupt();
     state.setProcessing(false);
     if (tuiStarted) {
-      screen.appendScroll(LAIN_COLORS.warning('\n[INTERRUPTED] Ctrl+C again to exit\n'));
+      screen.appendScroll(COLORS.warning('\n[INTERRUPTED] Ctrl+C again to exit\n'));
       screen.setStreaming(false);
       screen.restoreCursor();
       screen.refreshInput();
     } else {
-      console.log(LAIN_COLORS.warning('\n[INTERRUPTED] Ctrl+C again to exit'));
+      console.log(COLORS.warning('\n[INTERRUPTED] Ctrl+C again to exit'));
     }
   } else {
     if (tuiStarted) screen.end();
@@ -97,7 +97,7 @@ program
       state.setProviderConfig(providerConfig);
     } catch (error: any) {
       console.log('');
-      console.log(LAIN_COLORS.error(error.message));
+      console.log(COLORS.error(error.message));
       console.log('');
       return;
     }
@@ -107,7 +107,7 @@ program
 
     // 如果是非交互模式，使用简单输出
     if (useSimpleMode) {
-      console.log(LAIN_COLORS.muted('[INFO] Running in non-interactive mode (no TUI)'));
+      console.log(COLORS.muted('[INFO] Running in non-interactive mode (no TUI)'));
       await runSimpleMode(agent, options.fresh);
       return;
     }
@@ -140,7 +140,7 @@ program
           agent.setMessages(session.messages);
           // 显示加载历史提示（在滚动区域）
           
-          screen.appendScroll(LAIN_COLORS.muted(`Loaded ${session.messages.length} messages from history\n`));
+          screen.appendScroll(COLORS.muted(`Loaded ${session.messages.length} messages from history\n`));
         }
       }
 
@@ -170,7 +170,7 @@ program
       // 设置 Ctrl+O 切换回调
       screen.setVerboseToggleCallback(() => {
         const newMode = state.toggleVerboseMode();
-        screen.appendScroll(LAIN_COLORS.secondary(`\n[MODE] ${newMode ? 'Verbose' : 'Compact'} display enabled\n`));
+        screen.appendScroll(COLORS.secondary(`\n[MODE] ${newMode ? 'Verbose' : 'Compact'} display enabled\n`));
         updateStatusBar();
         screen.restoreCursor();
         screen.refreshInput();
@@ -198,7 +198,7 @@ program
             isProcessing = false;
             state.setProcessing(false);
 
-            screen.appendScroll(LAIN_COLORS.warning('\n[INTERRUPTED]\n'));
+            screen.appendScroll(COLORS.warning('\n[INTERRUPTED]\n'));
             screen.setStreaming(false);
             screen.restoreCursor();
             screen.refreshInput();
@@ -212,7 +212,7 @@ program
           // 禁用 Bracketed Paste Mode
           screen.appendScroll(`${ESC}[?2004l`);
           tuiHandler!.end();
-          screen.appendScroll(LAIN_COLORS.error('\n[FORCE EXIT]'));
+          screen.appendScroll(COLORS.error('\n[FORCE EXIT]'));
           process.exit(0);
           return;
         }
@@ -245,8 +245,8 @@ program
           saveSession(process.cwd(), messages);
           await shutdownMCP();
           state.setAgent(null);
-          screen.appendScroll(LAIN_COLORS.muted(`\nSession saved (${messages.length} messages)\n`));
-          screen.appendScroll(LAIN_COLORS.muted('Goodbye!\n'));
+          screen.appendScroll(COLORS.muted(`\nSession saved (${messages.length} messages)\n`));
+          screen.appendScroll(COLORS.muted('Goodbye!\n'));
           process.exit(0);
           return;
         }
@@ -256,7 +256,7 @@ program
           const queue = getInputQueue();
           queue.add(trimmed);
           const status = queue.getStatus();
-          screen.appendScroll(LAIN_COLORS.muted(`[QUEUE] Added (${status.pending} pending)\n`));
+          screen.appendScroll(COLORS.muted(`[QUEUE] Added (${status.pending} pending)\n`));
           return;
         }
 
@@ -265,7 +265,7 @@ program
         let finalInput = trimmed;
         if (queue.hasPending() && !trimmed.startsWith('/')) {
           finalInput = queue.mergePending() + '\n' + trimmed;
-          screen.appendScroll(LAIN_COLORS.muted(`[QUEUE] Merged ${queue.getStatus().total} inputs\n`));
+          screen.appendScroll(COLORS.muted(`[QUEUE] Merged ${queue.getStatus().total} inputs\n`));
         }
 
         if (!finalInput.trim()) {
@@ -287,12 +287,12 @@ program
             const queue = getInputQueue();
             const status = queue.getStatus();
             
-            screen.appendScroll(LAIN_COLORS.primary.bold('\nInput Queue:\n'));
+            screen.appendScroll(COLORS.primary.bold('\nInput Queue:\n'));
             screen.appendScroll(`  Pending: ${status.pending}\n`);
             if (status.pendingPreview.length > 0) {
-              screen.appendScroll(LAIN_COLORS.muted('  Recent:\n'));
+              screen.appendScroll(COLORS.muted('  Recent:\n'));
               status.pendingPreview.forEach((p, i) => {
-                screen.appendScroll(LAIN_COLORS.muted(`    ${i + 1}. ${p}\n`));
+                screen.appendScroll(COLORS.muted(`    ${i + 1}. ${p}\n`));
               });
             }
             screen.appendScroll('\n');
@@ -305,9 +305,9 @@ program
             const removed = queue.undoLast();
             
             if (removed) {
-              screen.appendScroll(LAIN_COLORS.muted(`\n[QUEUE] Removed: ${removed.content.slice(0, 30)}...\n`));
+              screen.appendScroll(COLORS.muted(`\n[QUEUE] Removed: ${removed.content}\n`));
             } else {
-              screen.appendScroll(LAIN_COLORS.muted('\n[QUEUE] No pending inputs\n'));
+              screen.appendScroll(COLORS.muted('\n[QUEUE] No pending inputs\n'));
             }
             
             return;
@@ -317,7 +317,7 @@ program
             agent.setMessages([]);
             clearInputQueue();
 
-            screen.appendScroll(LAIN_COLORS.muted('\n[OK] Session cleared\n'));
+            screen.appendScroll(COLORS.muted('\n[OK] Session cleared\n'));
 
             return;
           }
@@ -330,23 +330,23 @@ program
             const taskStats = getTaskStats(process.cwd());
             const currentMsgs = agent.getMessages().length;
 
-            screen.appendScroll(LAIN_COLORS.primary.bold('\nSessions:\n'));
+            screen.appendScroll(COLORS.primary.bold('\nSessions:\n'));
             screen.appendScroll(`  Current: ${currentMsgs} messages\n`);
             screen.appendScroll(`  Archived: ${sessions.length} sessions\n`);
             screen.appendScroll(`  Tasks: ${taskStats.total} (${taskStats.completed} done, ${taskStats.in_progress} active)\n`);
 
             if (sessions.length > 0) {
-              screen.appendScroll(LAIN_COLORS.muted('\n  Recent sessions:\n'));
+              screen.appendScroll(COLORS.muted('\n  Recent sessions:\n'));
               sessions.slice(0, 5).forEach((s, i) => {
                 const date = new Date(s.lastActivity).toLocaleDateString();
-                screen.appendScroll(LAIN_COLORS.muted(`    ${i + 1}. ${s.name} (${s.messageCount} msgs, ${date})\n`));
+                screen.appendScroll(COLORS.muted(`    ${i + 1}. ${s.name} (${s.messageCount} msgs, ${date})\n`));
               });
               if (sessions.length > 5) {
-                screen.appendScroll(LAIN_COLORS.muted(`    ... and ${sessions.length - 5} more\n`));
+                screen.appendScroll(COLORS.muted(`    ... and ${sessions.length - 5} more\n`));
               }
             }
 
-            screen.appendScroll(LAIN_COLORS.muted('\n  Commands: /switch <id>, /rename <name>, /delete <id>\n'));
+            screen.appendScroll(COLORS.muted('\n  Commands: /switch <id>, /rename <name>, /delete <id>\n'));
             screen.appendScroll('\n');
 
             return;
@@ -357,11 +357,11 @@ program
             const { switchSession } = await import('./utils/session');
 
             if (switchSession(process.cwd(), sessionId)) {
-              screen.appendScroll(LAIN_COLORS.success(`\n[OK] Switched to session ${sessionId}\n`));
-              screen.appendScroll(LAIN_COLORS.muted('Session loaded. Continue conversation.\n'));
+              screen.appendScroll(COLORS.success(`\n[OK] Switched to session ${sessionId}\n`));
+              screen.appendScroll(COLORS.muted('Session loaded. Continue conversation.\n'));
             } else {
-              screen.appendScroll(LAIN_COLORS.error(`\n[ERR] Session ${sessionId} not found\n`));
-              screen.appendScroll(LAIN_COLORS.muted('Use /sessions to list available sessions.\n'));
+              screen.appendScroll(COLORS.error(`\n[ERR] Session ${sessionId} not found\n`));
+              screen.appendScroll(COLORS.muted('Use /sessions to list available sessions.\n'));
             }
 
             return;
@@ -375,9 +375,9 @@ program
             const { renameSession } = await import('./utils/session');
 
             if (renameSession(process.cwd(), sessionId, newName)) {
-              screen.appendScroll(LAIN_COLORS.success(`\n[OK] Session renamed to: ${newName}\n`));
+              screen.appendScroll(COLORS.success(`\n[OK] Session renamed to: ${newName}\n`));
             } else {
-              screen.appendScroll(LAIN_COLORS.error(`\n[ERR] Failed to rename session ${sessionId}\n`));
+              screen.appendScroll(COLORS.error(`\n[ERR] Failed to rename session ${sessionId}\n`));
             }
 
             return;
@@ -414,7 +414,7 @@ program
             const contextWindow = provider?.getContextWindow() || 128000;
             const usagePercent = usedTokens / contextWindow * 100;
 
-            screen.appendScroll(LAIN_COLORS.primary.bold('\nStatus:\n'));
+            screen.appendScroll(COLORS.primary.bold('\nStatus:\n'));
             screen.appendScroll(`  Mode: ${bypass ? 'BYPASS' : 'STRICT'}\n`);
             screen.appendScroll(`  Messages: ${msgs}\n`);
             screen.appendScroll(`  Tokens: ${usedTokens} (${usagePercent.toFixed(1)}% of ${Math.floor(contextWindow/1000)}k)\n`);
@@ -428,14 +428,12 @@ program
           if (cmd === 'skills') {
             const skills = listSkills(process.cwd());
             
-            screen.appendScroll(LAIN_COLORS.primary.bold('\nSkills:\n'));
+            screen.appendScroll(COLORS.primary.bold('\nSkills:\n'));
             if (skills.length === 0) {
-              screen.appendScroll(LAIN_COLORS.muted('  (none)\n'));
+              screen.appendScroll(COLORS.muted('  (none)\n'));
             } else {
               skills.forEach(s => {
-                const desc = s.description || '';
-                const shortDesc = desc.length > 50 ? desc.slice(0, 50) + '...' : desc;
-                screen.appendScroll(LAIN_COLORS.muted(`  /${s.name} - ${shortDesc}\n`));
+                screen.appendScroll(COLORS.muted(`  /${s.name} - ${s.description || ''}\n`));
               });
             }
             screen.appendScroll('\n');
@@ -454,19 +452,19 @@ program
           if (cmd === 'history') {
             const msgs = agent.getMessages();
             
-            screen.appendScroll(LAIN_COLORS.primary.bold('\nHistory:\n'));
+            screen.appendScroll(COLORS.primary.bold('\nHistory:\n'));
             if (msgs.length === 0) {
-              screen.appendScroll(LAIN_COLORS.muted('  (empty)\n'));
+              screen.appendScroll(COLORS.muted('  (empty)\n'));
             } else {
               msgs.forEach((m, i) => {
                 const role = m.role === 'user' ? 'YOU' : m.role === 'assistant' ? 'AI' : 'SYS';
                 const content = m.content || '';
-                screen.appendScroll(LAIN_COLORS.muted(`  ${i + 1}. [${role}]\n`));
-                content.split('\n').slice(0, 5).forEach(line => {
-                  screen.appendScroll(LAIN_COLORS.muted(`     ${line.slice(0, 60)}${line.length > 60 ? '...' : ''}\n`));
+                screen.appendScroll(COLORS.muted(`  ${i + 1}. [${role}]\n`));
+                content.split('\n').forEach(line => {
+                  screen.appendScroll(COLORS.muted(`     ${line}\n`));
                 });
               });
-              screen.appendScroll(LAIN_COLORS.muted(`\n  Total: ${msgs.length} messages\n`));
+              screen.appendScroll(COLORS.muted(`\n  Total: ${msgs.length} messages\n`));
             }
             screen.appendScroll('\n');
             
@@ -578,7 +576,7 @@ Start the analysis, execute step by step, then output the document.`;
             const skillName = parts[0];
             if (!skillName) {
               
-            screen.appendScroll(LAIN_COLORS.warning('\nUsage: /skill-add <name> [promptTemplate]\n'));
+            screen.appendScroll(COLORS.warning('\nUsage: /skill-add <name> [promptTemplate]\n'));
               
               return;
             }
@@ -586,7 +584,7 @@ Start the analysis, execute step by step, then output the document.`;
             const description = `Custom skill: ${skillName}`;
             await saveSkill(skillName, { name: skillName, description, promptTemplate });
             
-            screen.appendScroll(LAIN_COLORS.success(`\n[OK] Skill added: ${skillName}\n`));
+            screen.appendScroll(COLORS.success(`\n[OK] Skill added: ${skillName}\n`));
             
             return;
           }
@@ -595,16 +593,16 @@ Start the analysis, execute step by step, then output the document.`;
             const skillName = cmd.slice('skill-remove '.length).trim();
             if (!skillName) {
               
-              screen.appendScroll(LAIN_COLORS.warning('\nUsage: /skill-remove <name>\n'));
+              screen.appendScroll(COLORS.warning('\nUsage: /skill-remove <name>\n'));
               
               return;
             }
             const result = await deleteSkill(skillName);
             
               if (result) {
-                screen.appendScroll(LAIN_COLORS.success(`\n[OK] Skill removed: ${skillName}\n`));
+                screen.appendScroll(COLORS.success(`\n[OK] Skill removed: ${skillName}\n`));
               } else {
-                screen.appendScroll(LAIN_COLORS.warning(`\n[WARN] Skill not found: ${skillName}\n`));
+                screen.appendScroll(COLORS.warning(`\n[WARN] Skill not found: ${skillName}\n`));
               }
             
             return;
@@ -615,7 +613,7 @@ Start the analysis, execute step by step, then output the document.`;
             const firstSpace = rest.indexOf(' ');
             if (firstSpace === -1) {
               
-              screen.appendScroll(LAIN_COLORS.warning('\nUsage: /skill-edit <name> <promptTemplate>\n'));
+              screen.appendScroll(COLORS.warning('\nUsage: /skill-edit <name> <promptTemplate>\n'));
               
               return;
             }
@@ -624,13 +622,13 @@ Start the analysis, execute step by step, then output the document.`;
             const existing = getSkill(skillName, process.cwd());
             if (!existing) {
               
-              screen.appendScroll(LAIN_COLORS.warning(`\n[WARN] Skill not found: ${skillName}\n`));
+              screen.appendScroll(COLORS.warning(`\n[WARN] Skill not found: ${skillName}\n`));
               
               return;
             }
             await saveSkill(skillName, { ...existing, promptTemplate });
             
-            screen.appendScroll(LAIN_COLORS.success(`\n[OK] Skill updated: ${skillName}\n`));
+            screen.appendScroll(COLORS.success(`\n[OK] Skill updated: ${skillName}\n`));
             
             return;
           }
@@ -642,16 +640,16 @@ Start the analysis, execute step by step, then output the document.`;
             if (skill) {
               const prompt = buildSkillPrompt(skill, skillInput.args);
 
-              screen.appendScroll(LAIN_COLORS.muted(`\n[${skill.name}] ${skill.description}\n`));
+              screen.appendScroll(COLORS.muted(`\n[${skill.name}] ${skill.description}\n`));
               isProcessing = true;
               state.setProcessing(true);
               try {
                 await agent.runLoop(prompt);
                 screen.setStreaming(false);
-                screen.appendScroll(LAIN_COLORS.success('\n[OK] Done\n'));
+                screen.appendScroll(COLORS.success('\n[OK] Done\n'));
               } catch (error: any) {
                 screen.setStreaming(false);
-                screen.appendScroll(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
+                screen.appendScroll(COLORS.error(`\n[ERR] ${error.message}\n`));
               }
               screen.restoreCursor();
               screen.refreshInput();
@@ -669,20 +667,20 @@ Start the analysis, execute step by step, then output the document.`;
           }
 
           // 未知的 / 命令
-          screen.appendScroll(LAIN_COLORS.warning(`\nUnknown command: ${trimmed}\n`));
-          screen.appendScroll(LAIN_COLORS.muted('Type /h for help\n'));
+          screen.appendScroll(COLORS.warning(`\nUnknown command: ${trimmed}\n`));
+          screen.appendScroll(COLORS.muted('Type /h for help\n'));
           return;
         }
 
         // === 执行请求 ===
         // 先显示用户输入在输出区
-        screen.appendScroll(LAIN_COLORS.primary(`\n> ${finalInput.slice(0, 100)}${finalInput.length > 100 ? '...' : ''}\n`));
+        screen.appendScroll(COLORS.primary(`\n> ${finalInput}\n`));
 
         isProcessing = true;
         state.setProcessing(true);
 
         // 显示处理状态（心跳由 waiting_for_llm 事件自动启动）
-        screen.appendScroll(LAIN_COLORS.muted('Processing... (ESC ESC to interrupt)\n'));
+        screen.appendScroll(COLORS.muted('Processing... (ESC ESC to interrupt)\n'));
 
         try {
           const result = await agent.runLoop(finalInput);
@@ -692,14 +690,14 @@ Start the analysis, execute step by step, then output the document.`;
             screen.appendScroll('\n');
           }
 
-          screen.appendScroll(LAIN_COLORS.success('\n[OK] Done\n'));
+          screen.appendScroll(COLORS.success('\n[OK] Done\n'));
         } catch (error: any) {
           if (state.isStreamingOutput()) {
             state.setStreamingOutput(false);
             screen.setStreaming(false);
             screen.appendScroll('\n');
           }
-          screen.appendScroll(LAIN_COLORS.error(`\n[ERR] ${error.message}\n`));
+          screen.appendScroll(COLORS.error(`\n[ERR] ${error.message}\n`));
         }
         // 输出完成，恢复光标到输入框并刷新显示
         screen.setStreaming(false);
@@ -718,28 +716,28 @@ Start the analysis, execute step by step, then output the document.`;
       // 帮助信息
       const showHelp = () => {
 
-        screen.appendScroll(LAIN_COLORS.primary.bold('\nCommands:\n'));
-        screen.appendScroll(LAIN_COLORS.muted('  quit/exit   Exit\n'));
-        screen.appendScroll(LAIN_COLORS.muted('  help        Show help\n'));
+        screen.appendScroll(COLORS.primary.bold('\nCommands:\n'));
+        screen.appendScroll(COLORS.muted('  quit/exit   Exit\n'));
+        screen.appendScroll(COLORS.muted('  help        Show help\n'));
         screen.appendScroll('\n');
-        screen.appendScroll(LAIN_COLORS.primary.bold('Session:\n'));
-        screen.appendScroll(LAIN_COLORS.muted('  /clear      Clear session\n'));
-        screen.appendScroll(LAIN_COLORS.muted('  /history    Show messages\n'));
-        screen.appendScroll(LAIN_COLORS.muted('  /compact    Compress context\n'));
-        screen.appendScroll(LAIN_COLORS.muted('  /sessions   List archived sessions\n'));
-        screen.appendScroll(LAIN_COLORS.muted('  /switch <id> Switch to session\n'));
+        screen.appendScroll(COLORS.primary.bold('Session:\n'));
+        screen.appendScroll(COLORS.muted('  /clear      Clear session\n'));
+        screen.appendScroll(COLORS.muted('  /history    Show messages\n'));
+        screen.appendScroll(COLORS.muted('  /compact    Compress context\n'));
+        screen.appendScroll(COLORS.muted('  /sessions   List archived sessions\n'));
+        screen.appendScroll(COLORS.muted('  /switch <id> Switch to session\n'));
         screen.appendScroll('\n');
-        screen.appendScroll(LAIN_COLORS.primary.bold('Queue:\n'));
-        screen.appendScroll(LAIN_COLORS.muted('  /queue      Show queue\n'));
-        screen.appendScroll(LAIN_COLORS.muted('  /undo       Remove last input\n'));
+        screen.appendScroll(COLORS.primary.bold('Queue:\n'));
+        screen.appendScroll(COLORS.muted('  /queue      Show queue\n'));
+        screen.appendScroll(COLORS.muted('  /undo       Remove last input\n'));
         screen.appendScroll('\n');
-        screen.appendScroll(LAIN_COLORS.primary.bold('Mode:\n'));
-        screen.appendScroll(LAIN_COLORS.muted('  /bypass     Auto-approve\n'));
-        screen.appendScroll(LAIN_COLORS.muted('  /strict     Ask permission\n'));
-        screen.appendScroll(LAIN_COLORS.muted('  /status     Show status\n'));
+        screen.appendScroll(COLORS.primary.bold('Mode:\n'));
+        screen.appendScroll(COLORS.muted('  /bypass     Auto-approve\n'));
+        screen.appendScroll(COLORS.muted('  /strict     Ask permission\n'));
+        screen.appendScroll(COLORS.muted('  /status     Show status\n'));
         screen.appendScroll('\n');
-        screen.appendScroll(LAIN_COLORS.primary.bold('Skills:\n'));
-        screen.appendScroll(LAIN_COLORS.muted('  /skills     List skills\n'));
+        screen.appendScroll(COLORS.primary.bold('Skills:\n'));
+        screen.appendScroll(COLORS.muted('  /skills     List skills\n'));
         screen.appendScroll('\n');
       };
 
@@ -754,9 +752,9 @@ Start the analysis, execute step by step, then output the document.`;
       if (!state.isConnectionErrorShown()) {
         if (tuiHandler) {
 
-          screen.appendScroll(LAIN_COLORS.error(`\nError: ${error.message}\n`));
+          screen.appendScroll(COLORS.error(`\nError: ${error.message}\n`));
         } else {
-          console.log(LAIN_COLORS.error(`Error: ${error.message}`));
+          console.log(COLORS.error(`Error: ${error.message}`));
         }
       }
     }
@@ -779,8 +777,8 @@ program
     try {
       providerConfig = await getProviderConfig(providerName);
     } catch (error: any) {
-      console.log(LAIN_COLORS.error(`Provider "${providerName}" not configured.`));
-      console.log(LAIN_COLORS.warning('Set up with: spica providers set <name> <api-key>'));
+      console.log(COLORS.error(`Provider "${providerName}" not configured.`));
+      console.log(COLORS.warning('Set up with: spica providers set <name> <api-key>'));
       return;
     }
 
@@ -792,10 +790,10 @@ program
     try {
       await agent.init();
       const result = await agent.runLoop(request);
-      console.log(LAIN_COLORS.success('\n[OK] Completed'));
+      console.log(COLORS.success('\n[OK] Completed'));
     } catch (error: any) {
       if (!state.isConnectionErrorShown()) {
-        console.log(LAIN_COLORS.error(`Error: ${error.message}`));
+        console.log(COLORS.error(`Error: ${error.message}`));
       }
     }
 
@@ -809,7 +807,7 @@ program
   .description('Add or update a provider')
   .action(async (name, url, apiKey, model) => {
     await setProviderConfig(name, apiKey, url, model);
-    console.log(LAIN_COLORS.success(`[OK] ${name}`));
+    console.log(COLORS.success(`[OK] ${name}`));
   });
 
 program
@@ -818,9 +816,9 @@ program
   .action(async (name) => {
     try {
       await setDefaultProvider(name);
-      console.log(LAIN_COLORS.success(`[OK] using ${name}`));
+      console.log(COLORS.success(`[OK] using ${name}`));
     } catch (e: any) {
-      console.log(LAIN_COLORS.error(e.message));
+      console.log(COLORS.error(e.message));
     }
   });
 
@@ -849,7 +847,7 @@ program
       console.log(`key:    ${c.apiKey.slice(0,8)}...`);
       console.log(`model:  ${c.model}`);
     } catch (e: any) {
-      console.log(LAIN_COLORS.error(e.message));
+      console.log(COLORS.error(e.message));
     }
   });
 
@@ -864,7 +862,7 @@ program
       config.providers = {};
       config.defaultProvider = undefined;
       await saveConfig(config);
-      console.log(LAIN_COLORS.success(`[OK] removed: ${all.join(', ')}`));
+      console.log(COLORS.success(`[OK] removed: ${all.join(', ')}`));
       return;
     }
     if (!names.length) return console.log('Usage: remove <names...> or --all');
@@ -872,9 +870,9 @@ program
       if (config.providers?.[n]) {
         delete config.providers[n];
         if (config.defaultProvider === n) config.defaultProvider = undefined;
-        console.log(LAIN_COLORS.success(`[OK] ${n}`));
+        console.log(COLORS.success(`[OK] ${n}`));
       } else {
-        console.log(LAIN_COLORS.error(`[ERR] ${n} not found`));
+        console.log(COLORS.error(`[ERR] ${n} not found`));
       }
     }
     await saveConfig(config);
@@ -893,23 +891,23 @@ program
       const skills = listSkills(process.cwd());
       const packages = await listInstalledPackages();
 
-      console.log(LAIN_COLORS.primary.bold('\nInstalled skill packages:'));
+      console.log(COLORS.primary.bold('\nInstalled skill packages:'));
       if (packages.length === 0) {
-        console.log(LAIN_COLORS.muted('  (none)'));
+        console.log(COLORS.muted('  (none)'));
       } else {
         packages.forEach(p => {
-          console.log(`  ${LAIN_COLORS.success('●')} ${p.name} (${p.skills.length} skills)`);
+          console.log(`  ${COLORS.success('●')} ${p.name} (${p.skills.length} skills)`);
         });
       }
 
-      console.log(LAIN_COLORS.primary.bold('\nAvailable skills:'));
+      console.log(COLORS.primary.bold('\nAvailable skills:'));
       if (skills.length === 0) {
-        console.log(LAIN_COLORS.muted('  (none)'));
-        console.log(LAIN_COLORS.muted('\nInstall skills with:'));
-        console.log(LAIN_COLORS.muted('  spica skills install <url-or-file>'));
+        console.log(COLORS.muted('  (none)'));
+        console.log(COLORS.muted('\nInstall skills with:'));
+        console.log(COLORS.muted('  spica skills install <url-or-file>'));
       } else {
         skills.forEach(s => {
-          console.log(`  ${LAIN_COLORS.muted(`/${s.name}`)} - ${s.description}`);
+          console.log(`  ${COLORS.muted(`/${s.name}`)} - ${s.description}`);
         });
       }
       console.log('');
@@ -919,58 +917,58 @@ program
     switch (action) {
       case 'list':
         const skills = listSkills(process.cwd());
-        console.log(LAIN_COLORS.primary.bold('\nAvailable skills:'));
+        console.log(COLORS.primary.bold('\nAvailable skills:'));
         skills.forEach(s => {
-          console.log(`  ${LAIN_COLORS.muted(`/${s.name}`)} - ${s.description}`);
+          console.log(`  ${COLORS.muted(`/${s.name}`)} - ${s.description}`);
         });
         break;
 
       case 'install':
         if (!source) {
-          console.log(LAIN_COLORS.warning('Usage: spica skills install <url-or-file>'));
-          console.log(LAIN_COLORS.muted('Example: spica skills install https://example.com/skills.json'));
+          console.log(COLORS.warning('Usage: spica skills install <url-or-file>'));
+          console.log(COLORS.muted('Example: spica skills install https://example.com/skills.json'));
           return;
         }
         const result = await installSkill(source);
         if (result.success) {
-          console.log(LAIN_COLORS.success(`[OK] ${result.message}`));
+          console.log(COLORS.success(`[OK] ${result.message}`));
           if (result.skills) {
-            console.log(LAIN_COLORS.muted('Installed skills:'));
-            result.skills.forEach(s => console.log(LAIN_COLORS.muted(`  /${s}`)));
+            console.log(COLORS.muted('Installed skills:'));
+            result.skills.forEach(s => console.log(COLORS.muted(`  /${s}`)));
           }
         } else {
-          console.log(LAIN_COLORS.error(`[ERR] ${result.message}`));
+          console.log(COLORS.error(`[ERR] ${result.message}`));
         }
         break;
 
       case 'uninstall':
         if (!source) {
-          console.log(LAIN_COLORS.warning('Usage: spica skills uninstall <package-name>'));
+          console.log(COLORS.warning('Usage: spica skills uninstall <package-name>'));
           return;
         }
         const uninstallResult = await uninstallSkill(source);
         if (uninstallResult.success) {
-          console.log(LAIN_COLORS.success(`[OK] ${uninstallResult.message}`));
+          console.log(COLORS.success(`[OK] ${uninstallResult.message}`));
         } else {
-          console.log(LAIN_COLORS.error(`[ERR] ${uninstallResult.message}`));
+          console.log(COLORS.error(`[ERR] ${uninstallResult.message}`));
         }
         break;
 
       case 'packages':
         const packages = await listInstalledPackages();
-        console.log(LAIN_COLORS.primary.bold('\nInstalled skill packages:'));
+        console.log(COLORS.primary.bold('\nInstalled skill packages:'));
         if (packages.length === 0) {
-          console.log(LAIN_COLORS.muted('  (none)'));
+          console.log(COLORS.muted('  (none)'));
         } else {
           packages.forEach(p => {
-            console.log(`  ${LAIN_COLORS.success('●')} ${p.name}`);
-            console.log(LAIN_COLORS.muted(`    Skills: ${p.skills.join(', ')}`));
+            console.log(`  ${COLORS.success('●')} ${p.name}`);
+            console.log(COLORS.muted(`    Skills: ${p.skills.join(', ')}`));
           });
         }
         break;
 
       default:
-        console.log(LAIN_COLORS.warning('Available actions: list, install, uninstall, packages'));
+        console.log(COLORS.warning('Available actions: list, install, uninstall, packages'));
     }
   });
 
@@ -989,19 +987,19 @@ program
       const connected = manager.listConnectedServers();
       const tools = manager.listAvailableTools();
 
-      console.log(LAIN_COLORS.primary.bold('\nMCP Status:'));
+      console.log(COLORS.primary.bold('\nMCP Status:'));
       if (connected.length === 0) {
-        console.log(LAIN_COLORS.muted('  No servers connected'));
-        console.log(LAIN_COLORS.muted('\n  Run `spica mcp init` to create example config'));
+        console.log(COLORS.muted('  No servers connected'));
+        console.log(COLORS.muted('\n  Run `spica mcp init` to create example config'));
       } else {
-        console.log(LAIN_COLORS.success(`  Connected servers: ${connected.join(', ')}`));
-        console.log(LAIN_COLORS.muted(`  Available tools: ${tools.length}`));
+        console.log(COLORS.success(`  Connected servers: ${connected.join(', ')}`));
+        console.log(COLORS.muted(`  Available tools: ${tools.length}`));
         if (tools.length > 0) {
           tools.slice(0, 10).forEach(t => {
-            console.log(LAIN_COLORS.muted(`    - ${t}`));
+            console.log(COLORS.muted(`    - ${t}`));
           });
           if (tools.length > 10) {
-            console.log(LAIN_COLORS.muted(`    ... and ${tools.length - 10} more`));
+            console.log(COLORS.muted(`    ... and ${tools.length - 10} more`));
           }
         }
       }
@@ -1012,13 +1010,13 @@ program
     switch (action) {
       case 'list':
         const servers = manager.listConnectedServers();
-        console.log(LAIN_COLORS.primary.bold('\nConnected MCP servers:'));
+        console.log(COLORS.primary.bold('\nConnected MCP servers:'));
         if (servers.length === 0) {
-          console.log(LAIN_COLORS.muted('  (none)'));
+          console.log(COLORS.muted('  (none)'));
         } else {
           servers.forEach(s => {
             const toolsCount = manager.listAvailableTools().filter(t => t.startsWith(`${s}/`)).length;
-            console.log(`  ${LAIN_COLORS.success('●')} ${s} (${toolsCount} tools)`);
+            console.log(`  ${COLORS.success('●')} ${s} (${toolsCount} tools)`);
           });
         }
         break;
@@ -1029,25 +1027,25 @@ program
         const currentSettings = await loadGlobalSettings();
 
         if ((currentSettings.mcp?.servers?.length ?? 0) > 0) {
-          console.log(LAIN_COLORS.warning(`MCP servers already configured in settings.json`));
-          console.log(LAIN_COLORS.muted('Edit ~/.spica/settings.json to modify'));
+          console.log(COLORS.warning(`MCP servers already configured in settings.json`));
+          console.log(COLORS.muted('Edit ~/.spica/settings.json to modify'));
         } else {
           currentSettings.mcp = generateExampleConfig();
           await saveGlobalSettings(currentSettings);
-          console.log(LAIN_COLORS.success(`[OK] MCP config added to ${GLOBAL_SETTINGS_FILE}`));
-          console.log(LAIN_COLORS.muted('Edit ~/.spica/settings.json to customize servers'));
+          console.log(COLORS.success(`[OK] MCP config added to ${GLOBAL_SETTINGS_FILE}`));
+          console.log(COLORS.muted('Edit ~/.spica/settings.json to customize servers'));
         }
         break;
 
       case 'tools':
         const allTools = manager.listAvailableTools();
-        console.log(LAIN_COLORS.primary.bold('\nAvailable MCP tools:'));
+        console.log(COLORS.primary.bold('\nAvailable MCP tools:'));
         if (allTools.length === 0) {
-          console.log(LAIN_COLORS.muted('  (none)'));
-          console.log(LAIN_COLORS.muted('Connect a MCP server first'));
+          console.log(COLORS.muted('  (none)'));
+          console.log(COLORS.muted('Connect a MCP server first'));
         } else {
           allTools.forEach(t => {
-            console.log(LAIN_COLORS.muted(`  ${t}`));
+            console.log(COLORS.muted(`  ${t}`));
           });
         }
         break;
@@ -1055,17 +1053,17 @@ program
       case 'disconnect':
         if (server) {
           // 断开特定服务器（未实现）
-          console.log(LAIN_COLORS.warning('Disconnecting specific server not implemented'));
+          console.log(COLORS.warning('Disconnecting specific server not implemented'));
         } else {
           await manager.disconnectAll();
-          console.log(LAIN_COLORS.success('[OK] All MCP servers disconnected'));
+          console.log(COLORS.success('[OK] All MCP servers disconnected'));
         }
         break;
 
       default:
-        console.log(LAIN_COLORS.warning('Available actions: list, init, tools, disconnect'));
-        console.log(LAIN_COLORS.muted('\nMCP allows connecting external tool servers'));
-        console.log(LAIN_COLORS.muted('Examples: filesystem, postgres, slack, custom APIs'));
+        console.log(COLORS.warning('Available actions: list, init, tools, disconnect'));
+        console.log(COLORS.muted('\nMCP allows connecting external tool servers'));
+        console.log(COLORS.muted('Examples: filesystem, postgres, slack, custom APIs'));
     }
   });
 
@@ -1080,18 +1078,18 @@ async function runSimpleMode(agent: SpicaAgent, fresh?: boolean): Promise<void> 
     });
 
     agent.on('reasoning', (data: any) => {
-      process.stdout.write(LAIN_COLORS.reasoning(data.content));
+      process.stdout.write(COLORS.reasoning(data.content));
     });
 
     agent.on('tool_call', (data: any) => {
-      console.log(LAIN_COLORS.tool(`\n[TOOL] ${data.name}`));
+      console.log(COLORS.tool(`\n[TOOL] ${data.name}`));
     });
 
     agent.on('tool_result', (data: any) => {
-      const icon = data.success ? LAIN_COLORS.success('[OK]') : LAIN_COLORS.error('[ERR]');
+      const icon = data.success ? COLORS.success('[OK]') : COLORS.error('[ERR]');
       console.log(`${icon} ${data.name}`);
       if (data.error) {
-        console.log(LAIN_COLORS.error(`  Error: ${data.error.slice(0, 100)}`));
+        console.log(COLORS.error(`  Error: ${data.error}`));
       }
     });
 
@@ -1102,24 +1100,24 @@ async function runSimpleMode(agent: SpicaAgent, fresh?: boolean): Promise<void> 
     });
 
     agent.on('context_compressed', (data: any) => {
-      console.log(LAIN_COLORS.secondary(`\n[COMPRESS] ${data.before} -> ${data.after} messages`));
+      console.log(COLORS.secondary(`\n[COMPRESS] ${data.before} -> ${data.after} messages`));
     });
 
     agent.on('connection_error', (data: any) => {
-      console.log(LAIN_COLORS.error(`\nConnection Error: ${data.type}`));
-      console.log(LAIN_COLORS.muted(data.hint));
+      console.log(COLORS.error(`\nConnection Error: ${data.type}`));
+      console.log(COLORS.muted(data.hint));
     });
 
     const providerConfig = state.getProviderConfig();
     const model = providerConfig?.model || 'unknown';
-    console.log(LAIN_COLORS.success(`[OK] Connected to ${model}`));
-    console.log(LAIN_COLORS.muted('\nNon-interactive mode: type your request and press Enter'));
-    console.log(LAIN_COLORS.muted('Press Ctrl+C to exit, Ctrl+D to interrupt'));
+    console.log(COLORS.success(`[OK] Connected to ${model}`));
+    console.log(COLORS.muted('\nNon-interactive mode: type your request and press Enter'));
+    console.log(COLORS.muted('Press Ctrl+C to exit, Ctrl+D to interrupt'));
 
     // 清空历史（如果指定）
     if (fresh) {
       agent.setMessages([]);
-      console.log(LAIN_COLORS.muted('[INFO] Session cleared'));
+      console.log(COLORS.muted('[INFO] Session cleared'));
     }
 
     // 简单的 readline 模式
@@ -1154,19 +1152,19 @@ async function runSimpleMode(agent: SpicaAgent, fresh?: boolean): Promise<void> 
         const cmd = trimmed.slice(1).toLowerCase();
         if (cmd === 'clear') {
           agent.setMessages([]);
-          console.log(LAIN_COLORS.muted('[OK] Session cleared'));
+          console.log(COLORS.muted('[OK] Session cleared'));
         } else if (cmd === 'compact') {
           await agent.compact();
         } else if (cmd === 'history') {
           const messages = agent.getMessages();
-          console.log(LAIN_COLORS.muted(`\n[History] ${messages.length} messages`));
+          console.log(COLORS.muted(`\n[History] ${messages.length} messages`));
         } else if (cmd === 'status') {
           const messages = agent.getMessages();
-          console.log(LAIN_COLORS.primary(`\n[Status]`));
+          console.log(COLORS.primary(`\n[Status]`));
           console.log(`  Messages: ${messages.length}`);
           console.log(`  Mode: ${state.isBypassMode() ? 'bypass' : 'strict'}`);
         } else {
-          console.log(LAIN_COLORS.warning(`Unknown command: ${trimmed}`));
+          console.log(COLORS.warning(`Unknown command: ${trimmed}`));
         }
         rl.prompt();
         return;
@@ -1174,18 +1172,18 @@ async function runSimpleMode(agent: SpicaAgent, fresh?: boolean): Promise<void> 
 
       // 执行请求
       try {
-        console.log(LAIN_COLORS.muted('\n[PROCESSING]...'));
+        console.log(COLORS.muted('\n[PROCESSING]...'));
         const response = await agent.runLoop(trimmed);
-        console.log(LAIN_COLORS.success('\n[OK] Done'));
+        console.log(COLORS.success('\n[OK] Done'));
       } catch (error: any) {
-        console.log(LAIN_COLORS.error(`\n[ERR] ${error.message}`));
+        console.log(COLORS.error(`\n[ERR] ${error.message}`));
       }
 
       rl.prompt();
     });
 
     rl.on('close', () => {
-      console.log(LAIN_COLORS.muted('\n[EXIT] Goodbye!'));
+      console.log(COLORS.muted('\n[EXIT] Goodbye!'));
       saveSession(process.cwd(), agent.getMessages());
       process.exit(0);
     });
@@ -1193,7 +1191,7 @@ async function runSimpleMode(agent: SpicaAgent, fresh?: boolean): Promise<void> 
   } catch (error: any) {
     // 停止banner动画（如果正在运行）
     BG.stopBanner();
-    console.log(LAIN_COLORS.error(`Error: ${error.message}`));
+    console.log(COLORS.error(`Error: ${error.message}`));
     process.exit(1);
   }
 }

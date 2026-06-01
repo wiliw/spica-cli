@@ -9,7 +9,7 @@ import { loadProjectConfig as loadAgentsConfig, autoDetectProject, createAgentsM
 import { SkillDefinition } from './utils/settings';
 import { loadProjectState, saveProjectState, updateProjectTodos, loadProjectContext, saveProjectContext, ensureProjectDir } from './storage/projectState';
 import { runPreHooks, runPostHooks } from './hooks';
-import { LAIN_COLORS } from './cli/ui/colors';
+import { COLORS } from './cli/ui/colors';
 // classifyIntent merged into matchSkill — see enhanced matchSkill() below
 import { EventEmitter } from 'events';
 import fs from 'fs-extra';

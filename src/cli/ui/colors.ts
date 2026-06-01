@@ -5,8 +5,8 @@ import chalk from 'chalk';
 import readline from 'readline';
 import { padRight, getStringWidth } from './stringWidth';
 
-// ANSI 标准配色（跟随终端设置）
-export const LAIN_COLORS = {
+// 终端标准配色（跟随终端设置）
+export const COLORS = {
   // 主色调 - 使用亮色版本 (bright colors)
   primary: chalk.cyanBright,
   secondary: chalk.magentaBright,
@@ -67,14 +67,12 @@ export const BG = {
     BG._bannerStopSignal = false;
 
     return new Promise<void>((resolve) => {
-      const cyanBright = '\x1b[96m';
-      const cyanNormal = '\x1b[36m';
+      // Use chalk colors to follow terminal theme
+      const bright = chalk.cyanBright;
+      const normal = chalk.cyan;
 
       process.stdout.write('\n');
-      lines.forEach(line => process.stdout.write(cyanBright + line + reset + '\n'));
-
-      let frameCount = 0;
-      let color = cyanBright;
+      lines.forEach(line => process.stdout.write(bright(line) + '\n'));
 
       const animate = () => {
         if (BG._bannerStopSignal) {
@@ -82,11 +80,10 @@ export const BG = {
           return;
         }
 
-        frameCount++;
-        color = frameCount % 2 === 0 ? cyanBright : cyanNormal;
-        
+        const color = Date.now() % 1000 < 500 ? bright : normal;
+
         process.stdout.write(esc + '[5A');
-        lines.forEach(line => process.stdout.write(color + line + reset + '\n'));
+        lines.forEach(line => process.stdout.write(color(line) + reset + '\n'));
 
         setTimeout(animate, 500);
       };
@@ -104,7 +101,6 @@ export const BG = {
     const reset = '\x1b[0m';
     const esc = '\x1b';
     const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-    const cyan = '\x1b[96m'; // bright cyan
 
     BG._compressStopSignal = false;
 
@@ -114,8 +110,8 @@ export const BG = {
       const spin = async () => {
         while (!BG._compressStopSignal) {
           const frame = frames[frameIndex % frames.length];
-          // Write spinner frame
-          process.stdout.write(cyan + frame + ' Compressing...' + reset);
+          // Use chalk to follow terminal theme
+          process.stdout.write(chalk.cyanBright(frame + ' Compressing...') + reset);
           await new Promise(r => setTimeout(r, 80));
           // Clear line
           process.stdout.write(esc + '[2K' + esc + '[1G');
