@@ -45,11 +45,6 @@ npx tsc --noEmit   # Type check
 **Core Modules** (`src/core/`):
 - `EventBus`: Central event dispatcher for agent communication
 - `RuntimeState`: Global runtime state (processing status, agent reference)
-- `StateManager`: Project state persistence (todos, checkpoints)
-- `ErrorHandler`: Error categorization, retry logic, error reports
-- `SessionManager`: Session lifecycle management
-- `LogManager`: Structured logging with categories and levels
-- `ProcessMonitor`: Background process tracking and log streaming
 
 **Tools** (`src/tools/index.ts`):
 - 24 built-in tools + MCP dynamic tools
@@ -130,11 +125,14 @@ npx tsc --noEmit   # Type check
 ```
 ~/.spica/
 ├── settings.json       # Unified config (providers, mcp, skills, hooks)
+├── .gitignore          # Protects settings.json from accidental commit
 ├── context.json        # Global context cache
 └── installed-skills/   # Installed skill packages (superpowers)
 
 <project>/.spica/
 ├── session.json        # Session history (auto-loaded/saved)
+├── backups/            # Auto-backups before file_write overwrites
+├── audit.log           # Dangerous operation audit trail
 ├── skills.json         # Project skills (optional)
 └── hooks.json          # Project hooks (optional)
 
@@ -148,7 +146,7 @@ npx tsc --noEmit   # Type check
 | `AGENTS.md` | Project description for AI context (industry standard) |
 | `src/index.ts` | CLI entry, REPL loop, input queue, `/init` prompt |
 | `src/agent.ts` | Agent loop, compression, permissions, summary generation |
-| `src/core/` | EventBus, StateManager, ErrorHandler, SessionManager |
+| `src/core/` | EventBus, RuntimeState |
 | `src/cli/ui/screenManager.ts` | TUI with scroll regions, status bar, input handling |
 | `src/cli/ui/queue.ts` | Non-blocking input management |
 | `src/cli/events.ts` | Agent event handlers for UI output |
@@ -156,8 +154,12 @@ npx tsc --noEmit   # Type check
 | `src/mcp/client.ts` | MCP client manager |
 | `src/skills/index.ts` | Skills loader and executor |
 | `src/hooks/index.ts` | Hooks system |
+| `src/llm/LLMClient.ts` | LLM client with streaming, retry, abort |
 | `src/llm/providers/OpenAICompatible.ts` | OpenAI streaming, context window tracking |
 | `src/llm/TokenCounter.ts` | Token estimation for compression |
+| `src/utils/settings.ts` | Unified configuration management |
+| `src/utils/messageCleaner.ts` | Shared message cleanup utility |
+| `src/utils/platform.ts` | Cross-platform shell detection, proxy support |
 | `src/prompts/system.ts` | System prompt (English) |
 
 ## Interactive Commands
@@ -170,7 +172,7 @@ npx tsc --noEmit   # Type check
 - Mode: `/bypass`, `/strict`, `/status`
 - Skills: `/skills`, `/init`, `/skill_name [args]`
 
-## Built-in Tools (24)
+## Built-in Tools (25)
 
 | Category | Tools |
 |----------|-------|
@@ -216,7 +218,7 @@ npx tsc --noEmit   # Type check
 ## Testing
 
 ```bash
-npm run test:run           # Run all 261 tests (22 test files)
+npm run test:run           # Run all 272 tests (22 test files)
 npx vitest run <pattern>   # Run specific test file (e.g., tools.test)
 npx tsc --noEmit           # Type check
 npm run build              # Build executable

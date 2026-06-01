@@ -27,7 +27,7 @@
 |----------------|---------|
 | `src/index.ts` | CLI entry point, command definitions, TUI setup, input loop |
 | `src/agent.ts` | Core SpicaAgent class — main orchestration, permission handling, event emission |
-| `src/core/` | EventBus, StateManager, ErrorHandler, SessionManager, LogManager, ProcessMonitor, RuntimeState |
+| `src/core/` | EventBus, RuntimeState |
 | `src/tools/index.ts` | 25 tool implementations (file, bash, git, web, etc.) + tool definitions |
 | `src/tools/subAgent.ts` | Parallel subagent task execution |
 | `src/llm/` | LLM client, FunctionCaller, RateLimiter, TokenCounter, provider implementations |
@@ -42,7 +42,7 @@
 | `src/utils/` | Config, session, settings, history, logger, projectConfig |
 | `src/external/` | Reserved for external integrations (currently empty) |
 | `src/builtin-skills/superpowers/` | 14 built-in superpowers skills |
-| `src/__tests__/` | Test files (28 test files, 341 tests) |
+| `src/__tests__/` | Test files (22 test files, 272 tests) |
 | `bin/spica` | CLI executable wrapper |
 | `docs/` | Documentation (MANUAL.md, CONFIGURATION.md, ARCHITECTURE.md, etc.) |
 
@@ -50,7 +50,7 @@
 - **Dev**: `npm run dev` (runs `tsx src/index.ts`)
 - **Build**: `npm run build` (creates `bin/spica` executable)
 - **Test (watch)**: `npm test` (vitest watch mode)
-- **Test (single run)**: `npm run test:run` — **341 tests, all passing**
+- **Test (single run)**: `npm run test:run` — **272 tests, all passing**
 - **Test single file**: `npx vitest run <file-pattern>`
 - **Type check**: `npx tsc --noEmit`
 - **Lint**: `npm run lint` (ESLint)
@@ -107,7 +107,7 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
 - `src/cli/ui/screenManager.ts` — TUI with dynamic layout
 - `src/prompts/system.ts` — System prompt with skill invocation rules
 - `src/cli/queueDrain.ts` — Auto-drains queued input after processing completes
-- `src/utils/config.ts` — Provider configuration (BUILTIN_PROVIDERS)
+- `src/utils/settings.ts` — Unified configuration management
 
 ### Common Patterns
 - Tool results: `{ success: boolean, output?: string, error?: string, diff?: string, syntaxErrors?: string[], content?: string }`
@@ -119,11 +119,10 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
 - Session persistence in `.spica/session.json`
 
 ### Testing
-- Tests in `src/**/__tests__/` (28 test files, 341 tests, all passing)
+- Tests in `src/**/__tests__/` (22 test files, 272 tests, all passing)
 - Run `npm run test:run` for single execution, `npx vitest run <pattern>` for a single file
 - Key test files:
   - `src/core/__tests__/EventBus.test.ts` — Event system tests
-  - `src/core/__tests__/SessionManager.test.ts` — Session persistence tests
   - `src/hooks/__tests__/hooks.test.ts` — Hooks tests
   - `src/skills/__tests__/skills.test.ts` — Skills tests
   - `src/__tests__/compression.test.ts` — Context compression tests (12 tests)
@@ -131,6 +130,7 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
   - `src/__tests__/agent.test.ts` — Core agent workflow tests
   - `src/__tests__/tools.test.ts` — Tool implementation tests
   - `src/__tests__/skillChain.test.ts` — Skill chain enforcement tests (7 tests)
+- Coverage: `npx vitest run --coverage` (v8 provider)
 
 ## Built-in Skills (14 superpowers)
 
