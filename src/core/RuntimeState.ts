@@ -13,6 +13,7 @@ interface RuntimeState {
   streamingOutput: boolean;
   permissionDialogActive: boolean;
   verboseMode: boolean;
+  showThinking: boolean;
 }
 
 class RuntimeStateManager {
@@ -25,6 +26,7 @@ class RuntimeStateManager {
     streamingOutput: false,
     permissionDialogActive: false,
     verboseMode: false,
+    showThinking: false,
   };
 
   // Agent
@@ -127,6 +129,20 @@ class RuntimeStateManager {
     return this.state.verboseMode;
   }
 
+  // Thinking 显示模式
+  setShowThinking(show: boolean): void {
+    this.state.showThinking = show;
+  }
+
+  isShowThinking(): boolean {
+    return this.state.showThinking;
+  }
+
+  toggleShowThinking(): boolean {
+    this.state.showThinking = !this.state.showThinking;
+    return this.state.showThinking;
+  }
+
   // Interrupt
   interrupt(): void {
     if (this.state.agent) {
@@ -145,6 +161,7 @@ class RuntimeStateManager {
       streamingOutput: false,
       permissionDialogActive: false,
       verboseMode: false,
+      showThinking: false,
     };
   }
 }

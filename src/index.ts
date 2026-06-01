@@ -18,7 +18,7 @@ import { COLORS, format, BG } from './cli/ui/colors';
 import { getInputQueue, clearInputQueue } from './cli/ui/queue';
 import { autoDrainQueue } from './cli/queueDrain';
 import { TUIInputHandler } from './cli/ui/tuiInput';
-import { setupAgentEvents } from './cli/events';
+import { setupAgentEvents, formatRunStats } from './cli/events';
 import { displayStatusLine } from './cli/status';
 import { getRuntimeState, resetRuntimeState } from './core/RuntimeState';
 import { FileCompleter } from './cli/ui/fileCompleter';
@@ -150,12 +150,12 @@ program
       }
 
       // Tab 补全命令列表
-      const BASE_COMMANDS = [
-        '/help', '/h', '/status', '/bypass', '/strict',
-        '/queue', '/q', '/undo', '/clear', '/reset',
-        '/skills', '/skill-add', '/skill-remove', '/skill-edit',
-        '/history', '/compact', '/init',
-      ];
+        const BASE_COMMANDS = [
+          '/help', '/h', '/status', '/bypass', '/strict', '/plan', '/build',
+          '/queue', '/q', '/undo', '/clear', '/reset',
+          '/skills', '/skill-add', '/skill-remove', '/skill-edit',
+          '/history', '/compact', '/init', '/think',
+        ];
       const getCommands = () => {
         const skills = listSkills(process.cwd());
         const skillCommands = skills.map(s => `/${s.name}`);
@@ -192,7 +192,7 @@ program
         // 颜色：绿色 <60%，黄色 60-80%，红色 >80%
         const pctColor = percent >= 80 ? '\x1b[31m' : percent >= 60 ? '\x1b[33m' : '\x1b[32m';
 
-        screen.setStatus(`${providerConfig.model} | ${ml.color}${ml.label}\x1b[0m | ${pctColor}${percent}%\x1b[0m ${usedK}/${maxK} | Tab: cycle`);
+        screen.setStatus(`${providerConfig.model} | ${ml.color}${ml.label}\x1b[0m | ${pctColor}${percent}%\x1b[0m ${usedK}/${maxK}`);
       };
       updateStatusBar();
 
@@ -450,6 +450,15 @@ program
             agent.setAgentMode('build');
             state.setAgentMode('build');
             screen.appendScroll(COLORS.success('\n[BUILD] Permission mode activated\n'));
+            return;
+          }
+
+          // 思考过程显示切换
+          if (cmd === 'think') {
+            const show = state.toggleShowThinking();
+            screen.appendScroll(show
+              ? COLORS.secondary('\n[THINK] Thinking display ON\n')
+              : COLORS.muted('\n[THINK] Thinking display OFF\n'));
             return;
           }
 
@@ -740,22 +749,31 @@ Start the analysis, execute step by step, then output the document.`;
         // 显示处理状态（心跳由 waiting_for_llm 事件自动启动）
         screen.appendScroll(COLORS.muted('Processing... (ESC ESC to interrupt)\n'));
 
+        const startTime = Date.now();
         try {
           const result = await agent.runLoop(finalInput);
+          const elapsed = Date.now() - startTime;
           if (state.isStreamingOutput()) {
             state.setStreamingOutput(false);
             screen.setStreaming(false);
             screen.appendScroll('\n');
           }
 
-          screen.appendScroll(COLORS.success('\n[OK] Done\n'));
+          // 显示运行统计
+          const stats = formatRunStats(elapsed, agent, tokenCounter);
+          screen.appendScroll(COLORS.muted(`\n${stats}\n`));
+          screen.appendScroll(COLORS.success('[OK] Done\n'));
         } catch (error: any) {
+          const elapsed = Date.now() - startTime;
           if (state.isStreamingOutput()) {
             state.setStreamingOutput(false);
             screen.setStreaming(false);
             screen.appendScroll('\n');
           }
-          screen.appendScroll(COLORS.error(`\n[ERR] ${error.message}\n`));
+          // 显示运行统计（即使失败也显示）
+          const stats = formatRunStats(elapsed, agent, tokenCounter);
+          screen.appendScroll(COLORS.muted(`\n${stats}\n`));
+          screen.appendScroll(COLORS.error(`[ERR] ${error.message}\n`));
         }
         // 输出完成，恢复光标到输入框并刷新显示
         screen.setStreaming(false);
@@ -790,9 +808,12 @@ Start the analysis, execute step by step, then output the document.`;
         screen.appendScroll(COLORS.muted('  /undo       Remove last input\n'));
         screen.appendScroll('\n');
         screen.appendScroll(COLORS.primary.bold('Mode:\n'));
-        screen.appendScroll(COLORS.muted('  /bypass     Auto-approve\n'));
-        screen.appendScroll(COLORS.muted('  /strict     Ask permission\n'));
+        screen.appendScroll(COLORS.muted('  /plan       Read-only (no file changes)\n'));
+        screen.appendScroll(COLORS.muted('  /build      Ask permission (default)\n'));
+        screen.appendScroll(COLORS.muted('  /bypass     Auto-approve (5min)\n'));
+        screen.appendScroll(COLORS.muted('  /think      Toggle thinking display\n'));
         screen.appendScroll(COLORS.muted('  /status     Show status\n'));
+        screen.appendScroll(COLORS.muted('  Tab         Cycle mode (empty input)\n'));
         screen.appendScroll('\n');
         screen.appendScroll(COLORS.primary.bold('Skills:\n'));
         screen.appendScroll(COLORS.muted('  /skills     List skills\n'));

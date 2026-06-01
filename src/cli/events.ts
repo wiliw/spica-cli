@@ -33,7 +33,7 @@ function buildStatusText(
   const maxK = contextWindow >= 1000 ? `${Math.floor(contextWindow / 1000)}k` : String(contextWindow);
   const pctColor = percent >= 80 ? '\x1b[31m' : percent >= 60 ? '\x1b[33m' : '\x1b[32m';
 
-  return `${model || '?'} | ${mc}${ml}\x1b[0m | ${pctColor}${percent}%\x1b[0m ${usedK}/${maxK} | Tab: cycle`;
+  return `${model || '?'} | ${mc}${ml}\x1b[0m | ${pctColor}${percent}%\x1b[0m ${usedK}/${maxK}`;
 }
 
 function formatArgs(args: Record<string, any>): string {
@@ -91,20 +91,20 @@ export function setupAgentEvents(
     if (!reasoningStarted) {
       reasoningStarted = true;
       justSwitchedFromReasoning = false;
-      screen.appendScroll('\n');  // 心跳结束后换行
-      if (!state.isVerboseMode()) {
-        screen.appendScroll(COLORS.muted('[thinking]\n'));
-      } else {
-        screen.appendScroll(COLORS.reasoning('[REASONING]\n'));
+      screen.appendScroll('\n');
+      if (state.isShowThinking()) {
+        screen.appendScroll(COLORS.reasoning('[THINKING]\n'));
         if (!state.isStreamingOutput()) {
           state.setStreamingOutput(true);
           screen.setStreaming(true);
         }
+      } else {
+        screen.appendScroll(COLORS.muted('[thinking]\n'));
       }
     }
 
-    // 详细模式下显示完整 reasoning content
-    if (state.isVerboseMode()) {
+    // showThinking 模式下显示完整 reasoning content
+    if (state.isShowThinking()) {
       screen.appendScroll(COLORS.reasoning(data.content));
     }
   });
@@ -376,4 +376,33 @@ agent.on('tool_stuck_warning', (data: any) => {
     screen.appendScroll(COLORS.secondary(`\n[COMPRESS] ${data.message || `${data.before} -> ${data.after} messages`}${tokensInfo}\n`));
     screen.restoreCursor();
   });
+}
+
+// 格式化运行统计（耗时 + token 用量）
+export function formatRunStats(
+  elapsedMs: number,
+  agent: SpicaAgent,
+  tokenCounter: TokenCounter
+): string {
+  const messages = agent.getMessages();
+  const usedTokens = tokenCounter.estimateMessages(messages);
+  const contextWindow = tokenCounter.getContextWindow();
+
+  // 估算本次响应的 output tokens（最后一条 assistant 消息）
+  const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+  const outputTokens = lastAssistant ? tokenCounter.estimateMessage(lastAssistant) : 0;
+  const inputTokens = Math.max(0, usedTokens - outputTokens);
+
+  // 估算本次 tool 调用数
+  const toolCallCount = messages.filter(m => m.role === 'tool').length;
+
+  // 格式化耗时
+  const elapsed = elapsedMs < 1000
+    ? `${elapsedMs}ms`
+    : `${(elapsedMs / 1000).toFixed(1)}s`;
+
+  // 格式化 token 数
+  const fmt = (t: number) => t >= 1000 ? `${(t / 1000).toFixed(1)}k` : String(t);
+
+  return `⏱ ${elapsed} | 📥 ${fmt(inputTokens)} in | 📤 ${fmt(outputTokens)} out | 🔧 ${toolCallCount} tools | 📦 ${fmt(usedTokens)}/${fmt(contextWindow)} ctx`;
 }
