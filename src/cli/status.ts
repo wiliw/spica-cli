@@ -23,9 +23,14 @@ export function displayStatusLine(): void {
     parts.push(LAIN_COLORS.primary(`queue: ${queueStatus.pending}`));
   }
 
-  parts.push(state.isBypassMode()
-    ? LAIN_COLORS.bypass('bypass')
-    : LAIN_COLORS.success('strict'));
+  const modeColors: Record<string, Function> = {
+    plan: LAIN_COLORS.secondary,
+    build: LAIN_COLORS.success,
+    bypass: LAIN_COLORS.bypass,
+  };
+  const mode = state.getAgentMode();
+  const modeColor = modeColors[mode] || LAIN_COLORS.success;
+  parts.push(modeColor(mode));
 
   const statusLine = parts.join(' | ');
   console.log(LAIN_COLORS.muted(statusLine));

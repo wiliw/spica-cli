@@ -21,6 +21,7 @@ import { TUIInputHandler } from './cli/ui/tuiInput';
 import { setupAgentEvents } from './cli/events';
 import { displayStatusLine } from './cli/status';
 import { getRuntimeState, resetRuntimeState } from './core/RuntimeState';
+import { FileCompleter } from './cli/ui/fileCompleter';
 
 import { getScreenManager } from './cli/ui/screenManager';
 import { TokenCounter } from './llm/TokenCounter';
@@ -131,7 +132,11 @@ program
       // TUI 输入处理（设置滚动区域）
       tuiHandler = new TUIInputHandler();
       tuiHandler.start();
-      tuiStarted = true;  // 标记 TUI 已启动
+      tuiStarted = true;
+
+      // @ 文件引用搜索
+      const fileCompleter = new FileCompleter(process.cwd());
+      screen.setFileCompleter(fileCompleter);
 
       // 自动加载历史
       if (!options.fresh) {
@@ -161,9 +166,15 @@ program
       });
 
       // 显示状态栏（简洁版）
+      const modeLabels: Record<string, { color: string; label: string }> = {
+        plan:   { color: '\x1b[36m', label: 'PLAN' },
+        build:  { color: '\x1b[32m', label: 'BUILD' },
+        bypass: { color: '\x1b[33m', label: 'PASS' },
+      };
       const updateStatusBar = () => {
-        const mode = state.isBypassMode() ? 'bypass' : 'strict';
-        screen.setStatus(`${providerConfig.model} | ${mode}`);
+        const mode = state.getAgentMode();
+        const ml = modeLabels[mode] || modeLabels.build;
+        screen.setStatus(`${providerConfig.model} | ${ml.color}${ml.label}\x1b[0m | Tab: cycle`);
       };
       updateStatusBar();
 
@@ -171,6 +182,21 @@ program
       screen.setVerboseToggleCallback(() => {
         const newMode = state.toggleVerboseMode();
         screen.appendScroll(COLORS.secondary(`\n[MODE] ${newMode ? 'Verbose' : 'Compact'} display enabled\n`));
+        updateStatusBar();
+        screen.restoreCursor();
+        screen.refreshInput();
+      });
+
+      // 设置 Tab 模式切换回调（空输入时 Tab 循环 plan→build→bypass）
+      screen.setModeCycleCallback(() => {
+        const newMode = state.cycleAgentMode();
+        agent.setAgentMode(newMode);
+        const modeMessages: Record<string, string> = {
+          plan:   '[PLAN] Read-only mode (no file changes)',
+          build:  '[BUILD] Permission mode (ask before writes)',
+          bypass: '[BYPASS] Auto-approve mode (5min timeout)',
+        };
+        screen.appendScroll(COLORS.secondary(`\n${modeMessages[newMode]}\n`));
         updateStatusBar();
         screen.restoreCursor();
         screen.refreshInput();
@@ -383,17 +409,29 @@ program
             return;
           }
 
-          // 权限模式
+          // 权限模式 (plan / build / bypass)
+          if (cmd === 'plan') {
+            agent.setAgentMode('plan');
+            state.setAgentMode('plan');
+            screen.appendScroll(COLORS.secondary('\n[PLAN] Read-only mode activated\n'));
+            return;
+          }
+          if (cmd === 'build') {
+            agent.setAgentMode('build');
+            state.setAgentMode('build');
+            screen.appendScroll(COLORS.success('\n[BUILD] Permission mode activated\n'));
+            return;
+          }
           if (cmd === 'bypass') {
-            agent.setBypassPermissions(true);
-            state.setBypassMode(true);
-            
+            agent.setAgentMode('bypass');
+            state.setAgentMode('bypass');
+            screen.appendScroll(COLORS.warning('\n[BYPASS] Auto-approve mode (5min timeout)\n'));
             return;
           }
           if (cmd === 'strict') {
-            agent.setBypassPermissions(false);
-            state.setBypassMode(false);
-            
+            agent.setAgentMode('build');
+            state.setAgentMode('build');
+            screen.appendScroll(COLORS.success('\n[BUILD] Permission mode activated\n'));
             return;
           }
 
@@ -1037,6 +1075,51 @@ program
         }
         break;
 
+      case 'add': {
+        const addResponse = await prompts([
+          { type: 'text', name: 'name', message: 'Server name:' },
+          { type: 'select', name: 'connType', message: 'Connection type:',
+            choices: [
+              { title: 'stdio (command)', value: 'stdio' },
+              { title: 'SSE (URL)', value: 'sse' },
+            ] },
+          { type: 'text', name: 'command', message: 'Start command (e.g. npx):', hint: 'For stdio mode' },
+          { type: 'text', name: 'args', message: 'Arguments (space-separated):', hint: 'e.g. -y @anthropic-ai/mcp-server-filesystem /path' },
+          { type: 'text', name: 'url', message: 'SSE URL:', hint: 'For SSE mode' },
+          { type: 'text', name: 'headers', message: 'Headers (key=value,key=value):', hint: 'Optional, for OAuth etc.' },
+        ]);
+
+        if (!addResponse.name) break;
+
+        const addSettings = await loadGlobalSettings();
+        if (!addSettings.mcp) addSettings.mcp = { servers: [] };
+
+        const serverConfig: any = { name: addResponse.name };
+
+        if (addResponse.connType === 'stdio' && addResponse.command) {
+          serverConfig.command = addResponse.command;
+          if (addResponse.args) serverConfig.args = addResponse.args.split(/\s+/);
+        } else if (addResponse.connType === 'sse' && addResponse.url) {
+          serverConfig.url = addResponse.url;
+        } else {
+          console.log(COLORS.warning('Invalid configuration'));
+          break;
+        }
+
+        if (addResponse.headers) {
+          serverConfig.headers = {};
+          for (const pair of addResponse.headers.split(',')) {
+            const [k, ...v] = pair.split('=');
+            if (k) serverConfig.headers[k.trim()] = v.join('=').trim();
+          }
+        }
+
+        addSettings.mcp.servers.push(serverConfig);
+        await saveGlobalSettings(addSettings);
+        console.log(COLORS.success(`[OK] MCP server "${addResponse.name}" added`));
+        break;
+      }
+
       case 'tools':
         const allTools = manager.listAvailableTools();
         console.log(COLORS.primary.bold('\nAvailable MCP tools:'));
@@ -1162,7 +1245,7 @@ async function runSimpleMode(agent: SpicaAgent, fresh?: boolean): Promise<void> 
           const messages = agent.getMessages();
           console.log(COLORS.primary(`\n[Status]`));
           console.log(`  Messages: ${messages.length}`);
-          console.log(`  Mode: ${state.isBypassMode() ? 'bypass' : 'strict'}`);
+          console.log(`  Mode: ${state.getAgentMode()}`);
         } else {
           console.log(COLORS.warning(`Unknown command: ${trimmed}`));
         }

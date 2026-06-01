@@ -1,5 +1,6 @@
 import { LAIN_COLORS } from './colors';
 import { isCJK } from './stringWidth';
+import { FileCompleter } from './fileCompleter';
 
 const ESC = '\x1b';
 
@@ -21,7 +22,13 @@ export interface ScreenState {
   lastCompletionLine: string;
   cursorInScrollArea: boolean;
   isStreaming: boolean;
-  onVerboseToggle?: () => void;  // Ctrl+O 回调
+  onVerboseToggle?: () => void;
+  onModeCycle?: () => void;
+  fileCompleter?: FileCompleter;
+  fileSearchActive: boolean;
+  fileSearchQuery: string;
+  fileSearchResults: string[];
+  fileSearchSelectedIndex: number;
 }
 
 export class ScreenManager {
@@ -46,6 +53,11 @@ export class ScreenManager {
       cursorInScrollArea: false,
       isStreaming: false,
       onVerboseToggle: undefined,
+      onModeCycle: undefined,
+      fileSearchActive: false,
+      fileSearchQuery: '',
+      fileSearchResults: [],
+      fileSearchSelectedIndex: 0,
     };
   }
 
@@ -323,6 +335,20 @@ export class ScreenManager {
       return false;
     }
     if (data === '\t') {
+      // 空输入 → 模式循环切换 (plan → build → bypass)
+      if (!this.state.inputBuffer[0].trim()) {
+        this.state.onModeCycle?.();
+        return false;
+      }
+      // @ 文件引用搜索
+      if (this.state.fileCompleter && this.state.inputBuffer[0].includes('@')) {
+        const atMatch = this.state.inputBuffer[0].match(/@(\S*)$/);
+        if (atMatch) {
+          const query = atMatch[1];
+          this.handleFileSearch(query);
+          return false;
+        }
+      }
       this.handleTab();
       return false;
     }
@@ -403,6 +429,41 @@ export class ScreenManager {
     return this.state.inputBuffer[0];
   }
 
+  // @ 文件引用搜索
+  private async handleFileSearch(query: string): Promise<void> {
+    if (!this.state.fileCompleter) return;
+
+    const results = await this.state.fileCompleter.search(query, 8);
+    if (results.length === 0) {
+      this.appendScroll('\n[No matching files]\n');
+      this.restoreCursor();
+      return;
+    }
+
+    if (results.length === 1) {
+      // 唯一匹配 → 直接替换 @query 为文件路径
+      const line = this.state.inputBuffer[0];
+      const replaced = line.replace(new RegExp(`@${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`), results[0]);
+      this.state.inputBuffer[0] = replaced;
+      this.state.cursorCol = [...replaced].length;
+      this.updateLayout();
+      this.refreshInput();
+      this.restoreCursor();
+    } else {
+      // 多个匹配 → 显示候选列表
+      const preview = results.map((f, i) => `  ${i + 1}. ${f}`).join('\n');
+      this.appendScroll(`\n@${query} matches:\n${preview}\n`);
+      // 如果第一个匹配是最佳的，自动替换
+      const line = this.state.inputBuffer[0];
+      const replaced = line.replace(new RegExp(`@${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`), results[0]);
+      this.state.inputBuffer[0] = replaced;
+      this.state.cursorCol = [...replaced].length;
+      this.updateLayout();
+      this.refreshInput();
+      this.restoreCursor();
+    }
+  }
+
   clear(): void {
     this.state.inputBuffer[0] = '';
     this.state.cursorCol = 0;
@@ -421,6 +482,14 @@ export class ScreenManager {
 
   setVerboseToggleCallback(fn: () => void): void {
     this.state.onVerboseToggle = fn;
+  }
+
+  setModeCycleCallback(fn: () => void): void {
+    this.state.onModeCycle = fn;
+  }
+
+  setFileCompleter(completer: FileCompleter): void {
+    this.state.fileCompleter = completer;
   }
 
   setStatus(text: string): void {

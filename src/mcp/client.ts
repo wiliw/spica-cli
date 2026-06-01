@@ -81,8 +81,12 @@ export class MCPManager extends EventEmitter {
       });
 
     } else if (config.url) {
-      // SSE模式 - HTTP连接
-      transport = new SSEClientTransport(new URL(config.url));
+      // SSE模式 - HTTP连接，支持自定义 headers (OAuth token 等)
+      const sseOptions: any = {};
+      if (config.headers) {
+        sseOptions.requestInit = { headers: config.headers };
+      }
+      transport = new SSEClientTransport(new URL(config.url), sseOptions);
 
     } else {
       throw new Error(`MCP server ${config.name} needs either command or url`);

@@ -8,6 +8,7 @@ import { SubAgentTask, getSubAgentConfig, isToolAllowed, summarizeResult } from 
 import { computeDiff, formatDiff, generateEditDiff } from '../cli/ui/diff';
 import { getMCPManager } from '../mcp/client';
 import { getBashPath, supportsTmux, getProxyAgent } from '../utils/platform';
+import { getCustomToolManager } from '../custom-tools';
 import axios from 'axios';
 
 const isWindows = process.platform === 'win32';
@@ -296,13 +297,13 @@ name: 'bash',
   },
   {
     name: 'gh',
-    description: 'GitHub CLI operations. Actions: pr_view, pr_list, pr_create, issue_list, issue_view, issue_create, repo_view, run_list, run_view. Use for GitHub interactions.',
+    description: 'GitHub CLI operations. Actions: pr_view, pr_list, pr_create, pr_comment, pr_review, pr_merge, pr_diff, issue_list, issue_view, issue_create, issue_comment, search, repo_view, run_list, run_view.',
     parameters: {
       type: 'object' as const,
       properties: {
         action: {
           type: 'string',
-          enum: ['pr_view', 'pr_list', 'pr_create', 'issue_list', 'issue_view', 'issue_create', 'repo_view', 'run_list', 'run_view'],
+          enum: ['pr_view', 'pr_list', 'pr_create', 'pr_comment', 'pr_review', 'pr_merge', 'pr_diff', 'issue_list', 'issue_view', 'issue_create', 'issue_comment', 'search', 'repo_view', 'run_list', 'run_view'],
           description: 'GitHub action'
         },
         args: {
@@ -313,9 +314,13 @@ name: 'bash',
             limit: { type: 'number', description: 'Result limit' },
             label: { type: 'string', description: 'Label filter' },
             title: { type: 'string', description: 'PR/Issue title (for create)' },
-            body: { type: 'string', description: 'PR/Issue body (for create)' },
+            body: { type: 'string', description: 'Comment/PR body text' },
             base: { type: 'string', description: 'Base branch (for PR create)' },
             head: { type: 'string', description: 'Head branch (for PR create)' },
+            action: { type: 'string', description: 'Review action: approve/comment/request-changes' },
+            method: { type: 'string', description: 'Merge method: squash/rebase/merge' },
+            type: { type: 'string', description: 'Search type: code/issues/prs' },
+            query: { type: 'string', description: 'Search query' },
           },
           description: 'Action-specific arguments'
         },
@@ -411,18 +416,41 @@ name: 'bash',
       required: [],
     },
   },
+  {
+    name: 'file_patch',
+    description: 'Apply a unified diff patch to a file. Accepts full unified diff content with @@ hunk headers. Returns error if patch does not apply cleanly.',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        path: { type: 'string', description: 'Target file path to patch' },
+        patch: { type: 'string', description: 'Unified diff content with @@ hunks' },
+      },
+      required: ['path', 'patch'],
+    },
+  },
+  {
+    name: 'format',
+    description: 'Format code using project formatter. Auto-detects: prettier (TS/JS), gofmt (Go), rustfmt (Rust), black (Python). Use after file edits to fix style.',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        path: { type: 'string', description: 'File or directory to format (defaults to workspace root)' },
+      },
+      required: [],
+    },
+  },
 ];
 
-// 获取所有工具定义（内置 + MCP动态工具）
+// 获取所有工具定义（内置 + MCP动态 + 自定义工具）
 export function getAllToolDefinitions(): ToolDefinition[] {
   const mcpTools = getMCPManager().getToolDefinitions();
-  // MCP工具转换为ToolDefinition格式
   const mcpConverted: ToolDefinition[] = mcpTools.map(t => ({
     name: t.name,
     description: `[MCP] ${t.description}`,
     parameters: t.inputSchema,
   }));
-  return [...TOOLS_DEFINITIONS, ...mcpConverted];
+  const customTools = getCustomToolManager().getToolDefinitions();
+  return [...TOOLS_DEFINITIONS, ...mcpConverted, ...customTools];
 }
 
 export interface ToolEventCallback {
@@ -587,6 +615,68 @@ export async function executeTool(
           output: `Edited ${editPath} (${editCount} changes)${syntaxWarning}`,
           diff: diffs.join('\n---\n'),
           syntaxErrors: syntaxResult.hasErrors ? syntaxResult.errors : undefined,
+        };
+      }
+
+      case 'file_patch': {
+        const patchPath = resolvePath(safeArgs.path);
+        const patchText = String(safeArgs.patch || '');
+        if (!patchText) return { success: false, error: 'Patch content is required' };
+
+        const originalContent = await fs.readFile(patchPath, 'utf-8');
+
+        // 备份旧文件
+        try {
+          const backupDir = join(WORKSPACE, '.spica', 'backups');
+          await fs.ensureDir(backupDir);
+          const timestamp = Date.now();
+          const safeName = safeArgs.path.replace(/[\/\\]/g, '_');
+          const backupPath = join(backupDir, `${timestamp}-${safeName}`);
+          await fs.writeFile(backupPath, originalContent, 'utf-8');
+        } catch { /* 新文件无需备份 */ }
+
+        const patchResult = applyUnifiedPatch(originalContent, patchText);
+        if (!patchResult.success) {
+          return { success: false, error: `Patch failed: ${patchResult.error}` };
+        }
+
+        await fs.writeFile(patchPath, patchResult.content!, 'utf-8');
+
+        const patchDiff = computeDiff(originalContent, patchResult.content!);
+        const patchDiffStr = formatDiff(patchDiff, 3);
+        const patchSyntax = await runSyntaxCheck(patchPath);
+        const patchSyntaxWarn = formatSyntaxResult(patchSyntax, patchPath);
+
+        return {
+          success: true,
+          output: `Patched ${patchPath} (${patchResult.hunksApplied} hunks)${patchSyntaxWarn}`,
+          diff: patchDiffStr,
+          syntaxErrors: patchSyntax.hasErrors ? patchSyntax.errors : undefined,
+        };
+      }
+
+      case 'format': {
+        const target = safeArgs.path ? resolvePath(safeArgs.path) : WORKSPACE;
+        const projectType = await detectProjectType(WORKSPACE);
+
+        const formatCmds: Record<string, string> = {
+          typescript: `npx prettier --write "${target}" 2>&1`,
+          javascript: `npx prettier --write "${target}" 2>&1`,
+          python: `python -m black "${target}" 2>&1 || python -m autopep8 --in-place "${target}" 2>&1`,
+          go: `gofmt -w "${target}" 2>&1`,
+          rust: `rustfmt "${target}" 2>&1`,
+        };
+
+        const cmd = formatCmds[projectType];
+        if (!cmd) {
+          return { success: false, error: `No formatter for project type: ${projectType}` };
+        }
+
+        const fmtResult = await execa(cmd, { shell: true, cwd: WORKSPACE, timeout: 30000, reject: false });
+        return {
+          success: fmtResult.exitCode === 0,
+          output: fmtResult.stdout || 'Formatted successfully',
+          error: fmtResult.exitCode !== 0 ? fmtResult.stderr : undefined,
         };
       }
 
@@ -1317,6 +1407,48 @@ export async function executeTool(
             const ghResult = await execa('gh', ghArgs, { cwd: WORKSPACE, timeout, reject: false });
             return { success: ghResult.exitCode === 0, output: ghResult.stdout || ghResult.stderr };
           }
+          case 'pr_comment': {
+            if (!args.number) return { success: false, error: 'PR number required' };
+            const ghArgs = ['pr', 'comment', String(args.number)];
+            if (args.body) ghArgs.push('--body', args.body);
+            const ghResult = await execa('gh', ghArgs, { cwd: WORKSPACE, timeout, reject: false });
+            return { success: ghResult.exitCode === 0, output: ghResult.stdout || 'Comment posted' };
+          }
+          case 'pr_review': {
+            if (!args.number) return { success: false, error: 'PR number required' };
+            const reviewAction = args.action || 'comment';
+            const ghArgs = ['pr', 'review', String(args.number), `--${reviewAction}`];
+            if (args.body) ghArgs.push('--body', args.body);
+            const ghResult = await execa('gh', ghArgs, { cwd: WORKSPACE, timeout, reject: false });
+            return { success: ghResult.exitCode === 0, output: ghResult.stdout || `Review (${reviewAction}) submitted` };
+          }
+          case 'pr_merge': {
+            if (!args.number) return { success: false, error: 'PR number required' };
+            const mergeMethod = args.method || 'squash';
+            const ghArgs = ['pr', 'merge', String(args.number), `--${mergeMethod}`];
+            const ghResult = await execa('gh', ghArgs, { cwd: WORKSPACE, timeout, reject: false });
+            return { success: ghResult.exitCode === 0, output: ghResult.stdout || `PR merged (${mergeMethod})` };
+          }
+          case 'pr_diff': {
+            if (!args.number) return { success: false, error: 'PR number required' };
+            const ghResult = await execa('gh', ['pr', 'diff', String(args.number)], { cwd: WORKSPACE, timeout, reject: false });
+            return { success: ghResult.exitCode === 0, output: ghResult.stdout || 'No diff' };
+          }
+          case 'issue_comment': {
+            if (!args.number) return { success: false, error: 'Issue number required' };
+            const ghArgs = ['issue', 'comment', String(args.number)];
+            if (args.body) ghArgs.push('--body', args.body);
+            const ghResult = await execa('gh', ghArgs, { cwd: WORKSPACE, timeout, reject: false });
+            return { success: ghResult.exitCode === 0, output: ghResult.stdout || 'Comment posted' };
+          }
+          case 'search': {
+            const searchType = args.type || 'code';
+            const searchQuery = args.query || '';
+            if (!searchQuery) return { success: false, error: 'Search query required' };
+            const searchLimit = args.limit || 10;
+            const ghResult = await execa('gh', ['search', searchType, searchQuery, '--limit', String(searchLimit)], { cwd: WORKSPACE, timeout, reject: false });
+            return { success: ghResult.exitCode === 0, output: ghResult.stdout || 'No results' };
+          }
           default:
             return { success: false, error: `Unknown gh action: ${action}` };
         }
@@ -1592,7 +1724,12 @@ export async function executeTool(
       }
 
       default:
-        // 检查是否是MCP工具（格式：servername/toolname）
+        // ① Custom Tools
+        const customMgr = getCustomToolManager();
+        if (customMgr.hasTool(name)) {
+          return await customMgr.execute(name, safeArgs, WORKSPACE);
+        }
+        // ② MCP 工具（格式：servername/toolname）
         if (name.includes('/')) {
           const mcpManager = getMCPManager();
           if (mcpManager.hasTool(name)) {
@@ -2095,4 +2232,114 @@ async function runInteractivePty(
       }
     }, timeout);
   });
+}
+
+// Unified diff patch parser and applier
+interface PatchResult {
+  success: boolean;
+  content?: string;
+  error?: string;
+  hunksApplied?: number;
+}
+
+function parseHunkHeader(header: string): { oldStart: number; oldCount: number; newStart: number; newCount: number } | null {
+  const match = header.match(/^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@/);
+  if (!match) return null;
+  return {
+    oldStart: parseInt(match[1], 10),
+    oldCount: match[2] ? parseInt(match[2], 10) : 1,
+    newStart: parseInt(match[3], 10),
+    newCount: match[4] ? parseInt(match[4], 10) : 1,
+  };
+}
+
+function applyUnifiedPatch(original: string, patchText: string): PatchResult {
+  const originalLines = original.split('\n');
+  const patchLines = patchText.split('\n');
+
+  let currentHunk: { oldStart: number; oldCount: number; newStart: number; newCount: number } | null = null;
+  let oldPos = 0;
+  const newLines: string[] = [];
+  let hunksApplied = 0;
+  let hunkLinesProcessed = 0;
+
+  for (let i = 0; i < patchLines.length; i++) {
+    const line = patchLines[i];
+
+    // 跳过文件头部
+    if (line.startsWith('--- ') || line.startsWith('+++ ') || line.startsWith('diff ') || line.startsWith('index ')) {
+      continue;
+    }
+
+    // 解析 hunk header
+    if (line.startsWith('@@')) {
+      const hunk = parseHunkHeader(line);
+      if (!hunk) return { success: false, error: `Invalid hunk header: ${line}` };
+
+      // 第一个 hunk: 复制 hunk 前面的行
+      if (hunksApplied === 0) {
+        while (oldPos < hunk.oldStart - 1 && oldPos < originalLines.length) {
+          newLines.push(originalLines[oldPos++]);
+        }
+      } else {
+        // 后续 hunk: 复制两个 hunk 之间不变的行
+        while (oldPos < hunk.oldStart - 1 && oldPos < originalLines.length) {
+          newLines.push(originalLines[oldPos++]);
+        }
+      }
+
+      currentHunk = hunk;
+      hunkLinesProcessed = 0;
+      continue;
+    }
+
+    if (!currentHunk) continue;
+
+    // 处理 hunk body
+    if (line.startsWith('+')) {
+      newLines.push(line.slice(1));
+      hunkLinesProcessed++;
+    } else if (line.startsWith('-')) {
+      const expectedLine = originalLines[oldPos];
+      if (expectedLine !== line.slice(1)) {
+        return { success: false, error: `Hunk mismatch at line ${oldPos + 1}: expected "${expectedLine}", got "${line.slice(1)}"` };
+      }
+      oldPos++;
+      hunkLinesProcessed++;
+    } else if (line.startsWith(' ') || line === '') {
+      const contextContent = line.startsWith(' ') ? line.slice(1) : line;
+      const expectedLine = originalLines[oldPos];
+      if (expectedLine !== undefined && expectedLine !== contextContent) {
+        // 宽松匹配：去除行尾空格
+        if (expectedLine.trimEnd() !== contextContent.trimEnd()) {
+          return { success: false, error: `Context mismatch at line ${oldPos + 1}: expected "${expectedLine}", got "${contextContent}"` };
+        }
+      }
+      newLines.push(contextContent);
+      oldPos++;
+      hunkLinesProcessed++;
+
+      // 检查 hunk 是否完成
+      if (currentHunk && hunkLinesProcessed >= currentHunk.oldCount + currentHunk.newCount) {
+        hunksApplied++;
+        currentHunk = null;
+      }
+    }
+  }
+
+  // 如果最后一个 hunk 还没关闭，关闭它
+  if (currentHunk && hunkLinesProcessed > 0) {
+    hunksApplied++;
+  }
+
+  // 复制剩余行
+  while (oldPos < originalLines.length) {
+    newLines.push(originalLines[oldPos++]);
+  }
+
+  if (hunksApplied === 0) {
+    return { success: false, error: 'No valid hunks found in patch' };
+  }
+
+  return { success: true, content: newLines.join('\n'), hunksApplied };
 }

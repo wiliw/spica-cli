@@ -2,15 +2,17 @@
 
 import { SpicaAgent } from '../agent';
 
+export type AgentMode = 'plan' | 'build' | 'bypass';
+
 interface RuntimeState {
   agent: SpicaAgent | null;
   providerConfig: any;
   isProcessing: boolean;
-  bypassMode: boolean;
+  agentMode: AgentMode;
   connectionErrorShown: boolean;
   streamingOutput: boolean;
-  permissionDialogActive: boolean;  // 权限对话框激活时，stdin监听器应跳过处理
-  verboseMode: boolean;  // 详细显示模式（默认 false = 缩略模式）
+  permissionDialogActive: boolean;
+  verboseMode: boolean;
 }
 
 class RuntimeStateManager {
@@ -18,11 +20,11 @@ class RuntimeStateManager {
     agent: null,
     providerConfig: null,
     isProcessing: false,
-    bypassMode: false,
+    agentMode: 'build',
     connectionErrorShown: false,
     streamingOutput: false,
     permissionDialogActive: false,
-    verboseMode: false,  // 默认缩略模式
+    verboseMode: false,
   };
 
   // Agent
@@ -56,13 +58,32 @@ class RuntimeStateManager {
     return this.state.isProcessing;
   }
 
-  // Bypass Mode
-  setBypassMode(mode: boolean): void {
-    this.state.bypassMode = mode;
+  // Agent Mode (plan / build / bypass)
+  setAgentMode(mode: AgentMode): void {
+    this.state.agentMode = mode;
+  }
+
+  getAgentMode(): AgentMode {
+    return this.state.agentMode;
+  }
+
+  isPlanMode(): boolean {
+    return this.state.agentMode === 'plan';
+  }
+
+  isBuildMode(): boolean {
+    return this.state.agentMode === 'build';
   }
 
   isBypassMode(): boolean {
-    return this.state.bypassMode;
+    return this.state.agentMode === 'bypass';
+  }
+
+  cycleAgentMode(): AgentMode {
+    const order: AgentMode[] = ['plan', 'build', 'bypass'];
+    const idx = order.indexOf(this.state.agentMode);
+    this.state.agentMode = order[(idx + 1) % 3];
+    return this.state.agentMode;
   }
 
   // Connection Error
@@ -92,7 +113,7 @@ class RuntimeStateManager {
     return this.state.permissionDialogActive;
   }
 
-  // Verbose Mode (详细显示模式)
+  // Verbose Mode
   setVerboseMode(verbose: boolean): void {
     this.state.verboseMode = verbose;
   }
@@ -119,11 +140,11 @@ class RuntimeStateManager {
       agent: null,
       providerConfig: null,
       isProcessing: false,
-      bypassMode: false,
+      agentMode: 'build',
       connectionErrorShown: false,
       streamingOutput: false,
       permissionDialogActive: false,
-      verboseMode: false,  // 默认缩略模式
+      verboseMode: false,
     };
   }
 }

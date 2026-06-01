@@ -199,14 +199,24 @@ export function setupAgentEvents(
     screen.appendScroll(COLORS.file(`\n[DIR] Workspace: ${data.path}\n`));
   });
 
-  agent.on('bypass_changed', (data: any) => {
-    state.setBypassMode(data.enabled);
-    screen.appendScroll(data.enabled
-      ? COLORS.bypass('\n[WARN] Bypass mode activated\n')
-      : COLORS.success('\n[OK] Strict mode activated\n'));
+  agent.on('mode_changed', (data: { mode: string }) => {
+    state.setAgentMode(data.mode as any);
+    const modeMessages: Record<string, string> = {
+      plan:   '[PLAN] Read-only mode (no file changes)',
+      build:  '[BUILD] Permission mode (ask before writes)',
+      bypass: '[BYPASS] Auto-approve mode (5min timeout)',
+    };
+    const modeColors: Record<string, Function> = {
+      plan:   COLORS.secondary,
+      build:  COLORS.success,
+      bypass: COLORS.bypass,
+    };
+    const color = modeColors[data.mode] || COLORS.success;
+    const msg = modeMessages[data.mode] || modeMessages.build;
+    screen.appendScroll(color(`\n${msg}\n`));
     if (model) {
-      const mode = data.enabled ? 'bypass' : 'strict';
-      screen.setStatus(`${model} | ${mode} | /h help | ESC ESC interrupt`);
+      const modeLabel = data.mode.toUpperCase();
+      screen.setStatus(`${model} | ${modeLabel} | Tab: cycle`);
     }
   });
 

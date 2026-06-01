@@ -143,7 +143,7 @@ describe('SpicaAgent', () => {
 
     describe('waitForPermission', () => {
       it('should auto-approve in bypass mode', async () => {
-        agent.setBypassPermissions(true);
+        agent.setAgentMode('bypass');
         const result = await agent.waitForPermission('test reason');
         expect(result).toBe(true);
       });
@@ -180,21 +180,30 @@ describe('SpicaAgent', () => {
       });
     });
 
-    describe('bypass mode', () => {
-      it('should toggle bypass mode', () => {
-        agent.setBypassPermissions(true);
+    describe('agent mode', () => {
+      it('should toggle agent mode', () => {
+        agent.setAgentMode('bypass');
         expect(agent.isBypassPermissions).toBe(true);
+        expect(agent.currentMode).toBe('bypass');
         
-        agent.setBypassPermissions(false);
+        agent.setAgentMode('build');
         expect(agent.isBypassPermissions).toBe(false);
+        expect(agent.currentMode).toBe('build');
+
+        agent.setAgentMode('plan');
+        expect(agent.isPlanMode).toBe(true);
+        expect(agent.currentMode).toBe('plan');
       });
 
-      it('should emit bypass_changed event', () => {
+      it('should emit mode_changed event', () => {
         const eventSpy = vi.fn();
-        agent.on('bypass_changed', eventSpy);
+        agent.on('mode_changed', eventSpy);
         
-        agent.setBypassPermissions(true);
-        expect(eventSpy).toHaveBeenCalledWith({ enabled: true });
+        agent.setAgentMode('bypass');
+        expect(eventSpy).toHaveBeenCalledWith({ mode: 'bypass' });
+
+        agent.setAgentMode('plan');
+        expect(eventSpy).toHaveBeenCalledWith({ mode: 'plan' });
       });
     });
   });
