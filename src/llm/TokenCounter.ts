@@ -6,6 +6,10 @@ export class TokenCounter {
     this.contextWindow = size;
   }
 
+  getContextWindow(): number {
+    return this.contextWindow;
+  }
+
   estimateTokens(text: string): number {
     return Math.ceil(text.length / TokenCounter.AVERAGE_CHARS_PER_TOKEN);
   }

@@ -1,12 +1,40 @@
 import { SpicaAgent } from '../agent';
 import { getScreenManager } from './ui/screenManager';
 import { COLORS, format } from './ui/colors';
+import { TokenCounter } from '../llm/TokenCounter';
 import prompts from 'prompts';
 import { getRuntimeState } from '../core/RuntimeState';
 
 
 const screen = getScreenManager();
 const state = getRuntimeState();
+
+// 构建状态栏文本（含上下文占用）
+function buildStatusText(
+  agent: SpicaAgent,
+  model: string | undefined,
+  mode: string,
+  tokenCounter: TokenCounter
+): string {
+  const modeColors: Record<string, string> = {
+    plan: '\x1b[36m', build: '\x1b[32m', bypass: '\x1b[33m',
+  };
+  const modeLabels: Record<string, string> = {
+    plan: 'PLAN', build: 'BUILD', bypass: 'PASS',
+  };
+  const mc = modeColors[mode] || '\x1b[32m';
+  const ml = modeLabels[mode] || 'BUILD';
+
+  const messages = agent.getMessages();
+  const usedTokens = tokenCounter.estimateMessages(messages);
+  const contextWindow = tokenCounter.getContextWindow() || 128000;
+  const percent = Math.min(99, Math.floor(usedTokens / contextWindow * 100));
+  const usedK = usedTokens >= 1000 ? `${Math.floor(usedTokens / 1000)}k` : String(usedTokens);
+  const maxK = contextWindow >= 1000 ? `${Math.floor(contextWindow / 1000)}k` : String(contextWindow);
+  const pctColor = percent >= 80 ? '\x1b[31m' : percent >= 60 ? '\x1b[33m' : '\x1b[32m';
+
+  return `${model || '?'} | ${mc}${ml}\x1b[0m | ${pctColor}${percent}%\x1b[0m ${usedK}/${maxK} | Tab: cycle`;
+}
 
 function formatArgs(args: Record<string, any>): string {
   if (!args || Object.keys(args).length === 0) return '';
@@ -30,7 +58,8 @@ function formatArgs(args: Record<string, any>): string {
 export function setupAgentEvents(
   agent: SpicaAgent,
   interactive: boolean = false,
-  model?: string
+  model?: string,
+  tokenCounter?: TokenCounter
 ): void {
   // 追踪 reasoning 状态
   let reasoningStarted = false;
@@ -214,9 +243,15 @@ export function setupAgentEvents(
     const color = modeColors[data.mode] || COLORS.success;
     const msg = modeMessages[data.mode] || modeMessages.build;
     screen.appendScroll(color(`\n${msg}\n`));
-    if (model) {
-      const modeLabel = data.mode.toUpperCase();
-      screen.setStatus(`${model} | ${modeLabel} | Tab: cycle`);
+    if (model && tokenCounter) {
+      screen.setStatus(buildStatusText(agent, model, data.mode, tokenCounter));
+    }
+  });
+
+  // 工具执行完成后刷新状态栏（更新上下文占用）
+  agent.on('tool_result', () => {
+    if (model && tokenCounter) {
+      screen.setStatus(buildStatusText(agent, model, state.getAgentMode(), tokenCounter));
     }
   });
 

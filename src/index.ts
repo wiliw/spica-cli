@@ -171,10 +171,28 @@ program
         build:  { color: '\x1b[32m', label: 'BUILD' },
         bypass: { color: '\x1b[33m', label: 'PASS' },
       };
+
+      // 获取上下文窗口大小
+      const provider = agent.getLLM()?.getProvider();
+      const contextWindow = provider?.getContextWindow() || 128000;
+      const tokenCounter = new TokenCounter();
+      tokenCounter.setContextWindow(contextWindow);
+
       const updateStatusBar = () => {
         const mode = state.getAgentMode();
         const ml = modeLabels[mode] || modeLabels.build;
-        screen.setStatus(`${providerConfig.model} | ${ml.color}${ml.label}\x1b[0m | Tab: cycle`);
+
+        // 计算上下文占用
+        const messages = agent.getMessages();
+        const usedTokens = tokenCounter.estimateMessages(messages);
+        const percent = Math.min(99, Math.floor(usedTokens / contextWindow * 100));
+        const usedK = usedTokens >= 1000 ? `${Math.floor(usedTokens / 1000)}k` : String(usedTokens);
+        const maxK = contextWindow >= 1000 ? `${Math.floor(contextWindow / 1000)}k` : String(contextWindow);
+
+        // 颜色：绿色 <60%，黄色 60-80%，红色 >80%
+        const pctColor = percent >= 80 ? '\x1b[31m' : percent >= 60 ? '\x1b[33m' : '\x1b[32m';
+
+        screen.setStatus(`${providerConfig.model} | ${ml.color}${ml.label}\x1b[0m | ${pctColor}${percent}%\x1b[0m ${usedK}/${maxK} | Tab: cycle`);
       };
       updateStatusBar();
 
@@ -250,7 +268,7 @@ program
       });
 
       // 设置agent事件监听
-      setupAgentEvents(agent, true, providerConfig.model);
+      setupAgentEvents(agent, true, providerConfig.model, tokenCounter);
 
       // TUI 输出辅助函数（已简化）
 
@@ -437,7 +455,7 @@ program
 
           // 状态
           if (cmd === 'status') {
-            const bypass = agent.isBypassPermissions;
+            const mode = state.getAgentMode();
             const msgs = agent.getMessages().length;
             const queue = getInputQueue();
             const queueStatus = queue.getStatus();
@@ -451,11 +469,13 @@ program
             const usedTokens = tokenCounter.estimateMessages(agent.getMessages());
             const contextWindow = provider?.getContextWindow() || 128000;
             const usagePercent = usedTokens / contextWindow * 100;
+            const usedK = usedTokens >= 1000 ? `${Math.floor(usedTokens / 1000)}k` : String(usedTokens);
+            const maxK = contextWindow >= 1000 ? `${Math.floor(contextWindow / 1000)}k` : String(contextWindow);
 
             screen.appendScroll(COLORS.primary.bold('\nStatus:\n'));
-            screen.appendScroll(`  Mode: ${bypass ? 'BYPASS' : 'STRICT'}\n`);
+            screen.appendScroll(`  Mode: ${mode.toUpperCase()}\n`);
             screen.appendScroll(`  Messages: ${msgs}\n`);
-            screen.appendScroll(`  Tokens: ${usedTokens} (${usagePercent.toFixed(1)}% of ${Math.floor(contextWindow/1000)}k)\n`);
+            screen.appendScroll(`  Context: ${usagePercent.toFixed(1)}% (${usedK} / ${maxK} tokens)\n`);
             screen.appendScroll(`  Queue: ${queueStatus.pending} pending\n`);
             screen.appendScroll(`  Workspace: ${agent.getWorkspacePath()}\n\n`);
 
