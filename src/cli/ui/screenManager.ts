@@ -1,8 +1,11 @@
 import { LAIN_COLORS } from './colors';
 import { isCJK } from './stringWidth';
-import fs from 'fs';
 
 const ESC = '\x1b';
+
+function writeStdout(text: string): void {
+  process.stdout.write(text);
+}
 
 export interface ScreenState {
   inputBuffer: string[];
@@ -98,17 +101,17 @@ export class ScreenManager {
       if (oldStatusRow > this.state.statusRow) {
         // 输入行数增加：清除被输入框覆盖的旧位置
         for (let row = this.state.statusRow + 1; row <= oldStatusRow; row++) {
-          fs.writeSync(1, `${ESC}[${row};1H${ESC}[2K`);
+          writeStdout(`${ESC}[${row};1H${ESC}[2K`);
         }
       } else if (oldStatusRow < this.state.statusRow) {
         // 输入行数减少：清除变成滚动区域的旧输入位置
         for (let row = oldScrollBottom + 1; row <= this.state.scrollBottom; row++) {
-          fs.writeSync(1, `${ESC}[${row};1H${ESC}[2K`);
+          writeStdout(`${ESC}[${row};1H${ESC}[2K`);
         }
       }
 
       // 重新设置滚动区域
-      fs.writeSync(1, `${ESC}[1;${this.state.scrollBottom}r`);
+      writeStdout(`${ESC}[1;${this.state.scrollBottom}r`);
 
       // 重绘状态栏在新位置
       this.drawStatus();
@@ -120,24 +123,24 @@ export class ScreenManager {
   }
 
   start(): void {
-    fs.writeSync(1, `${ESC}[1;${this.state.scrollBottom}r`);
-    fs.writeSync(1, `${ESC}[2J${ESC}[1;1H`);
+    writeStdout(`${ESC}[1;${this.state.scrollBottom}r`);
+    writeStdout(`${ESC}[2J${ESC}[1;1H`);
     this.drawStatus();
     this.refreshInput();
     this.restoreCursor();
   }
 
   end(): void {
-    fs.writeSync(1, `${ESC}[r${ESC}[2J${ESC}[1;1H`);
+    writeStdout(`${ESC}[r${ESC}[2J${ESC}[1;1H`);
   }
 
   appendScroll(text: string): void {
     if (!this.state.cursorInScrollArea) {
-      fs.writeSync(1, `${ESC}[?25l`);
-      fs.writeSync(1, `${ESC}[${this.state.scrollBottom};1H`);
+      writeStdout(`${ESC}[?25l`);
+      writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
       this.state.cursorInScrollArea = true;
     }
-    fs.writeSync(1, text);
+    writeStdout(text);
   }
 
   // 刷新状态栏（清除并重绘）
@@ -147,10 +150,10 @@ export class ScreenManager {
 
   // 绘制状态栏
   private drawStatus(): void {
-    fs.writeSync(1, `${ESC}[?25l`);
-    fs.writeSync(1, `${ESC}[${this.state.statusRow};1H${ESC}[2K`);
+    writeStdout(`${ESC}[?25l`);
+    writeStdout(`${ESC}[${this.state.statusRow};1H${ESC}[2K`);
     if (this.state.statusText) {
-      fs.writeSync(1, this.state.statusText);
+      writeStdout(this.state.statusText);
     }
   }
 
@@ -171,11 +174,11 @@ export class ScreenManager {
   // 刷新输入框（清除所有输入行，重绘）
   refreshInput(): void {
     this.updateLayout();
-    fs.writeSync(1, `${ESC}[?25l`);
+    writeStdout(`${ESC}[?25l`);
 
     // 清除所有输入行（从 statusRow+1 到 terminalHeight）
     for (let row = this.state.statusRow + 1; row <= this.state.terminalHeight; row++) {
-      fs.writeSync(1, `${ESC}[${row};1H${ESC}[2K`);
+      writeStdout(`${ESC}[${row};1H${ESC}[2K`);
     }
 
     // 按换行符分割内容，渲染多行
@@ -197,12 +200,12 @@ export class ScreenManager {
 
       // 清除该逻辑行占用的所有物理行（防止残留）
       for (let j = 0; j < physicalLines; j++) {
-        fs.writeSync(1, `${ESC}[${currentRow + j};1H${ESC}[2K`);
+        writeStdout(`${ESC}[${currentRow + j};1H${ESC}[2K`);
       }
 
       // 写入内容（只写在第一个物理行，终端自动换行）
-      fs.writeSync(1, `${ESC}[${currentRow};1H`);
-      fs.writeSync(1, displayContent);
+      writeStdout(`${ESC}[${currentRow};1H`);
+      writeStdout(displayContent);
 
       currentRow += physicalLines;
     }
@@ -267,8 +270,8 @@ export class ScreenManager {
     const cursorRow = inputStartRow + physicalLinesBefore + physicalLinesInCurrentBeforeCursor;
     const cursorCol = (totalDisplayWidth % width) + 1;
 
-    fs.writeSync(1, `${ESC}[${cursorRow};${cursorCol}H`);
-    fs.writeSync(1, `${ESC}[?25h`);
+    writeStdout(`${ESC}[${cursorRow};${cursorCol}H`);
+    writeStdout(`${ESC}[?25h`);
     this.state.cursorInScrollArea = false;
   }
 
@@ -277,15 +280,15 @@ export class ScreenManager {
     // Without this, the cursor resets to column 1, causing the next
     // appendScroll() to overwrite previous streaming output.
     if (this.state.isStreaming) {
-      fs.writeSync(1, '\x1b7');  // DECSC: Save cursor
+      writeStdout('\x1b7');  // DECSC: Save cursor
     }
 
     this.refreshInput();
     this.restoreCursor();
 
     if (this.state.isStreaming) {
-      fs.writeSync(1, '\x1b8');  // DECRC: Restore cursor (preserves column)
-      fs.writeSync(1, `${ESC}[?25l`);
+      writeStdout('\x1b8');  // DECRC: Restore cursor (preserves column)
+      writeStdout(`${ESC}[?25l`);
       this.state.cursorInScrollArea = true;
     }
   }
@@ -406,7 +409,7 @@ export class ScreenManager {
     this.state.inputLines = 1;
     this.state.statusRow = this.state.terminalHeight - 2;
     this.state.scrollBottom = this.state.terminalHeight - 3;
-    fs.writeSync(1, `${ESC}[1;${this.state.scrollBottom}r`);
+    writeStdout(`${ESC}[1;${this.state.scrollBottom}r`);
     this.drawStatus();
     this.refreshInput();
     this.restoreCursor();
