@@ -9,6 +9,7 @@ import { loadProjectConfig as loadAgentsConfig, autoDetectProject, createAgentsM
 import { SkillDefinition } from './utils/settings';
 import { cleanMessages } from './utils/messageCleaner';
 import { loadProjectState, saveProjectState, updateProjectTodos, loadProjectContext, saveProjectContext, ensureProjectDir } from './storage/projectState';
+import { loadSession } from './utils/session';
 import { runPreHooks, runPostHooks } from './hooks';
 import { COLORS } from './cli/ui/colors';
 // classifyIntent merged into matchSkill — see enhanced matchSkill() below
@@ -666,11 +667,14 @@ async init() {
     }
 
     ensureProjectDir(this.workspacePath);
-    const projectContext = loadProjectContext(this.workspacePath);
-    if (projectContext.length > 0) {
-      this.llm.setMessages(projectContext);
+
+    // 从session文件加载完整历史（不是损坏的context.json）
+    const session = loadSession(this.workspacePath);
+    if (session && session.messages.length > 0) {
+      // session.messages已经通过cleanMessages清理过了
+      this.llm.setMessages(session.messages);
     }
-    
+
     const projectState = loadProjectState(this.workspacePath);
     if (projectState) {
       this._todos = projectState.todos;
@@ -1290,7 +1294,9 @@ async init() {
     let safetyTruncated = [...truncatedRecent];
     let safetyTokens = tokenCounter.estimateMessages(safetyTruncated);
     let compactIterations = 0;
-    while (safetyTokens > targetTokens * 0.7 && safetyTruncated.length > 2) {
+
+    // 从后面移除消息（保留前面的assistant-tool配对）
+    while (safetyTokens > targetTokens * 0.7 && safetyTruncated.length > 3) {
       compactIterations++;
       if (compactIterations > MAX_COMPACT_ITERATIONS) {
         this.emit('context_warning', {
@@ -1300,7 +1306,7 @@ async init() {
         });
         break;
       }
-      safetyTruncated.shift();
+      safetyTruncated.pop();  // 从后面移除
       safetyTokens = tokenCounter.estimateMessages(safetyTruncated);
     }
     // Recompute oldMessages to match possibly reduced recent set
@@ -1311,15 +1317,21 @@ async init() {
       // 保留 assistant + 对应的 tool messages，过滤掉孤立的 tool messages
       const safetyTruncatedClean: ChatMessage[] = [];
       const existingToolMessageIds = new Set<string>();
+      const assistantToolCallIds = new Set<string>();
 
-      // 第一遍：收集所有存在的 tool message 的 toolCallId
+      // 第一遍：收集所有存在的 tool message 的 toolCallId，以及所有 assistant 的 toolCall id
       for (const m of safetyTruncated) {
         if (m.role === 'tool' && m.toolCallId) {
           existingToolMessageIds.add(m.toolCallId);
         }
+        if (m.role === 'assistant' && m.toolCalls) {
+          for (const tc of m.toolCalls) {
+            assistantToolCallIds.add(tc.id);
+          }
+        }
       }
 
-      // 第二遍：保留 user/assistant/system，以及存在的 tool messages
+      // 第二遍：保留 user/assistant/system，以及匹配的 tool messages
       for (const m of safetyTruncated) {
         if (m.role === 'user' || m.role === 'assistant' || m.role === 'system') {
           // 如果是 assistant with toolCalls，检查每个toolCall是否有对应的tool message
@@ -1334,8 +1346,11 @@ async init() {
           } else {
             safetyTruncatedClean.push(m);
           }
-        } else if (m.role === 'tool' && existingToolMessageIds.has(m.toolCallId || '')) {
-          safetyTruncatedClean.push(m);
+        } else if (m.role === 'tool' && m.toolCallId) {
+          // 只保留有对应 assistant message 的 tool message
+          if (assistantToolCallIds.has(m.toolCallId)) {
+            safetyTruncatedClean.push(m);
+          }
         }
       }
 
