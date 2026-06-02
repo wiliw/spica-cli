@@ -161,10 +161,30 @@ export class SpicaAgent extends EventEmitter {
     return null;
   }
 
+  // 永远不会被 bypass 的危险操作模式
+  private static readonly NEVER_BYPASS_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+    { pattern: /rm\s+-rf\b/, label: 'Recursive force delete' },
+    { pattern: />\s*\/dev\//, label: 'Write to device' },
+    { pattern: /mkfs\./, label: 'Filesystem format' },
+    { pattern: /dd\s+if=/, label: 'Disk copy' },
+    { pattern: /chmod\s+777/, label: 'World-writable permissions' },
+    { pattern: /:\(\)\s*\{\s*:\|:&\s*\};:/, label: 'Fork bomb' },
+    { pattern: /sudo\s+su\b/, label: 'Switch to root' },
+  ];
+
   // 等待权限确认（串行处理）
   async waitForPermission(reason: string): Promise<boolean> {
-    // 如果bypass模式开启，自动批准
-    if (this.bypassPermissions) {
+    // 检查是否为永不 bypass 的危险操作
+    for (const { pattern, label } of SpicaAgent.NEVER_BYPASS_PATTERNS) {
+      if (pattern.test(reason)) {
+        // 危险操作：即使在 bypass 模式也强制请求权限
+        break;
+      }
+    }
+
+    // 如果bypass模式开启且不在永不bypass列表中，自动批准
+    const isNeverBypass = SpicaAgent.NEVER_BYPASS_PATTERNS.some(p => p.pattern.test(reason));
+    if (this.bypassPermissions && !isNeverBypass) {
       this.auditLog('BYPASS_APPROVED', reason);
       this.emit('permission_bypassed', { reason });
       return true;
@@ -1249,9 +1269,20 @@ async init() {
 
     // 用 LLM 生成摘要（如果还有旧消息）
     // Safety: if kept messages alone exceed 70% of target, reduce until they fit
+    const MAX_COMPACT_ITERATIONS = 5;
     let safetyTruncated = [...truncatedRecent];
     let safetyTokens = tokenCounter.estimateMessages(safetyTruncated);
+    let compactIterations = 0;
     while (safetyTokens > targetTokens * 0.7 && safetyTruncated.length > 2) {
+      compactIterations++;
+      if (compactIterations > MAX_COMPACT_ITERATIONS) {
+        this.emit('context_warning', {
+          level: 'warning',
+          usage: 100,
+          message: `Compact loop exceeded ${MAX_COMPACT_ITERATIONS} iterations. Keeping remaining messages.`,
+        });
+        break;
+      }
       safetyTruncated.shift();
       safetyTokens = tokenCounter.estimateMessages(safetyTruncated);
     }

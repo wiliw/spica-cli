@@ -29,7 +29,8 @@ export function saveHistory(history: ChatMessage[]): void {
   try {
     ensureHistoryDir();
     const trimmed = history.slice(-MAX_HISTORY);
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(trimmed, null, 2));
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(trimmed, null, 2), { mode: 0o600 });
+    fs.chmodSync(HISTORY_FILE, 0o600);
   } catch (error) {
     // Failed to save history - non-critical
   }
