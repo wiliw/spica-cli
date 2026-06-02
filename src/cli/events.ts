@@ -9,25 +9,34 @@ import { getRuntimeState } from '../core/RuntimeState';
 const screen = getScreenManager();
 const state = getRuntimeState();
 
-// 构建状态栏文本（含上下文占用）
+// 构建状态栏文本（模型 | 模式 | 工作区）
 function buildStatusText(
   agent: SpicaAgent,
   model: string | undefined,
-  bypassMode: boolean,
-  tokenCounter: TokenCounter
+  bypassMode: boolean
 ): string {
   const modeLabel = bypassMode ? 'BYPASS' : 'STRICT';
   const modeColor = bypassMode ? '\x1b[33m' : '\x1b[32m';
 
-  const messages = agent.getMessages();
-  const usedTokens = tokenCounter.estimateMessages(messages);
-  const contextWindow = tokenCounter.getContextWindow() || 128000;
-  const percent = Math.min(99, Math.floor(usedTokens / contextWindow * 100));
-  const usedK = usedTokens >= 1000 ? `${Math.floor(usedTokens / 1000)}k` : String(usedTokens);
-  const maxK = contextWindow >= 1000 ? `${Math.floor(contextWindow / 1000)}k` : String(contextWindow);
-  const pctColor = percent >= 80 ? '\x1b[31m' : percent >= 60 ? '\x1b[33m' : '\x1b[32m';
+  // 工作区路径显示（智能缩写）
+  const workspace = agent.getWorkspacePath();
+  const homeDir = require('os').homedir();
+  let displayPath = workspace;
 
-  return `${model || '?'} | ${modeColor}${modeLabel}\x1b[0m | ${pctColor}${percent}%\x1b[0m ${usedK}/${maxK}`;
+  // 缩写用户目录为 ~
+  if (workspace.startsWith(homeDir)) {
+    displayPath = '~' + workspace.slice(homeDir.length);
+  }
+
+  // 路径过长时显示最后两级
+  if (displayPath.length > 30) {
+    const parts = displayPath.split(/[/\\]/);
+    if (parts.length > 2) {
+      displayPath = '...' + parts.slice(-2).join('/');
+    }
+  }
+
+  return `${model || '?'} | ${modeColor}${modeLabel}\x1b[0m | ${displayPath}`;
 }
 
 function formatArgs(args: Record<string, any>): string {
@@ -238,15 +247,15 @@ export function setupAgentEvents(
       : '[STRICT] Permission mode activated';
     const color = data.enabled ? COLORS.warning : COLORS.success;
     screen.appendScroll(color(`\n${msg}\n`));
-    if (model && tokenCounter) {
-      screen.setStatus(buildStatusText(agent, model, data.enabled, tokenCounter));
+    if (model) {
+      screen.setStatus(buildStatusText(agent, model, data.enabled));
     }
   });
 
-  // 工具执行完成后刷新状态栏（更新上下文占用）
+  // 工具执行完成后刷新状态栏（更新工作区等）
   agent.on('tool_result', () => {
-    if (model && tokenCounter) {
-      screen.setStatus(buildStatusText(agent, model, state.isBypassMode(), tokenCounter));
+    if (model) {
+      screen.setStatus(buildStatusText(agent, model, state.isBypassMode()));
     }
   });
 

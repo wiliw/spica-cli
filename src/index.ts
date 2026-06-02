@@ -162,27 +162,37 @@ program
       });
 
       // 显示状态栏（简洁版）
-      // 获取上下文窗口大小
+      // 状态栏：模型 | 模式 | 工作区（智能缩写长路径）
+      const updateStatusBar = () => {
+        const modeLabel = state.isBypassMode() ? '\x1b[33mBYPASS\x1b[0m' : '\x1b[32mSTRICT\x1b[0m';
+
+        // 工作区路径显示（Windows 下缩写长路径）
+        const workspace = agent.getWorkspacePath();
+        const homeDir = require('os').homedir();
+        let displayPath = workspace;
+
+        // 缩写用户目录为 ~（跨平台）
+        if (workspace.startsWith(homeDir)) {
+          displayPath = '~' + workspace.slice(homeDir.length);
+        }
+
+        // Windows 下如果路径仍太长（超过 30 字符），显示最后两级目录
+        if (displayPath.length > 30) {
+          const parts = displayPath.split(/[/\\]/);
+          if (parts.length > 2) {
+            displayPath = '...' + parts.slice(-2).join('/');
+          }
+        }
+
+        screen.setStatus(`${providerConfig.model} | ${modeLabel} | ${displayPath}`);
+      };
+      updateStatusBar();
+
+      // TokenCounter 用于结束统计显示
       const provider = agent.getLLM()?.getProvider();
       const contextWindow = provider?.getContextWindow() || 128000;
       const tokenCounter = new TokenCounter();
       tokenCounter.setContextWindow(contextWindow);
-
-      const updateStatusBar = () => {
-        // 计算上下文占用
-        const messages = agent.getMessages();
-        const usedTokens = tokenCounter.estimateMessages(messages);
-        const percent = Math.min(99, Math.floor(usedTokens / contextWindow * 100));
-        const usedK = usedTokens >= 1000 ? `${Math.floor(usedTokens / 1000)}k` : String(usedTokens);
-        const maxK = contextWindow >= 1000 ? `${Math.floor(contextWindow / 1000)}k` : String(contextWindow);
-
-        // 颜色：绿色 <60%，黄色 60-80%，红色 >80%
-        const pctColor = percent >= 80 ? '\x1b[31m' : percent >= 60 ? '\x1b[33m' : '\x1b[32m';
-        const modeLabel = state.isBypassMode() ? '\x1b[33mBYPASS\x1b[0m' : '\x1b[32mSTRICT\x1b[0m';
-
-        screen.setStatus(`${providerConfig.model} | ${modeLabel} | ${pctColor}${percent}%\x1b[0m ${usedK}/${maxK}`);
-      };
-      updateStatusBar();
 
       // 设置 Ctrl+O 切换回调
       screen.setVerboseToggleCallback(() => {
