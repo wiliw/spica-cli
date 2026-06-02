@@ -13,6 +13,8 @@ import {
 import { MCPServerConfig } from './utils/settings';
 import { loadSession, saveSession } from './utils/session';
 import { parseSkillInput, getSkill, buildSkillPrompt, listSkills, installSkill, uninstallSkill, listInstalledPackages, saveSkill, deleteSkill } from './skills';
+import { exec } from 'child_process';
+import os from 'os';
 
 import { getMCPManager, generateExampleConfig, shutdownMCP } from './mcp/client';
 import { COLORS, format, BG } from './cli/ui/colors';
@@ -35,6 +37,25 @@ const program = new Command();
 const state = getRuntimeState();
 const screen = getScreenManager();
 const ESC = '\x1b';
+
+// 提示音函数（跨平台）
+const BELL_ENABLED = process.env.SPICA_BELL !== 'false';
+function playBell(reason: 'done' | 'error'): void {
+  if (!BELL_ENABLED) return;
+
+  const platform = os.platform();
+  if (platform === 'linux') {
+    const sounds: Record<string, string> = {
+      done: '/usr/share/sounds/freedesktop/stereo/complete.oga',
+      error: '/usr/share/sounds/freedesktop/stereo/dialog-error.oga',
+    };
+    exec(`paplay ${sounds[reason]} 2>/dev/null || true`);
+  } else if (platform === 'darwin') {
+    exec(`afplay /System/Library/Sounds/Glass.aiff 2>/dev/null || true`);
+  } else if (platform === 'win32') {
+    exec(`powershell -c "(New-Object Media.SoundPlayer 'C:\\Windows\\Media\\notify.wav').PlaySync()" 2>/dev/null || true`);
+  }
+}
 
 // Ctrl+C中断处理（SIGINT - 在非 raw mode 或特殊情况下触发）
 let interruptCount = 0;
@@ -660,17 +681,11 @@ Start the analysis, execute step by step, then output the document.`;
                 await agent.runLoop(prompt);
                 screen.setStreaming(false);
                 screen.appendScroll(COLORS.success('\n[OK] Done\n'));
-                // 工作完成提示音
-                if (process.env.SPICA_BELL !== 'false') {
-                  process.stdout.write('\x07');
-                }
+                playBell('done');  // 工作完成提示音
               } catch (error: any) {
                 screen.setStreaming(false);
                 screen.appendScroll(COLORS.error(`\n[ERR] ${error.message}\n`));
-                // 错误提示音
-                if (process.env.SPICA_BELL !== 'false') {
-                  process.stdout.write('\x07\x07');  // 两声表示错误
-                }
+                playBell('error');  // 错误提示音
               }
               screen.restoreCursor();
               screen.refreshInput();

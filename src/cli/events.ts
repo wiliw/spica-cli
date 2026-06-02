@@ -5,20 +5,39 @@ import { TokenCounter } from '../llm/TokenCounter';
 import prompts from 'prompts';
 import { getRuntimeState } from '../core/RuntimeState';
 import os from 'os';
+import { exec } from 'child_process';
 
 
 const screen = getScreenManager();
 const state = getRuntimeState();
 
-// Terminal bell sound (可配置开关)
-const BELL_ENABLED = process.env.SPICA_BELL !== 'false';  // 默认开启，设置 SPICA_BELL=false 关闭
+// 提示音配置（默认开启）
+const BELL_ENABLED = process.env.SPICA_BELL !== 'false';
 function bell(reason: 'permission' | 'done' | 'error'): void {
-  if (BELL_ENABLED) {
-    process.stdout.write('\x07');  // Terminal bell
-    // 可选：根据reason不同声音（需要系统支持）
-    // permission: 急促提示
-    // done: 完成提示
-    // error: 错误提示
+  if (!BELL_ENABLED) return;
+
+  // 尝试播放系统声音
+  const platform = os.platform();
+
+  if (platform === 'linux') {
+    // Linux: paplay 或 notify-send
+    const sounds: Record<string, string> = {
+      permission: '/usr/share/sounds/freedesktop/stereo/bell.oga',
+      done: '/usr/share/sounds/freedesktop/stereo/complete.oga',
+      error: '/usr/share/sounds/freedesktop/stereo/dialog-error.oga',
+    };
+    const soundFile = sounds[reason];
+    if (soundFile) {
+      exec(`paplay ${soundFile} 2>/dev/null || true`);
+    } else {
+      exec(`notify-send 'spica' '${reason === 'permission' ? '需要确认' : reason === 'done' ? '完成' : '错误'}' --urgency=normal 2>/dev/null || true`);
+    }
+  } else if (platform === 'darwin') {
+    // macOS: afplay
+    exec(`afplay /System/Library/Sounds/Glass.aiff 2>/dev/null || true`);
+  } else if (platform === 'win32') {
+    // Windows: 使用 PowerShell 播放系统声音
+    exec(`powershell -c "(New-Object Media.SoundPlayer 'C:\\Windows\\Media\\notify.wav').PlaySync()" 2>/dev/null || true`);
   }
 }
 
