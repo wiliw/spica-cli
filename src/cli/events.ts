@@ -64,23 +64,30 @@ export function setupAgentEvents(
   interactive: boolean = false,
   model?: string,
   tokenCounter?: TokenCounter
-): void {
+): () => void {
+  // 收集所有注册的监听器，用于 cleanup
+  const listeners: Array<{ event: string; handler: (...args: any[]) => void }> = [];
+  const on = (event: string, handler: (...args: any[]) => void) => {
+    agent.on(event, handler);
+    listeners.push({ event, handler });
+  };
+
   // 追踪 reasoning 状态
   let reasoningStarted = false;
   let justSwitchedFromReasoning = false;
 
   // 每次新对话开始时重置 reasoning 状态
-  agent.on('waiting_for_llm', () => {
+  on('waiting_for_llm', () => {
     reasoningStarted = false;
     justSwitchedFromReasoning = false;
   });
 
-  agent.on('connection_error', (data: any) => {
+  on('connection_error', (data: any) => {
     state.setConnectionErrorShown(true);
     screen.appendScroll(COLORS.error(`\n[ERR] ${data.type}: ${data.hint}\n`));
   });
 
-  agent.on('stream', (data: any) => {
+  on('stream', (data: any) => {
 
     // 从 reasoning 切换到 stream 时，加分隔线
     if (reasoningStarted && !justSwitchedFromReasoning) {
@@ -100,7 +107,7 @@ export function setupAgentEvents(
     screen.appendScroll(COLORS.primary(data.chunk));
   });
 
-  agent.on('reasoning', (data: any) => {
+  on('reasoning', (data: any) => {
     // 只在第一次显示 thinking 提示
     if (!reasoningStarted) {
       reasoningStarted = true;
@@ -122,7 +129,7 @@ export function setupAgentEvents(
     }
   });
 
-  agent.on('tool_call', (data: any) => {
+  on('tool_call', (data: any) => {
     state.setStreamingOutput(false);
     screen.setStreaming(false);
     // 从reasoning切换到tool_call时，需要换行
@@ -138,7 +145,7 @@ export function setupAgentEvents(
 
   });
 
-  agent.on('tool_result', (data: any) => {
+  on('tool_result', (data: any) => {
     state.setStreamingOutput(false);
     screen.setStreaming(false);
     const icon = data.success ? '✓' : '✗';
@@ -176,13 +183,13 @@ export function setupAgentEvents(
   });
 
   // Diff预览（文件编辑时显示详细diff）
-  agent.on('diff_preview', (data: any) => {
+  on('diff_preview', (data: any) => {
     screen.appendScroll(COLORS.file(`\n[DIFF] ${data.filePath}\n`));
     screen.appendScroll(data.diff + '\n');
     screen.restoreCursor();
   });
 
-  agent.on('permission_request', async (data: any) => {
+  on('permission_request', async (data: any) => {
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(false);
       process.stdin.pause();
@@ -227,21 +234,21 @@ export function setupAgentEvents(
     }
   });
 
-  agent.on('error_suggestion', (data: any) => {
+  on('error_suggestion', (data: any) => {
     screen.appendScroll(COLORS.warning(`\n[HINT] ${data.suggestion}\n`));
   });
 
-  agent.on('retry_attempt', (data: any) => {
+  on('retry_attempt', (data: any) => {
     screen.appendScroll(COLORS.muted(`\n[RETRY] ${data.operation} attempt ${data.attempt}/${data.maxRetries} in ${Math.floor(data.delay/1000)}s...\n`));
     screen.appendScroll(COLORS.muted(`  Error: ${data.error}\n`));
     screen.restoreCursor();
   });
 
-  agent.on('workspace_changed', (data: any) => {
+  on('workspace_changed', (data: any) => {
     screen.appendScroll(COLORS.file(`\n[DIR] Workspace: ${data.path}\n`));
   });
 
-  agent.on('bypass_changed', (data: { enabled: boolean }) => {
+  on('bypass_changed', (data: { enabled: boolean }) => {
     state.setBypassMode(data.enabled);
     const msg = data.enabled
       ? '[BYPASS] Auto-approve mode activated'
@@ -254,67 +261,67 @@ export function setupAgentEvents(
   });
 
   // 工具执行完成后刷新状态栏（更新工作区等）
-  agent.on('tool_result', () => {
+  on('tool_result', () => {
     if (model) {
       screen.setStatus(buildStatusText(agent, model, state.isBypassMode()));
     }
   });
 
-  agent.on('permission_bypassed', (data: any) => {
+  on('permission_bypassed', (data: any) => {
     screen.appendScroll(COLORS.bypassAuto(`\n[AUTO] Approved: ${data.reason}\n`));
   });
 
-  agent.on('sub_agent_start', (data: any) => {
+  on('sub_agent_start', (data: any) => {
     screen.appendScroll(COLORS.subAgent(`\n  [${data.type || 'sub'}] ${data.description}\n`));
   });
 
-  agent.on('sub_agent_tool_call', (data: any) => {
+  on('sub_agent_tool_call', (data: any) => {
     screen.appendScroll(COLORS.subAgent(`    -> [sub] ${data.name}\n`));
   });
 
-  agent.on('sub_agent_tool_result', (data: any) => {
+  on('sub_agent_tool_result', (data: any) => {
     const icon = data.success ? COLORS.success('[OK]') : COLORS.error('[ERR]');
     screen.appendScroll(COLORS.subAgent(`    ${icon} [sub] ${data.name}\n`));
   });
 
-  agent.on('sub_agent_done', (data: any) => {
+  on('sub_agent_done', (data: any) => {
     screen.appendScroll(COLORS.success(`\n  [OK] [sub] Done: ${data.summary}\n`));
   });
 
-  agent.on('sub_agent_error', (data: any) => {
+  on('sub_agent_error', (data: any) => {
     screen.appendScroll(COLORS.error(`\n  [ERR] [sub] Error: ${data.error}\n`));
   });
 
-  agent.on('hook_blocked', (data: any) => {
+  on('hook_blocked', (data: any) => {
     screen.appendScroll(COLORS.error(`\n[BLOCKED] ${data.tool} - ${data.reason}\n`));
   });
 
-  agent.on('hook_warning', (data: any) => {
+  on('hook_warning', (data: any) => {
     screen.appendScroll(COLORS.warning(`\n[WARN] ${data.message}\n`));
   });
 
-  agent.on('hook_log', (data: any) => {
+  on('hook_log', (data: any) => {
     screen.appendScroll(COLORS.muted(`\n[LOG] ${data.message}\n`));
   });
 
-  agent.on('pending_input_detected', (data: any) => {
+  on('pending_input_detected', (data: any) => {
     screen.appendScroll(COLORS.warning(`\n[NEW INPUT] Detected during tool execution\n`));
     screen.appendScroll(COLORS.muted(`  ${data.input}\n`));
     screen.restoreCursor();
     screen.refreshInput();
   });
 
-agent.on('tool_stuck_warning', (data: any) => {
+  on('tool_stuck_warning', (data: any) => {
     screen.appendScroll(COLORS.warning(`\n[STUCK] ${data.tool}: stalled ${data.elapsedMs / 1000}s. Auto-aborting and retrying with alternative strategy...\n`));
   });
 
-  agent.on('tool_aborted', (data: any) => {
+  on('tool_aborted', (data: any) => {
     screen.appendScroll(COLORS.warning(`\n[ABORT] ${data.tool} 已中断\n`));
     screen.restoreCursor();
     screen.refreshInput();
   });
 
-  agent.on('agent_interrupted', (data: any) => {
+  on('agent_interrupted', (data: any) => {
     // 重置流式状态
     state.setStreamingOutput(false);
     screen.setStreaming(false);
@@ -327,7 +334,7 @@ agent.on('tool_stuck_warning', (data: any) => {
     screen.refreshInput();
   });
 
-  agent.on('agent_stopped_on_error', (data: any) => {
+  on('agent_stopped_on_error', (data: any) => {
     screen.appendScroll(COLORS.error(`\n[STOPPED] Agent stopped due to critical error.\n`));
     screen.appendScroll(COLORS.muted(`  Error: ${data.error || 'Unknown'}\n`));
     screen.appendScroll(COLORS.muted(`  Tool: ${data.tool || 'Unknown'}\n`));
@@ -337,13 +344,13 @@ agent.on('tool_stuck_warning', (data: any) => {
   });
 
   // Todo progress display
-  agent.on('todos_set', (todos: any[]) => {
+  on('todos_set', (todos: any[]) => {
     if (todos.length > 0) {
       displayTodoProgress(todos);
     }
   });
 
-  agent.on('todo_update', (data: any) => {
+  on('todo_update', (data: any) => {
     if (data.todos && data.todos.length > 0) {
       displayTodoProgress(data.todos);
     }
@@ -373,7 +380,7 @@ agent.on('tool_stuck_warning', (data: any) => {
     screen.refreshInput();
   }
 
-  agent.on('context_compressed', (data: any) => {
+  on('context_compressed', (data: any) => {
     const formatTokens = (t: number) => t >= 1000 ? `${Math.floor(t/1000)}k` : `${t}`;
     const tokensInfo = data.tokensBefore && data.tokensAfter
       ? ` (${formatTokens(data.tokensBefore)} -> ${formatTokens(data.tokensAfter)} tokens)`
@@ -381,6 +388,14 @@ agent.on('tool_stuck_warning', (data: any) => {
     screen.appendScroll(COLORS.secondary(`\n[COMPRESS] ${data.message || `${data.before} -> ${data.after} messages`}${tokensInfo}\n`));
     screen.restoreCursor();
   });
+
+  // 返回 cleanup 函数：移除所有注册的监听器
+  return () => {
+    for (const { event, handler } of listeners) {
+      agent.off(event, handler);
+    }
+    listeners.length = 0;
+  };
 }
 
 // 格式化运行统计（耗时 + token 用量）
