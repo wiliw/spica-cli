@@ -1098,6 +1098,36 @@ async init() {
             
             if (this.llm) {
               const allMessages = this.llm.getMessages();
+
+              // 找到最后一个assistant with toolCalls，检查是否有对应的tool messages
+              let lastAssistantWithToolCalls: number = -1;
+              for (let i = allMessages.length - 1; i >= 0; i--) {
+                const m = allMessages[i];
+                if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+                  lastAssistantWithToolCalls = i;
+                  break;
+                }
+              }
+
+              // 如果最后一个assistant有toolCalls但没有对应的tool messages，去掉它的toolCalls
+              if (lastAssistantWithToolCalls >= 0) {
+                const lastMsg = allMessages[lastAssistantWithToolCalls];
+                const tc = lastMsg.toolCalls;
+                if (tc) {
+                  const expectedIds = tc.map(t => t.id);
+                  // 检查后面是否有对应的tool messages
+                  const toolMessagesAfter = allMessages.slice(lastAssistantWithToolCalls + 1).filter(m => m.role === 'tool');
+                  const foundIds = toolMessagesAfter.map(m => m.toolCallId || '');
+                  const hasAllToolMessages = expectedIds.every(id => foundIds.includes(id));
+
+                  if (!hasAllToolMessages) {
+                    // 去掉这个assistant的toolCalls
+                    allMessages[lastAssistantWithToolCalls] = { ...lastMsg, toolCalls: undefined };
+                  }
+                }
+              }
+
+              // 清理所有tool messages（保持一致性）
               const cleanedMessages = allMessages.map(m => {
                 if (m.role === 'assistant' && m.toolCalls) {
                   return { role: 'assistant', content: m.content || '' };
