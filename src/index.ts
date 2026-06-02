@@ -783,6 +783,17 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
           isProcessing = true;
           state.setProcessing(true);
 
+          // 设置队列输入回调，让 agent 在迭代间隙获取队列输入
+          agent.setQueueInputCallback(() => {
+            const queue = getInputQueue();
+            if (queue.hasPending()) {
+              const merged = queue.mergePending();
+              screen.appendScroll(COLORS.muted(`[QUEUE] Injected during iteration\n`));
+              return merged;
+            }
+            return null;
+          });
+
           // 显示处理状态（心跳由 waiting_for_llm 事件自动启动）
           screen.appendScroll(
             COLORS.muted("Processing... (ESC ESC to interrupt)\n"),
@@ -822,9 +833,13 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
           screen.refreshInput();
           isProcessing = false;
           state.setProcessing(false);
+          
+          // 清理队列输入回调
+          agent.setQueueInputCallback(null);
+          
           saveSession(process.cwd(), agent.getMessages());
 
-          // Auto-drain queued inputs
+          // Auto-drain remaining queued inputs（处理未被注入的剩余队列）
           await autoDrainQueue(getInputQueue(), async (merged) => {
             await handleInput(merged);
           });

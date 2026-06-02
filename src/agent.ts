@@ -72,6 +72,9 @@ export class SpicaAgent extends EventEmitter {
 
   // 待处理的新输入（用于在工具执行间隙插入新指令）
   private pendingInput: string | null = null;
+  
+  // 队列输入注入回调（由 CLI 设置，用于在迭代间隙获取队列输入）
+  private queueInputCallback: (() => string | null) | null = null;
 
   // 工具白名单（用于限制subagent工具访问）
   private toolWhitelist: string[] | null = null;
@@ -304,6 +307,19 @@ export class SpicaAgent extends EventEmitter {
 
   // 获取待处理的新输入
   getPendingInput(): string | null {
+    return this.pendingInput;
+  }
+
+  // 设置队列输入回调（由 CLI 设置，用于在迭代间隙获取队列输入）
+  setQueueInputCallback(callback: (() => string | null) | null): void {
+    this.queueInputCallback = callback;
+  }
+
+  // 检查并获取队列输入
+  checkQueueInput(): string | null {
+    if (this.queueInputCallback) {
+      return this.queueInputCallback();
+    }
     return this.pendingInput;
   }
 
@@ -1071,6 +1087,16 @@ async init() {
           role: 'system' as const,
           content: `REQUIRED_SKILL: ${refName}`
         }));
+
+        // 🔄 队列注入点：在工具完成后检查是否有新输入
+        const queuedInput = this.checkQueueInput();
+        if (queuedInput) {
+          this.emit('queue_injected', { content: queuedInput.slice(0, 50) + '...' });
+          // 将队列输入作为新的 user message 注入
+          this.llm!.addMessage({ role: 'user', content: queuedInput });
+          // 清空 pendingInput
+          this.pendingInput = null;
+        }
 
         // 所有工具完成后，一次性发送所有结果给LLM继续生成
         if (toolResults.length > 0) {
