@@ -201,6 +201,9 @@ export class SpicaAgent extends EventEmitter {
 
   // 处理权限队列
   private async processPermissionQueue(): Promise<void> {
+    // Gate: 防止并发处理循环
+    if (this.permissionPending) return;
+    
     while (this.permissionQueue.length > 0 && !this.interruptFlag) {
       this.permissionPending = true;
       const request = this.permissionQueue.shift()!;
