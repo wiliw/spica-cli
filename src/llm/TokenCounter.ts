@@ -1,5 +1,7 @@
 export class TokenCounter {
   private static readonly AVERAGE_CHARS_PER_TOKEN = 4;
+  private static readonly CJK_CHARS_PER_TOKEN = 1.5;
+  private static readonly CODE_CHARS_PER_TOKEN = 3;
   private contextWindow: number = 128000;  // 默认值，可动态设置
 
   setContextWindow(size: number): void {
@@ -10,8 +12,40 @@ export class TokenCounter {
     return this.contextWindow;
   }
 
+  private detectContentType(text: string): 'cjk' | 'code' | 'prose' {
+    let cjkCount = 0;
+    let codeIndicators = 0;
+
+    for (const char of text) {
+      const code = char.charCodeAt(0);
+      // CJK Unified Ideographs, Hiragana, Katakana, Hangul
+      if (
+        (code >= 0x4E00 && code <= 0x9FFF) ||
+        (code >= 0x3040 && code <= 0x309F) ||
+        (code >= 0x30A0 && code <= 0x30FF) ||
+        (code >= 0xAC00 && code <= 0xD7AF)
+      ) {
+        cjkCount++;
+      }
+    }
+
+    // Code indicators: braces, semicolons, arrows, dots
+    const codePatterns = /[{}();=><\[\].]/g;
+    const codeMatches = text.match(codePatterns);
+    if (codeMatches) codeIndicators = codeMatches.length;
+
+    if (cjkCount > text.length * 0.3) return 'cjk';
+    if (codeIndicators > text.length * 0.05) return 'code';
+    return 'prose';
+  }
+
   estimateTokens(text: string): number {
-    return Math.ceil(text.length / TokenCounter.AVERAGE_CHARS_PER_TOKEN);
+    const type = this.detectContentType(text);
+    const charsPerToken =
+      type === 'cjk' ? TokenCounter.CJK_CHARS_PER_TOKEN :
+      type === 'code' ? TokenCounter.CODE_CHARS_PER_TOKEN :
+      TokenCounter.AVERAGE_CHARS_PER_TOKEN;
+    return Math.ceil(text.length / charsPerToken);
   }
 
   // 估算单条消息的 tokens（包括 toolCalls 等结构）

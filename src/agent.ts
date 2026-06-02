@@ -36,6 +36,13 @@ export interface ProjectConfig {
   constraints?: string[];
 }
 
+export class InterruptError extends Error {
+  constructor(message = 'Interrupted by user') {
+    super(message);
+    this.name = 'InterruptError';
+  }
+}
+
 export class SpicaAgent extends EventEmitter {
   private llm: LLMClient | null = null;
 
@@ -134,6 +141,8 @@ export class SpicaAgent extends EventEmitter {
         { pattern: 'init 0', name: '关机' },
         { pattern: 'mkswap', name: '格式化交换分区' },
         { pattern: 'fdisk', name: '磁盘分区操作' },
+      { pattern: 'doas ', name: '使用doas权限' },
+      { pattern: 'run0 ', name: '使用run0权限' },
       ];
 
       for (const { pattern, name } of dangerousPatterns) {
@@ -549,6 +558,11 @@ private matchSkill(prompt: string): SkillDefinition | null {
       try {
         return await operation();
       } catch (error: any) {
+        // InterruptError: don't retry, propagate immediately
+        if (error instanceof InterruptError || error.name === 'InterruptError') {
+          throw error;
+        }
+
         lastError = error;
 
         // 最后一次尝试不再重试
@@ -606,9 +620,12 @@ async init() {
     if (this._initPromise) return this._initPromise;
     
     this._initPromise = this._doInit();
-    await this._initPromise;
-    this._initialized = true;
-    this._initPromise = null;
+    try {
+      await this._initPromise;
+      this._initialized = true;
+    } finally {
+      this._initPromise = null;
+    }
   }
   
   private async _doInit(): Promise<void> {

@@ -107,7 +107,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
       apiKey: config.apiKey,
       baseURL: config.baseUrl,
       timeout: 60000,  // 60秒超时 (优化)
-      maxRetries: 1,
+      maxRetries: 0,  // Spica handles retries via callLLMWithRetry
     });
   }
 
