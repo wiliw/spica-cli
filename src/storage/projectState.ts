@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { ChatMessage } from '../llm/providers/BaseProvider';
 
 export interface ProjectState {
   phase: 'mvp' | 'cycle' | 'archive' | 'unknown';
@@ -92,7 +93,7 @@ export function setProjectPhase(workspacePath: string, phase: ProjectState['phas
   saveProjectState(workspacePath, state);
 }
 
-export function loadProjectContext(workspacePath: string): any[] {
+export function loadProjectContext(workspacePath: string): ChatMessage[] {
   try {
     const contextPath = path.join(workspacePath, CONTEXT_FILE);
     if (fs.existsSync(contextPath)) {
@@ -106,7 +107,7 @@ export function loadProjectContext(workspacePath: string): any[] {
   return [];
 }
 
-export function saveProjectContext(workspacePath: string, messages: any[]): void {
+export function saveProjectContext(workspacePath: string, messages: ChatMessage[]): void {
   try {
     ensureProjectDir(workspacePath);
     const contextPath = path.join(workspacePath, CONTEXT_FILE);

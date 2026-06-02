@@ -177,13 +177,21 @@ export function initFixedInputBox(initialStatus?: {
   showPrompt();
 }
 
+interface Status {
+  model?: string;
+  mode?: 'bypass' | 'strict';
+  processing?: boolean;
+  queue?: number;
+  message?: string;
+}
+
 // 处理终端 resize
-export function handleResize(status?: any): void {
+export function handleResize(status?: Status): void {
   initFixedInputBox(status);
 }
 
 // 监听 resize 事件
-export function watchResize(getStatus: () => any): void {
+export function watchResize(getStatus: () => Status): void {
   process.stdout.on('resize', () => {
     handleResize(getStatus());
   });

@@ -3,7 +3,7 @@
 import { SpicaAgent } from '../agent';
 
 interface ProviderConfig {
-  provider: string;
+  provider?: string;
   apiKey: string;
   model: string;
   baseUrl?: string;

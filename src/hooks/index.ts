@@ -88,7 +88,7 @@ function loadGlobalSettingsSync(): { hooks?: { PreToolUse?: HookDefinition[]; Po
 }
 
 // 检查匹配
-function matchesMatcher(toolName: string, args: Record<string, any>, matcher: HookMatcher): boolean {
+function matchesMatcher(toolName: string, args: Record<string, unknown>, matcher: HookMatcher): boolean {
   // 检查工具名匹配
   if (matcher.tool) {
     const toolPattern = matcher.tool || '';
@@ -118,7 +118,7 @@ function matchesMatcher(toolName: string, args: Record<string, any>, matcher: Ho
 }
 
 // 执行PreToolUse hooks
-export function runPreHooks(toolName: string, args: Record<string, any>): HookResult {
+export function runPreHooks(toolName: string, args: Record<string, unknown>): HookResult {
   const safeArgs = args || {};  // 保护 args 参数
   const hooks = loadHooks();
   const preHooks = hooks.hooks.PreToolUse || [];
@@ -137,7 +137,7 @@ export function runPreHooks(toolName: string, args: Record<string, any>): HookRe
 }
 
 // 执行PostToolUse hooks（返回日志消息）
-export function runPostHooks(toolName: string, args: Record<string, any>, _result: any): string | null {
+export function runPostHooks(toolName: string, args: Record<string, unknown>, _result: unknown): string | null {
   const safeArgs = args || {};  // 保护 args 参数
   const hooks = loadHooks();
   const postHooks = hooks.hooks.PostToolUse || [];

@@ -1,7 +1,7 @@
 import { ToolCall } from './providers/BaseProvider';
 import { ToolResult } from '../tools/index';
 
-export type ToolExecutor = (name: string, args: Record<string, any>) => Promise<ToolResult>;
+export type ToolExecutor = (name: string, args: Record<string, unknown>) => Promise<ToolResult>;
 
 export class FunctionCaller {
   private toolExecutors: Map<string, ToolExecutor> = new Map();
@@ -27,10 +27,11 @@ export class FunctionCaller {
 
     try {
       return await executor(toolCall.name, toolCall.arguments);
-    } catch (error: any) {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       return {
         success: false,
-        error: error.message || String(error),
+        error: message,
       };
     }
   }

@@ -43,7 +43,19 @@ function loadLearnings(workspacePath: string): string {
   }
 }
 
-export function getSystemPrompt(projectConfig?: any, skillsMetadata?: string, workspacePath?: string): string {
+interface ProjectConfig {
+  rawContent?: string;
+  type?: string;
+  language?: string;
+  framework?: string;
+  commands?: {
+    build?: string;
+    test?: string;
+  };
+  constraints?: string[];
+}
+
+export function getSystemPrompt(projectConfig?: ProjectConfig, skillsMetadata?: string, workspacePath?: string): string {
   let prompt = SYSTEM_PROMPT;
 
   // Project context - inject full AGENTS.md content
@@ -62,7 +74,7 @@ export function getSystemPrompt(projectConfig?: any, skillsMetadata?: string, wo
         prompt += `\nCommands: build=${projectConfig.commands.build || 'N/A'}, test=${projectConfig.commands.test || 'N/A'}`;
       }
 
-      if (projectConfig.constraints?.length > 0) {
+      if (projectConfig.constraints && projectConfig.constraints.length > 0) {
         prompt += `\nConstraints: ${projectConfig.constraints.slice(0, 3).join(', ')}`;
       }
     }

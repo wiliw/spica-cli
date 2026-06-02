@@ -103,7 +103,6 @@ interface HookLogData {
   message: string;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
 interface BypassChangedData {
   enabled: boolean;
 }
@@ -223,7 +222,7 @@ function buildStatusText(
   return `${model || '?'} | ${modeColor}${modeLabel}\x1b[0m | ${displayPath}`;
 }
 
-function formatArgs(args: Record<string, any>): string {
+function formatArgs(args: Record<string, unknown>): string {
   if (!args || Object.keys(args).length === 0) return '';
   const keys = Object.keys(args);
   const parts = keys.map(k => {
@@ -292,7 +291,7 @@ export function setupAgentEvents(
     screen.appendScroll(COLORS.primary(data.chunk));
   });
 
-  on('reasoning', (data: any) => {
+  on('reasoning', (data: ReasoningData) => {
     // 只在第一次显示 thinking 提示
     if (!reasoningStarted) {
       reasoningStarted = true;
@@ -314,7 +313,7 @@ export function setupAgentEvents(
     }
   });
 
-  on('tool_call', (data: any) => {
+  on('tool_call', (data: ToolCallData) => {
     state.setStreamingOutput(false);
     screen.setStreaming(false);
     // 从reasoning切换到tool_call时，需要换行
@@ -434,7 +433,7 @@ export function setupAgentEvents(
     screen.appendScroll(COLORS.file(`\n[DIR] Workspace: ${data.path}\n`));
   });
 
-  on('bypass_changed', (data: { enabled: boolean }) => {
+  on('bypass_changed', (data: BypassChangedData) => {
     state.setBypassMode(data.enabled);
     const msg = data.enabled
       ? '[BYPASS] Auto-approve mode activated'
@@ -531,7 +530,7 @@ export function setupAgentEvents(
   });
 
   // Todo progress display
-  on('todos_set', (todos: any[]) => {
+  on('todos_set', (todos: TodoUpdateData['todos']) => {
     if (todos.length > 0) {
       displayTodoProgress(todos);
     }
@@ -543,7 +542,7 @@ export function setupAgentEvents(
     }
   });
 
-  function displayTodoProgress(todos: any[]) {
+  function displayTodoProgress(todos: TodoUpdateData['todos']) {
     const statusIcons: Record<string, string> = {
       'completed': '✔',
       'in_progress': '◼',
