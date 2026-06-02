@@ -19,14 +19,19 @@ const BELL_DONE = process.env.SPICA_BELL_DONE || '';
 const BELL_ERROR = process.env.SPICA_BELL_ERROR || '';
 
 function bell(reason: 'permission' | 'done' | 'error'): void {
-  if (!BELL_ENABLED) return;
+  if (!BELL_ENABLED) {
+    console.error('[BELL] Disabled by SPICA_BELL=false');
+    return;
+  }
 
   const platform = os.platform();
+  console.error(`[BELL] reason=${reason}, platform=${platform}`);
 
   // 优先使用用户自定义声音文件
   const customSound = reason === 'permission' ? BELL_PERMISSION : reason === 'done' ? BELL_DONE : BELL_ERROR;
 
   if (customSound && fs.existsSync(customSound)) {
+    console.error(`[BELL] Playing custom: ${customSound}`);
     playSound(customSound);
     return;
   }
@@ -39,7 +44,8 @@ function bell(reason: 'permission' | 'done' | 'error'): void {
       error: '/usr/share/sounds/freedesktop/stereo/dialog-error.oga',
     };
     const defaultSound = sounds[reason];
-    if (defaultSound && fs.existsSync(defaultSound)) {
+    console.error(`[BELL] Linux default: ${defaultSound}, exists=${fs.existsSync(defaultSound)}`);
+    if (defaultSound) {
       playSound(defaultSound);
     }
   } else if (platform === 'darwin') {
