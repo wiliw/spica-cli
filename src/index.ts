@@ -51,24 +51,48 @@ const state = getRuntimeState();
 const screen = getScreenManager();
 const ESC = "\x1b";
 
-// 提示音函数（跨平台）
+// 提示音函数（跨平台，支持自定义声音文件）
 const BELL_ENABLED = process.env.SPICA_BELL !== "false";
+const BELL_DONE = process.env.SPICA_BELL_DONE || "";
+const BELL_ERROR = process.env.SPICA_BELL_ERROR || "";
+
 function playBell(reason: "done" | "error"): void {
   if (!BELL_ENABLED) return;
 
   const platform = os.platform();
+  const customSound = reason === "done" ? BELL_DONE : BELL_ERROR;
+
+  // 优先使用自定义声音文件
+  if (customSound && fs.existsSync(customSound)) {
+    if (platform === "linux") {
+      exec(`paplay "${customSound}" 2>/dev/null || true`);
+    } else if (platform === "darwin") {
+      exec(`afplay "${customSound}" 2>/dev/null || true`);
+    } else if (platform === "win32") {
+      exec(`powershell -c "(New-Object Media.SoundPlayer '${customSound}').PlaySync()" 2>/dev/null || true`);
+    }
+    return;
+  }
+
+  // 默认系统声音
   if (platform === "linux") {
-    const sounds: Record<string, string> = {
+    const sounds = {
       done: "/usr/share/sounds/freedesktop/stereo/complete.oga",
       error: "/usr/share/sounds/freedesktop/stereo/dialog-error.oga",
     };
     exec(`paplay ${sounds[reason]} 2>/dev/null || true`);
   } else if (platform === "darwin") {
-    exec(`afplay /System/Library/Sounds/Glass.aiff 2>/dev/null || true`);
+    const sounds = {
+      done: "/System/Library/Sounds/Glass.aiff",
+      error: "/System/Library/Sounds/Sosumi.aiff",
+    };
+    exec(`afplay ${sounds[reason]} 2>/dev/null || true`);
   } else if (platform === "win32") {
-    exec(
-      `powershell -c "(New-Object Media.SoundPlayer 'C:\\Windows\\Media\\notify.wav').PlaySync()" 2>/dev/null || true`,
-    );
+    const sounds = {
+      done: "C:\\Windows\\Media\\Windows Notify Calendar.wav",
+      error: "C:\\Windows\\Media\\Windows Critical Stop.wav",
+    };
+    exec(`powershell -c "(New-Object Media.SoundPlayer '${sounds[reason]}').PlaySync()" 2>/dev/null || true`);
   }
 }
 

@@ -6,39 +6,70 @@ import prompts from 'prompts';
 import { getRuntimeState } from '../core/RuntimeState';
 import os from 'os';
 import { exec } from 'child_process';
+import fs from 'fs-extra';
 
 
 const screen = getScreenManager();
 const state = getRuntimeState();
 
-// 提示音配置（默认开启）
+// 提示音配置
 const BELL_ENABLED = process.env.SPICA_BELL !== 'false';
+const BELL_PERMISSION = process.env.SPICA_BELL_PERMISSION || '';  // 自定义声音文件路径
+const BELL_DONE = process.env.SPICA_BELL_DONE || '';
+const BELL_ERROR = process.env.SPICA_BELL_ERROR || '';
+
 function bell(reason: 'permission' | 'done' | 'error'): void {
   if (!BELL_ENABLED) return;
 
-  // 尝试播放系统声音
   const platform = os.platform();
 
+  // 优先使用用户自定义声音文件
+  const customSound = reason === 'permission' ? BELL_PERMISSION : reason === 'done' ? BELL_DONE : BELL_ERROR;
+
+  if (customSound && fs.existsSync(customSound)) {
+    playSound(customSound);
+    return;
+  }
+
+  // 默认系统声音
   if (platform === 'linux') {
-    // Linux: paplay 或 notify-send
     const sounds: Record<string, string> = {
       permission: '/usr/share/sounds/freedesktop/stereo/bell.oga',
       done: '/usr/share/sounds/freedesktop/stereo/complete.oga',
       error: '/usr/share/sounds/freedesktop/stereo/dialog-error.oga',
     };
-    const soundFile = sounds[reason];
-    if (soundFile) {
-      exec(`paplay ${soundFile} 2>/dev/null || true`);
-    } else {
-      exec(`notify-send 'spica' '${reason === 'permission' ? '需要确认' : reason === 'done' ? '完成' : '错误'}' --urgency=normal 2>/dev/null || true`);
+    const defaultSound = sounds[reason];
+    if (defaultSound && fs.existsSync(defaultSound)) {
+      playSound(defaultSound);
     }
   } else if (platform === 'darwin') {
-    // macOS: afplay
-    exec(`afplay /System/Library/Sounds/Glass.aiff 2>/dev/null || true`);
+    const sounds: Record<string, string> = {
+      permission: '/System/Library/Sounds/Ping.aiff',
+      done: '/System/Library/Sounds/Glass.aiff',
+      error: '/System/Library/Sounds/Sosumi.aiff',
+    };
+    playSound(sounds[reason] || '/System/Library/Sounds/Glass.aiff');
   } else if (platform === 'win32') {
-    // Windows: 使用 PowerShell 播放系统声音
-    exec(`powershell -c "(New-Object Media.SoundPlayer 'C:\\Windows\\Media\\notify.wav').PlaySync()" 2>/dev/null || true`);
+    const sounds: Record<string, string> = {
+      permission: 'C:\\Windows\\Media\\Windows Notify System Generic.wav',
+      done: 'C:\\Windows\\Media\\Windows Notify Calendar.wav',
+      error: 'C:\\Windows\\Media\\Windows Critical Stop.wav',
+    };
+    playSoundWindows(sounds[reason] || 'C:\\Windows\\Media\\notify.wav');
   }
+}
+
+function playSound(soundFile: string): void {
+  const platform = os.platform();
+  if (platform === 'linux') {
+    exec(`paplay "${soundFile}" 2>/dev/null || true`);
+  } else if (platform === 'darwin') {
+    exec(`afplay "${soundFile}" 2>/dev/null || true`);
+  }
+}
+
+function playSoundWindows(soundFile: string): void {
+  exec(`powershell -c "(New-Object Media.SoundPlayer '${soundFile}').PlaySync()" 2>/dev/null || true`);
 }
 
 // 构建状态栏文本（模型 | 模式 | 工作区）
