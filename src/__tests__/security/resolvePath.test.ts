@@ -1,17 +1,22 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { executeTool, setWorkspace } from '../../tools/index';
 import fs from 'fs-extra';
-import os from 'os';
 import path from 'path';
-import { setWorkspace, executeTool } from '../../tools/index';
+import os from 'os';
 
-describe('resolvePath symlink traversal', () => {
+describe('resolvePath symlink traversal protection', () => {
   let tmpDir: string;
   let workspaceDir: string;
+  let outsideDir: string;
 
   beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'spica-test-'));
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'spica-resolve-test-'));
     workspaceDir = path.join(tmpDir, 'workspace');
-    await fs.ensureDir(workspaceDir);
+    outsideDir = path.join(tmpDir, 'outside');
+    await fs.mkdir(workspaceDir);
+    await fs.mkdir(outsideDir);
+    await fs.writeFile(path.join(workspaceDir, 'safe.txt'), 'safe content');
+    await fs.writeFile(path.join(outsideDir, 'secret.txt'), 'secret content');
     setWorkspace(workspaceDir);
   });
 
@@ -19,35 +24,99 @@ describe('resolvePath symlink traversal', () => {
     await fs.remove(tmpDir);
   });
 
-  it('should reject symlinks pointing outside workspace', async () => {
-    const outsideFile = path.join(tmpDir, 'secret.txt');
-    await fs.writeFile(outsideFile, 'sensitive data');
-
-    const symlinkPath = path.join(workspaceDir, 'link-to-secret');
-    await fs.symlink(outsideFile, symlinkPath);
+  it('should block symlink pointing outside workspace', async () => {
+    const symlinkPath = path.join(workspaceDir, 'escape-link');
+    const secretPath = path.join(outsideDir, 'secret.txt');
+    await fs.symlink(secretPath, symlinkPath);
 
     const result = await executeTool('file_read', { path: symlinkPath });
+
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Access denied');
-    expect(result.error).toContain('symlink');
+    expect(result.error).toContain('outside workspace');
   });
 
-  it('should allow symlinks pointing inside workspace', async () => {
-    const insideFile = path.join(workspaceDir, 'real-file.txt');
-    await fs.writeFile(insideFile, 'normal data');
+  it('should block symlink pointing outside workspace via relative path', async () => {
+    const symlinkPath = path.join(workspaceDir, 'escape-link-rel');
+    await fs.symlink('../outside/secret.txt', symlinkPath);
 
-    const symlinkPath = path.join(workspaceDir, 'link-to-inside');
-    await fs.symlink(insideFile, symlinkPath);
+    const result = await executeTool('file_read', { path: symlinkPath });
 
-    const result = await executeTool('file_read', { path: 'link-to-inside' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('outside workspace');
+  });
+
+  it('should block symlink via nested directory traversal', async () => {
+    const nestedDir = path.join(workspaceDir, 'nested');
+    await fs.mkdir(nestedDir);
+    const symlinkPath = path.join(nestedDir, 'escape-link');
+    await fs.symlink(path.join(outsideDir, 'secret.txt'), symlinkPath);
+
+    const result = await executeTool('file_read', { path: symlinkPath });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('outside workspace');
+  });
+
+  it('should allow symlink pointing inside workspace', async () => {
+    const symlinkPath = path.join(workspaceDir, 'safe-link');
+    await fs.symlink(path.join(workspaceDir, 'safe.txt'), symlinkPath);
+
+    const result = await executeTool('file_read', { path: symlinkPath });
+
     expect(result.success).toBe(true);
+    expect(result.content).toContain('safe content');
   });
 
-  it('should allow normal files without symlinks', async () => {
-    const normalFile = path.join(workspaceDir, 'normal.txt');
-    await fs.writeFile(normalFile, 'hello');
+  it('should allow symlink to directory inside workspace', async () => {
+    const subDir = path.join(workspaceDir, 'sub');
+    const fileInSub = path.join(subDir, 'inner.txt');
+    await fs.mkdir(subDir);
+    await fs.writeFile(fileInSub, 'inner content');
+    const symlinkPath = path.join(workspaceDir, 'sub-link');
+    await fs.symlink(subDir, symlinkPath);
 
-    const result = await executeTool('file_read', { path: 'normal.txt' });
+    const result = await executeTool('file_read', { path: path.join(symlinkPath, 'inner.txt') });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('inner content');
+  });
+
+  it('should allow normal file read inside workspace', async () => {
+    const result = await executeTool('file_read', { path: path.join(workspaceDir, 'safe.txt') });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('safe content');
+  });
+
+  it('should block direct path outside workspace (no symlink)', async () => {
+    const result = await executeTool('file_read', { path: path.join(outsideDir, 'secret.txt') });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('outside workspace');
+  });
+
+  it('should handle non-existent file inside workspace gracefully', async () => {
+    const nonExistent = path.join(workspaceDir, 'nonexistent.txt');
+    const result = await executeTool('file_read', { path: nonExistent });
+
+    expect(result.success).toBe(false);
+    expect(result.error).not.toContain('outside workspace');
+  });
+
+  it('should block non-existent symlink that would point outside workspace', async () => {
+    const symlinkPath = path.join(workspaceDir, 'dead-escape-link');
+    await fs.symlink(path.join(outsideDir, 'nonexistent.txt'), symlinkPath);
+
+    const result = await executeTool('file_read', { path: symlinkPath });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('outside workspace');
+  });
+
+  it('should allow writing new file inside workspace', async () => {
+    const newFile = path.join(workspaceDir, 'will-create.txt');
+    const result = await executeTool('file_write', { path: newFile, content: 'new file' });
+
     expect(result.success).toBe(true);
   });
 });
