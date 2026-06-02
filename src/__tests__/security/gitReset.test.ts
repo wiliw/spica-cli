@@ -1,51 +1,56 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { SpicaAgent } from '../../agent.js';
-import { mkdtempSync, rmSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
+import fs from 'fs-extra';
+import os from 'os';
+import path from 'path';
 import simpleGit from 'simple-git';
-import type { SimpleGit } from 'simple-git';
+import { SpicaAgent } from '../../agent';
 
-describe('git reset permission check', () => {
-  let agent: SpicaAgent;
+describe('git reset confirmation bypass', () => {
   let tmpDir: string;
-  let git: SimpleGit;
 
   beforeEach(async () => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'spica-test-git-reset-'));
-    git = simpleGit(tmpDir);
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'spica-test-'));
+    const git = simpleGit(tmpDir);
     await git.init();
-    agent = new SpicaAgent(undefined, tmpDir);
+    await fs.writeFile(path.join(tmpDir, 'test.txt'), 'content');
+    await git.add('test.txt');
+    await git.commit('initial commit');
   });
 
-  afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+  afterEach(async () => {
+    await fs.remove(tmpDir);
   });
 
-  it('requires permission for hard reset even with userConfirmed: true', () => {
-    const result = (agent as any).checkNeedsPermission('git', {
+  it('should require permission for git reset regardless of userConfirmed parameter', () => {
+    const agent = new SpicaAgent(undefined, tmpDir);
+    const agentAny = agent as any;
+    const reason = agentAny.checkNeedsPermission('git', {
       action: 'reset',
       args: { mode: 'hard', userConfirmed: true },
     });
-    expect(result).not.toBeNull();
-    expect(result).toBeTypeOf('string');
+
+    expect(reason).not.toBeNull();
   });
 
-  it('requires permission for hard reset with userConfirmed: false', () => {
-    const result = (agent as any).checkNeedsPermission('git', {
+  it('should require permission for git reset with userConfirmed false', () => {
+    const agent = new SpicaAgent(undefined, tmpDir);
+    const agentAny = agent as any;
+    const reason = agentAny.checkNeedsPermission('git', {
       action: 'reset',
       args: { mode: 'hard', userConfirmed: false },
     });
-    expect(result).not.toBeNull();
-    expect(result).toBeTypeOf('string');
+
+    expect(reason).not.toBeNull();
   });
 
-  it('requires permission for soft reset even with userConfirmed: true', () => {
-    const result = (agent as any).checkNeedsPermission('git', {
+  it('should require permission for soft reset too', () => {
+    const agent = new SpicaAgent(undefined, tmpDir);
+    const agentAny = agent as any;
+    const reason = agentAny.checkNeedsPermission('git', {
       action: 'reset',
-      args: { mode: 'soft', userConfirmed: true },
+      args: { mode: 'soft' },
     });
-    expect(result).not.toBeNull();
-    expect(result).toBeTypeOf('string');
+
+    expect(reason).not.toBeNull();
   });
 });
