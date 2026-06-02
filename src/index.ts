@@ -57,24 +57,28 @@ const BELL_DONE = process.env.SPICA_BELL_DONE || "";
 const BELL_ERROR = process.env.SPICA_BELL_ERROR || "";
 
 function playBell(reason: "done" | "error"): void {
+  console.error(`[BELL] playBell called: reason=${reason}, enabled=${BELL_ENABLED}`);
   if (!BELL_ENABLED) return;
 
   const platform = os.platform();
   const customSound = reason === "done" ? BELL_DONE : BELL_ERROR;
+  console.error(`[BELL] platform=${platform}, customSound=${customSound}`);
 
   // 优先使用自定义声音文件
   if (customSound && fs.existsSync(customSound)) {
+    console.error(`[BELL] Playing custom sound`);
     if (platform === "linux") {
-      exec(`paplay "${customSound}" 2>/dev/null || true`);
+      exec(`paplay "${customSound}"`);
     } else if (platform === "darwin") {
-      exec(`afplay "${customSound}" 2>/dev/null || true`);
+      exec(`afplay "${customSound}"`);
     } else if (platform === "win32") {
-      exec(`powershell -c "(New-Object Media.SoundPlayer '${customSound}').PlaySync()" 2>/dev/null || true`);
+      exec(`powershell -c "(New-Object Media.SoundPlayer '${customSound}').PlaySync()"`);
     }
     return;
   }
 
   // 默认系统声音
+  console.error(`[BELL] Playing default sound`);
   if (platform === "linux") {
     const sounds = {
       done: "/usr/share/sounds/freedesktop/stereo/complete.oga",
