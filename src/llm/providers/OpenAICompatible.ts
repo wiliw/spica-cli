@@ -219,6 +219,11 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
         }
       }
 
+      // 中断时不要push不完整的toolCalls assistant message
+      if (signal?.aborted) {
+        return { finished: true };
+      }
+
       if (hasToolCalls && toolCalls.length > 0) {
         const parsedToolCalls: ToolCall[] = toolCalls.map(tc => ({
           id: tc.id,
@@ -231,7 +236,7 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
           content: fullContent || '',
           toolCalls: parsedToolCalls,
         });
-        
+
         return { toolCalls: parsedToolCalls, finished: false };
       }
 
@@ -507,6 +512,11 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
             }
           });
         }
+      }
+
+      // 中断时不要push不完整的toolCalls assistant message
+      if (signal?.aborted) {
+        return { finished: true };
       }
 
       if (hasToolCalls && toolCalls.length > 0) {
