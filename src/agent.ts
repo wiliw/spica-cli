@@ -1088,16 +1088,6 @@ async init() {
           content: `REQUIRED_SKILL: ${refName}`
         }));
 
-        // 🔄 队列注入点：在工具完成后检查是否有新输入
-        const queuedInput = this.checkQueueInput();
-        if (queuedInput) {
-          this.emit('queue_injected', { content: queuedInput.slice(0, 50) + '...' });
-          // 将队列输入作为新的 user message 注入
-          this.llm!.addMessage({ role: 'user', content: queuedInput });
-          // 清空 pendingInput
-          this.pendingInput = null;
-        }
-
         // 所有工具完成后，一次性发送所有结果给LLM继续生成
         if (toolResults.length > 0) {
           this.emit('waiting_for_llm');  // 通知外部启动心跳

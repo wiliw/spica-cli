@@ -339,10 +339,18 @@ program
           // 如果正在处理，使用队列累积输入
           if (isProcessing && !trimmed.startsWith("/")) {
             const queue = getInputQueue();
-            queue.add(trimmed);
+            const added = queue.add(trimmed);
             const status = queue.getStatus();
+            
+            // 检查是否接近队列上限
+            if (status.droppedWarning) {
+              screen.appendScroll(
+                COLORS.warning(`[QUEUE] Warning: Queue near limit (${status.total}/${50})\n`),
+              );
+            }
+            
             screen.appendScroll(
-              COLORS.muted(`[QUEUE] Added (${status.pending} pending)\n`),
+              COLORS.muted(`[QUEUE] Added #${added.id} (${status.pending} pending)\n`),
             );
             return;
           }
@@ -351,12 +359,21 @@ program
           const queue = getInputQueue();
           let finalInput = trimmed;
           if (queue.hasPending() && !trimmed.startsWith("/")) {
-            finalInput = queue.mergePending() + "\n" + trimmed;
+            finalInput = queue.mergePending() + "\n\n---\n\n" + trimmed;
+            const status = queue.getStatus();
             screen.appendScroll(
               COLORS.muted(
-                `[QUEUE] Merged ${queue.getStatus().total} inputs\n`,
+                `[QUEUE] Merged ${status.pending + 1} inputs (use --- separator)\n`,
               ),
             );
+            
+            // 自动清理已处理的输入
+            const cleared = queue.autoCleanup();
+            if (cleared > 0) {
+              screen.appendScroll(
+                COLORS.muted(`[QUEUE] Auto-cleaned ${cleared} processed inputs\n`),
+              );
+            }
           }
 
           if (!finalInput.trim()) {

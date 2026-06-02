@@ -15,7 +15,7 @@ describe('Queue Strategy Tests', () => {
   });
 
   describe('1. 合并策略问题', () => {
-    it('should merge multiple inputs with newline', () => {
+    it('should merge multiple inputs with separator', () => {
       queue.add('fix bug A');
       queue.add('add feature B');
       queue.add('refactor C');
@@ -24,13 +24,13 @@ describe('Queue Strategy Tests', () => {
       
       console.log('[Merge] result:', merged);
       
-      // 问题：三个独立任务被合并成一个
-      expect(merged).toBe('fix bug A\nadd feature B\nrefactor C');
+      // 改进：使用分隔符区分不同任务
+      expect(merged).toBe('fix bug A\n\n---\n\nadd feature B\n\n---\n\nrefactor C');
       
-      // 这可能导致 LLM 理解为一个大任务
+      // LLM 可以更清晰地理解这是三个独立任务
     });
 
-    it('should handle conflicting inputs', () => {
+    it('should handle conflicting inputs with separator', () => {
       queue.add('use TypeScript');
       queue.add('use JavaScript'); // 冲突的指令
       
@@ -38,8 +38,8 @@ describe('Queue Strategy Tests', () => {
       
       console.log('[Merge] conflicting:', merged);
       
-      // 问题：冲突的指令被合并
-      expect(merged).toBe('use TypeScript\nuse JavaScript');
+      // 改进：分隔符让 LLM 更容易识别冲突
+      expect(merged).toBe('use TypeScript\n\n---\n\nuse JavaScript');
     });
 
     it('should handle long inputs', () => {
@@ -140,9 +140,9 @@ describe('Queue Strategy Tests', () => {
 
     it('should not infinite loop', async () => {
       const handlerCalls: number[] = [];
-      let maxCalls = 5; // 限制最大调用次数
+      const maxCalls = 5; // 限制最大调用次数
       
-      const handler = async (merged: string) => {
+      const handler = async (_merged: string) => {
         handlerCalls.push(handlerCalls.length);
         
         // 模拟每次都添加新输入（潜在无限循环）
@@ -173,7 +173,7 @@ describe('Queue Strategy Tests', () => {
   });
 
   describe('5. 输入顺序问题', () => {
-    it('should preserve input order', () => {
+    it('should preserve input order with separator', () => {
       queue.add('First');
       queue.add('Second');
       queue.add('Third');
@@ -182,7 +182,7 @@ describe('Queue Strategy Tests', () => {
       
       console.log('[Queue] order:', merged);
       
-      expect(merged).toBe('First\nSecond\nThird');
+      expect(merged).toBe('First\n\n---\n\nSecond\n\n---\n\nThird');
     });
 
     it('should handle undo correctly', () => {
@@ -197,7 +197,7 @@ describe('Queue Strategy Tests', () => {
       expect(undone?.content).toBe('Input 3');
       
       const merged = queue.mergePending();
-      expect(merged).toBe('Input 1\nInput 2');
+      expect(merged).toBe('Input 1\n\n---\n\nInput 2');
     });
   });
 
