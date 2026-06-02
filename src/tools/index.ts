@@ -842,19 +842,37 @@ export async function executeTool(
           // 分离模式：使用 tmux 运行（用户可 attach 查看）
           if (detached) {
             if (isWindows) {
-              // Windows: 使用 start /B 在后台运行
-              const escapedCmd = command.replace(/"/g, '\\"');
-              const actualCommand = `start /B cmd /c "${escapedCmd}"`;
-              await execa(actualCommand, {
-                shell: true,
-                cwd: WORKSPACE,
-                timeout: 5000,
-                reject: false,
-              });
-              return {
-                success: true,
-                output: `Started in detached mode (Windows background).\nCommand: ${command}\n\nNote: Process runs in background. Use Task Manager to monitor.`,
-              };
+              // Windows: 使用 PowerShell 启动后台进程并获取 PID
+              const sessionId = `spica_${Date.now()}`;
+              const psCommand = `
+$proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c ${command.replace(/"/g, '""')}" -WindowStyle Hidden -PassThru;
+Write-Output $proc.Id;
+`;
+              try {
+                const result = await execa('powershell', ['-Command', psCommand], {
+                  cwd: WORKSPACE,
+                  timeout: 10000,
+                  reject: false,
+                });
+                const pid = result.stdout.trim();
+                return {
+                  success: true,
+                  output: `Started in detached mode (Windows).\nSession: ${sessionId}\nPID: ${pid || 'unknown'}\nCommand: ${command}\n\nTo monitor: Task Manager or PowerShell "Get-Process -Id ${pid}"\nTo kill: taskkill /PID ${pid} /F`,
+                };
+              } catch {
+                // Fallback: 使用 start /B
+                const escapedCmd = command.replace(/"/g, '\\"');
+                await execa(`start /B cmd /c "${escapedCmd}"`, {
+                  shell: true,
+                  cwd: WORKSPACE,
+                  timeout: 5000,
+                  reject: false,
+                });
+                return {
+                  success: true,
+                  output: `Started in detached mode (Windows background).\nCommand: ${command}\n\nNote: Process runs in background. Use Task Manager to monitor.`,
+                };
+              }
             }
 
             const sessionId = `spica_${Date.now()}`;

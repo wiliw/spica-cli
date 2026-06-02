@@ -160,3 +160,24 @@ User input → SpicaAgent.runLoop() → LLMClient (streaming) → Tool execution
 | Together | llama-3-70b | Varies |
 | Groq | llama-3-70b | Varies |
 | Local | llama-3 | Varies |
+
+## Platform Compatibility
+
+### Windows
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Shell execution | ✅ | Uses `cmd.exe` or Git Bash |
+| Detached mode | ✅ | PowerShell background process |
+| PTY terminal | ⚠️ | Requires Visual Studio Build Tools |
+| Process kill | ✅ | Uses `taskkill` |
+| tmux/screen | ❌ | Not supported (use detached mode) |
+
+**Windows Setup:**
+1. Install [Git for Windows](https://git-scm.com/download/win) for Bash support
+2. For PTY terminal: Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with "Desktop development with C++" workload
+3. Run: `npm install node-pty`
+
+### macOS / Linux
+
+All features supported. tmux/screen available for detached mode.

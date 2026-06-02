@@ -118,16 +118,17 @@ export class ProcessMonitor {
       stored.info.endTime = new Date();
 
       if (isWindows) {
-        // Windows: kill via taskkill (SIGTERM not supported)
+        // Windows: SIGTERM 不支持，直接用 taskkill
         try {
-          process.kill();
+          execSync(`taskkill /PID ${process.pid} /T /F`, { stdio: 'ignore' });
         } catch {
-          // Fallback: taskkill
+          // taskkill 失败时尝试 process.kill()
           try {
-            execSync(`taskkill /PID ${process.pid} /T /F`, { stdio: 'ignore' });
+            process.kill();
           } catch {}
         }
       } else {
+        // Unix: 先 SIGTERM，5秒后 SIGKILL
         process.kill('SIGTERM');
 
         setTimeout(() => {
