@@ -657,20 +657,40 @@ export async function executeTool(
         const target = safeArgs.path ? resolvePath(safeArgs.path) : WORKSPACE;
         const projectType = await detectProjectType(WORKSPACE);
 
-        const formatCmds: Record<string, string> = {
-          typescript: `npx prettier --write "${target}" 2>&1`,
-          javascript: `npx prettier --write "${target}" 2>&1`,
-          python: `python -m black "${target}" 2>&1 || python -m autopep8 --in-place "${target}" 2>&1`,
-          go: `gofmt -w "${target}" 2>&1`,
-          rust: `rustfmt "${target}" 2>&1`,
+        // Use array-based invocation to avoid shell injection
+        const formatCmds: Record<string, { cmd: string; args: string[] }> = {
+          typescript: { cmd: 'npx', args: ['prettier', '--write', target] },
+          javascript: { cmd: 'npx', args: ['prettier', '--write', target] },
+          python: { cmd: 'python', args: ['-m', 'black', target] },
+          go: { cmd: 'gofmt', args: ['-w', target] },
+          rust: { cmd: 'rustfmt', args: [target] },
         };
 
-        const cmd = formatCmds[projectType];
-        if (!cmd) {
+        const fmtConfig = formatCmds[projectType];
+        if (!fmtConfig) {
           return { success: false, error: `No formatter for project type: ${projectType}` };
         }
 
-        const fmtResult = await execa(cmd, { shell: true, cwd: WORKSPACE, timeout: 30000, reject: false });
+        const fmtResult = await execa(fmtConfig.cmd, fmtConfig.args, {
+          cwd: WORKSPACE,
+          timeout: 30000,
+          reject: false,
+        });
+
+        // For Python, try autopep8 as fallback
+        if (projectType === 'python' && fmtResult.exitCode !== 0) {
+          const fallbackResult = await execa('python', ['-m', 'autopep8', '--in-place', target], {
+            cwd: WORKSPACE,
+            timeout: 30000,
+            reject: false,
+          });
+          return {
+            success: fallbackResult.exitCode === 0,
+            output: fallbackResult.stdout || 'Formatted successfully',
+            error: fallbackResult.exitCode !== 0 ? fallbackResult.stderr : undefined,
+          };
+        }
+
         return {
           success: fmtResult.exitCode === 0,
           output: fmtResult.stdout || 'Formatted successfully',
@@ -811,6 +831,12 @@ export async function executeTool(
           { pattern: /\|\s*(bash|sh|zsh|python|perl|ruby)\b/, name: 'piping to shell interpreter' },
           { pattern: /mkfifo/, name: 'named pipe creation' },
           { pattern: /\bnc\s+-[el]/, name: 'netcat listener' },
+          { pattern: /;/, name: 'command separator' },
+          { pattern: /&&/, name: 'AND operator' },
+          { pattern: /\|\|/, name: 'OR operator' },
+          { pattern: /\$\{/, name: 'variable expansion' },
+          { pattern: /<<\s*/, name: 'heredoc' },
+          { pattern: /\beval\b/, name: 'eval command' },
         ];
         for (const { pattern, name } of injectionPatterns) {
           if (pattern.test(command)) {
@@ -1750,44 +1776,66 @@ Write-Output $proc.Id;
 
 function resolvePath(path: string): string {
   const resolved = isAbsolute(path) ? path : pathResolve(WORKSPACE, path);
-  const realWorkspace = pathResolve(WORKSPACE);
+  const realWorkspace = fs.realpathSync(pathResolve(WORKSPACE));
 
-  // Resolve to real path, following symlinks
+  function isOutside(p: string): boolean {
+    return !p.startsWith(realWorkspace) && !p.startsWith(pathResolve(realWorkspace));
+  }
+
   let realPath: string;
   try {
     realPath = fs.realpathSync(resolved);
-  } catch {
-    // File doesn't exist yet (e.g., file_write on new file) —
-    // check the parent directory instead
-    const parent = dirname(resolved);
-    let realParent: string;
-    try {
-      realParent = fs.realpathSync(parent);
-    } catch {
-      throw new Error(
-        `Access denied: cannot resolve path "${path}"`
-      );
+  } catch (err: any) {
+    if (err.code === 'ENOENT') {
+      try {
+        const lst = fs.lstatSync(resolved);
+        if (lst.isSymbolicLink()) {
+          const linkTarget = fs.readlinkSync(resolved);
+          const resolvedTarget = isAbsolute(linkTarget)
+            ? linkTarget
+            : pathResolve(dirname(resolved), linkTarget);
+          try {
+            const realTarget = fs.realpathSync(resolvedTarget);
+            if (isOutside(realTarget)) {
+              throw new Error('Access denied: symlink points outside workspace');
+            }
+          } catch {
+            const targetParent = dirname(resolvedTarget);
+            try {
+              const realTargetParent = fs.realpathSync(targetParent);
+              const fullPath = pathResolve(realTargetParent, basename(resolvedTarget));
+              if (isOutside(fullPath)) {
+                throw new Error('Access denied: symlink points outside workspace');
+              }
+            } catch {
+              if (isOutside(pathResolve(resolvedTarget))) {
+                throw new Error('Access denied: symlink points outside workspace');
+              }
+            }
+          }
+          return resolved;
+        }
+      } catch (lstErr: any) {
+        if (lstErr.message?.includes('Access denied')) throw lstErr;
+      }
+
+      const parent = dirname(resolved);
+      try {
+        const realParent = fs.realpathSync(parent);
+        if (isOutside(realParent)) {
+          throw new Error(`Access denied: path "${path}" is outside workspace`);
+        }
+      } catch (parentErr: any) {
+        if (parentErr.message?.includes('Access denied')) throw parentErr;
+        throw new Error(`Access denied: cannot resolve path "${path}"`);
+      }
+      return resolved;
     }
-    // Verify parent is within workspace
-    if (
-      !realParent.startsWith(realWorkspace) &&
-      !realParent.startsWith(pathResolve(realWorkspace))
-    ) {
-      throw new Error(
-        `Access denied: path "${path}" is outside workspace`
-      );
-    }
-    return resolved;
+    throw err;
   }
 
-  // Verify resolved real path is within workspace
-  if (
-    !realPath.startsWith(realWorkspace) &&
-    !realPath.startsWith(pathResolve(realWorkspace))
-  ) {
-    throw new Error(
-      `Access denied: symlink points outside workspace`
-    );
+  if (isOutside(realPath)) {
+    throw new Error('Access denied: symlink points outside workspace');
   }
 
   return resolved;
