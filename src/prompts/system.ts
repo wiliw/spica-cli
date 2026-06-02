@@ -43,13 +43,8 @@ function loadLearnings(workspacePath: string): string {
   }
 }
 
-export function getSystemPrompt(projectConfig?: any, skillsMetadata?: string, usingSuperpowersContent?: string, workspacePath?: string): string {
+export function getSystemPrompt(projectConfig?: any, skillsMetadata?: string, workspacePath?: string): string {
   let prompt = SYSTEM_PROMPT;
-
-  // Using-superpowers core content injected at session start
-  if (usingSuperpowersContent) {
-    prompt += '\n\n' + usingSuperpowersContent;
-  }
 
   // Project context - inject full AGENTS.md content
   if (projectConfig) {
