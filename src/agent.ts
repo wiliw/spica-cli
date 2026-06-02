@@ -1293,25 +1293,23 @@ async init() {
       const summary = await this.generateSummary(finalOldMessages);
       // 保留 assistant + 对应的 tool messages，过滤掉孤立的 tool messages
       const safetyTruncatedClean: ChatMessage[] = [];
-      const keptToolCallIds = new Set<string>();
+      const existingToolMessageIds = new Set<string>();
 
-      // 第一遍：收集所有保留的 assistant message 的 toolCall IDs
+      // 第一遍：收集所有存在的 tool message 的 toolCallId
       for (const m of safetyTruncated) {
-        if (m.role === 'assistant' && m.toolCalls) {
-          for (const tc of m.toolCalls) {
-            keptToolCallIds.add(tc.id);
-          }
+        if (m.role === 'tool' && m.toolCallId) {
+          existingToolMessageIds.add(m.toolCallId);
         }
       }
 
-      // 第二遍：保留 user/assistant/system，以及对应 keptToolCallIds 的 tool messages
+      // 第二遍：保留 user/assistant/system，以及存在的 tool messages
       for (const m of safetyTruncated) {
         if (m.role === 'user' || m.role === 'assistant' || m.role === 'system') {
-          // 如果是 assistant with toolCalls 但对应的 tool messages 不在 kept 范围内，去掉 toolCalls
-          if (m.role === 'assistant' && m.toolCalls) {
-            const validToolCalls = m.toolCalls.filter(tc => keptToolCallIds.has(tc.id));
-            if (validToolCalls.length < m.toolCalls.length) {
-              // 部分 tool calls 缺少对应的 tool messages，去掉所有 toolCalls
+          // 如果是 assistant with toolCalls，检查每个toolCall是否有对应的tool message
+          if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+            const hasAllToolMessages = m.toolCalls.every(tc => existingToolMessageIds.has(tc.id));
+            if (!hasAllToolMessages) {
+              // 缺少部分 tool messages，去掉所有 toolCalls
               safetyTruncatedClean.push({ ...m, toolCalls: undefined });
             } else {
               safetyTruncatedClean.push(m);
@@ -1319,7 +1317,7 @@ async init() {
           } else {
             safetyTruncatedClean.push(m);
           }
-        } else if (m.role === 'tool' && keptToolCallIds.has(m.toolCallId || '')) {
+        } else if (m.role === 'tool' && existingToolMessageIds.has(m.toolCallId || '')) {
           safetyTruncatedClean.push(m);
         }
       }

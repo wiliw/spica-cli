@@ -166,10 +166,29 @@ export class OpenAICompatibleProvider extends BaseProvider {
 async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): Promise<LLMResponse> {
     this.messages.push({ role: 'user', content: prompt });
 
+    // DEBUG: 检查消息序列是否正确
+    const converted = this.convertMessages();
+    const lastAssistantWithToolCalls = converted.filter(m => m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0).pop() as any;
+    if (lastAssistantWithToolCalls) {
+      const lastIndex = converted.indexOf(lastAssistantWithToolCalls);
+      const expectedIds = lastAssistantWithToolCalls.tool_calls.map((tc: any) => tc.id);
+      const followingMessages = converted.slice(lastIndex + 1);
+      const toolMessagesFollowing = followingMessages.filter((m: any) => m.role === 'tool');
+      const foundIds = toolMessagesFollowing.map((m: any) => m.tool_call_id);
+
+      if (expectedIds.some((id: string) => !foundIds.includes(id))) {
+        console.error('[DEBUG] Invalid message sequence detected before API call:');
+        console.error('[DEBUG] Expected tool_call_ids:', expectedIds);
+        console.error('[DEBUG] Found tool_call_ids:', foundIds);
+        console.error('[DEBUG] Last assistant message index:', lastIndex);
+        console.error('[DEBUG] Following messages:', followingMessages.slice(0, 5));
+      }
+    }
+
     try {
       const stream = await this.client.chat.completions.create({
         model: this.config.model,
-        messages: this.convertMessages(),
+        messages: converted,
         tools: tools?.map(t => ({
           type: 'function',
           function: {

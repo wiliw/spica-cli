@@ -1,6 +1,6 @@
 import type { ChatMessage } from '../llm/providers/BaseProvider';
 
-export function cleanMessages(messages: ChatMessage[]): ChatMessage[] {
+export function cleanMessages(messages: ChatMessage[], debug = false): ChatMessage[] {
   const result: ChatMessage[] = [];
   const usedToolCallIds = new Set<string>();
 
@@ -28,6 +28,15 @@ export function cleanMessages(messages: ChatMessage[]): ChatMessage[] {
           usedToolCallIds.add(messages[k].toolCallId || '');
         }
       } else {
+        // DEBUG: 检测到缺失的tool messages
+        if (debug) {
+          console.error('[cleanMessages] Missing tool messages for assistant:', {
+            expectedIds,
+            foundIds,
+            missingOrReused,
+            assistantContent: m.content?.slice(0, 50)
+          });
+        }
         result.push({ role: 'assistant', content: m.content || '' });
       }
       i = j - 1;
