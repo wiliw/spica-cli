@@ -2,3 +2,4 @@
 {"version": "完整版-161行", "task": "代码风格", "duration": 90, "quality": "一般-有注释"}
 {"version": "完整版-161行", "task": "架构理解", "duration": 52, "quality": "良好-有详细回答"}
 {"version": "完整版-161行", "task": "添加工具", "duration": 48, "quality": "失败-未创建文件"}
+{"version": "完整版-161行", "task": "Bug修复", "duration": 30, "quality": "失败-文件丢失"}
