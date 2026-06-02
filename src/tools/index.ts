@@ -1,7 +1,7 @@
 import fs from 'fs-extra';
 import { execa } from 'execa';
 import simpleGit from 'simple-git';
-import { resolve as pathResolve, isAbsolute, dirname, join } from 'path';
+import { resolve as pathResolve, isAbsolute, dirname, join, basename } from 'path';
 import fastGlob from 'fast-glob';
 import { SpicaAgent } from '../agent';
 import { SubAgentTask, getSubAgentConfig, isToolAllowed, summarizeResult } from './subAgent';
@@ -1750,9 +1750,46 @@ Write-Output $proc.Id;
 
 function resolvePath(path: string): string {
   const resolved = isAbsolute(path) ? path : pathResolve(WORKSPACE, path);
-  if (!resolved.startsWith(WORKSPACE) && !resolved.startsWith(pathResolve(WORKSPACE))) {
-    throw new Error(`Access denied: path "${path}" is outside workspace`);
+  const realWorkspace = pathResolve(WORKSPACE);
+
+  // Resolve to real path, following symlinks
+  let realPath: string;
+  try {
+    realPath = fs.realpathSync(resolved);
+  } catch {
+    // File doesn't exist yet (e.g., file_write on new file) —
+    // check the parent directory instead
+    const parent = dirname(resolved);
+    let realParent: string;
+    try {
+      realParent = fs.realpathSync(parent);
+    } catch {
+      throw new Error(
+        `Access denied: cannot resolve path "${path}"`
+      );
+    }
+    // Verify parent is within workspace
+    if (
+      !realParent.startsWith(realWorkspace) &&
+      !realParent.startsWith(pathResolve(realWorkspace))
+    ) {
+      throw new Error(
+        `Access denied: path "${path}" is outside workspace`
+      );
+    }
+    return resolved;
   }
+
+  // Verify resolved real path is within workspace
+  if (
+    !realPath.startsWith(realWorkspace) &&
+    !realPath.startsWith(pathResolve(realWorkspace))
+  ) {
+    throw new Error(
+      `Access denied: symlink points outside workspace`
+    );
+  }
+
   return resolved;
 }
 
