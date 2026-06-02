@@ -1797,7 +1797,11 @@ function resolvePath(path: string): string {
           let realTarget: string;
           try {
             realTarget = fs.realpathSync(resolvedTarget);
+            if (isOutside(realTarget)) {
+              throw new Error('Access denied: symlink points outside workspace');
+            }
           } catch (_e) {
+            if (_e instanceof Error && _e.message.includes('Access denied')) throw _e;
             const targetParent = dirname(resolvedTarget);
             try {
               const realTargetParent = fs.realpathSync(targetParent);
@@ -1812,10 +1816,6 @@ function resolvePath(path: string): string {
             }
             return resolved;
           }
-          if (isOutside(realTarget)) {
-            throw new Error('Access denied: symlink points outside workspace');
-          }
-          return resolved;
           return resolved;
         }
       } catch (lstErr: any) {
@@ -1826,12 +1826,12 @@ function resolvePath(path: string): string {
       let realParent: string;
       try {
         realParent = fs.realpathSync(parent);
+        if (isOutside(realParent)) {
+          throw new Error(`Access denied: path "${path}" is outside workspace`);
+        }
       } catch (parentErr: any) {
         if (parentErr.message?.includes('Access denied')) throw parentErr;
         throw new Error(`Access denied: cannot resolve path "${path}"`, { cause: parentErr });
-      }
-      if (isOutside(realParent)) {
-        throw new Error(`Access denied: path "${path}" is outside workspace`);
       }
       return resolved;
     }
