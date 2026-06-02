@@ -23,8 +23,8 @@ import {
   saveSkill,
   deleteSkill,
 } from "./skills";
-import { exec } from "child_process";
 import os from "os";
+import { playBell } from "./utils/bell";
 
 import {
   getMCPManager,
@@ -43,62 +43,13 @@ import { getScreenManager } from "./cli/ui/screenManager";
 import { TokenCounter } from "./llm/TokenCounter";
 import * as readline from "readline";
 import prompts from "prompts";
-import fs from "fs-extra";
+
 import { join } from "path";
 
 const program = new Command();
 const state = getRuntimeState();
 const screen = getScreenManager();
 const ESC = "\x1b";
-
-// 提示音函数（跨平台，支持自定义声音文件）
-const BELL_ENABLED = process.env.SPICA_BELL !== "false";
-const BELL_DONE = process.env.SPICA_BELL_DONE || "";
-const BELL_ERROR = process.env.SPICA_BELL_ERROR || "";
-
-function playBell(reason: "done" | "error"): void {
-  console.error(`[BELL] playBell called: reason=${reason}, enabled=${BELL_ENABLED}`);
-  if (!BELL_ENABLED) return;
-
-  const platform = os.platform();
-  const customSound = reason === "done" ? BELL_DONE : BELL_ERROR;
-  console.error(`[BELL] platform=${platform}, customSound=${customSound}`);
-
-  // 优先使用自定义声音文件
-  if (customSound && fs.existsSync(customSound)) {
-    console.error(`[BELL] Playing custom sound`);
-    if (platform === "linux") {
-      exec(`paplay "${customSound}"`);
-    } else if (platform === "darwin") {
-      exec(`afplay "${customSound}"`);
-    } else if (platform === "win32") {
-      exec(`powershell -c "(New-Object Media.SoundPlayer '${customSound}').PlaySync()"`);
-    }
-    return;
-  }
-
-  // 默认系统声音
-  console.error(`[BELL] Playing default sound`);
-  if (platform === "linux") {
-    const sounds = {
-      done: "/usr/share/sounds/freedesktop/stereo/complete.oga",
-      error: "/usr/share/sounds/freedesktop/stereo/dialog-error.oga",
-    };
-    exec(`paplay ${sounds[reason]} 2>/dev/null || true`);
-  } else if (platform === "darwin") {
-    const sounds = {
-      done: "/System/Library/Sounds/Glass.aiff",
-      error: "/System/Library/Sounds/Sosumi.aiff",
-    };
-    exec(`afplay ${sounds[reason]} 2>/dev/null || true`);
-  } else if (platform === "win32") {
-    const sounds = {
-      done: "C:\\Windows\\Media\\Windows Notify Calendar.wav",
-      error: "C:\\Windows\\Media\\Windows Critical Stop.wav",
-    };
-    exec(`powershell -c "(New-Object Media.SoundPlayer '${sounds[reason]}').PlaySync()" 2>/dev/null || true`);
-  }
-}
 
 // Ctrl+C中断处理（SIGINT - 在非 raw mode 或特殊情况下触发）
 let interruptCount = 0;
@@ -851,6 +802,7 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
             const stats = formatRunStats(elapsed, agent, tokenCounter);
             screen.appendScroll(COLORS.muted(`\n${stats}\n`));
             screen.appendScroll(COLORS.success("[OK] Done\n"));
+            playBell("done");
           } catch (error: any) {
             const elapsed = Date.now() - startTime;
             if (state.isStreamingOutput()) {
@@ -862,6 +814,7 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
             const stats = formatRunStats(elapsed, agent, tokenCounter);
             screen.appendScroll(COLORS.muted(`\n${stats}\n`));
             screen.appendScroll(COLORS.error(`[ERR] ${error.message}\n`));
+            playBell("error");
           }
           // 输出完成，恢复光标到输入框并刷新显示
           screen.setStreaming(false);
@@ -970,10 +923,12 @@ program
       await agent.init();
       const result = await agent.runLoop(request);
       console.log(COLORS.success("\n[OK] Completed"));
+      playBell("done");
     } catch (error: any) {
       if (!state.isConnectionErrorShown()) {
         console.log(COLORS.error(`Error: ${error.message}`));
       }
+      playBell("error");
     }
 
     state.setAgent(null);
@@ -1478,8 +1433,10 @@ async function runSimpleMode(
         console.log(COLORS.muted("\n[PROCESSING]..."));
         const response = await agent.runLoop(trimmed);
         console.log(COLORS.success("\n[OK] Done"));
+        playBell("done");
       } catch (error: any) {
         console.log(COLORS.error(`\n[ERR] ${error.message}`));
+        playBell("error");
       }
 
       rl.prompt();
