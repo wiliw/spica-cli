@@ -820,11 +820,6 @@ async init() {
       await this.compact();
     }
 
-    // Simplified project context (减少token)
-    const projectContext = this.projectConfig.type
-      ? `Project: ${this.projectConfig.type}, Build: ${this.projectConfig.commands?.build || 'N/A'}, Test: ${this.projectConfig.commands?.test || 'N/A'}`
-      : '';
-
     this.emit('message', { role: 'user', content: prompt });
 
     const toolDefinitions = getAllToolDefinitions();
@@ -833,7 +828,7 @@ async init() {
     let response;
     try {
       response = await this.callLLMWithRetry(
-        () => this.llm!.generate(prompt + (projectContext ? `\n${projectContext}` : ''), toolDefinitions),
+        () => this.llm!.generate(prompt, toolDefinitions),
         'llm_generate'
       );
     } catch (llmError: any) {
