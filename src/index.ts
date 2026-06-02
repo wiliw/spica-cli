@@ -13,7 +13,7 @@ import {
 import { MCPServerConfig } from './utils/settings';
 import { loadSession, saveSession } from './utils/session';
 import { parseSkillInput, getSkill, buildSkillPrompt, listSkills, installSkill, uninstallSkill, listInstalledPackages, saveSkill, deleteSkill } from './skills';
-import { runInit } from './cli/init';
+
 import { getMCPManager, generateExampleConfig, shutdownMCP } from './mcp/client';
 import { COLORS, format, BG } from './cli/ui/colors';
 import { getInputQueue, clearInputQueue } from './cli/ui/queue';
