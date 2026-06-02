@@ -660,9 +660,17 @@ Start the analysis, execute step by step, then output the document.`;
                 await agent.runLoop(prompt);
                 screen.setStreaming(false);
                 screen.appendScroll(COLORS.success('\n[OK] Done\n'));
+                // 工作完成提示音
+                if (process.env.SPICA_BELL !== 'false') {
+                  process.stdout.write('\x07');
+                }
               } catch (error: any) {
                 screen.setStreaming(false);
                 screen.appendScroll(COLORS.error(`\n[ERR] ${error.message}\n`));
+                // 错误提示音
+                if (process.env.SPICA_BELL !== 'false') {
+                  process.stdout.write('\x07\x07');  // 两声表示错误
+                }
               }
               screen.restoreCursor();
               screen.refreshInput();
