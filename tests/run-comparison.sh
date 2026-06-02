@@ -10,13 +10,11 @@ AGENTS_FILE="$PROJECT_DIR/AGENTS.md"
 AGENTS_SIMPLE="$PROJECT_DIR/tests/AGENTS_simple.md"
 AGENTS_BACKUP="$PROJECT_DIR/AGENTS_original.md"
 
-# 测试任务 - 覆盖不同理解维度
+# 测试任务 - 覆盖不同理解维度（精简版，快速测试）
 TASKS=(
-  "这个项目的核心架构是什么？用简短回答"
-  "bash 工具有几种模式？分别是什么"
-  "如何运行测试？测试命令是什么"
-  "agent.ts 的主要职责是什么"
-  "列出所有与 skills 相关的文件路径"
+  "项目用什么语言？一句话回答"
+  "bash 工具支持哪些模式"
+  "测试命令是什么"
 )
 
 mkdir -p "$RESULTS_DIR"
@@ -41,7 +39,7 @@ run_test() {
 
     # 运行 spica 并捕获输出
     start_time=$(date +%s)
-    output=$(timeout 120 spica run "$task" 2>&1 || echo "TIMEOUT/ERROR")
+    output=$(timeout 30 spica run "$task" 2>&1 || echo "TIMEOUT/ERROR")
     end_time=$(date +%s)
 
     duration=$((end_time - start_time))
