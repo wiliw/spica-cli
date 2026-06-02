@@ -153,14 +153,8 @@ export class SpicaAgent extends EventEmitter {
         return `删除所有未跟踪文件和目录，无法恢复！`;
       }
       
-      // 用户确认的reset操作（AI已告知风险，用户明确确认）
-      if (action === 'reset' && gitArgs.userConfirmed === true) {
-        return `用户已确认reset ${gitArgs.mode || 'mixed'}操作`;
-      }
-      
-      // 用户确认的checkout操作
-      if (action === 'checkout' && gitArgs.userConfirmed === true) {
-        return `用户已确认checkout操作，将切换到 ${gitArgs.branch}`;
+      if (action === 'reset') {
+        return `git reset ${gitArgs.mode || 'mixed'}操作将丢失未提交的更改`;
       }
     }
 
