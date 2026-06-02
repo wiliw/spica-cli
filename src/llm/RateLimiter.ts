@@ -105,6 +105,7 @@ export class RateLimiter {
 
       signal?.addEventListener('abort', () => {
         clearTimeout(timer);
+        clearInterval(checkInterval);
         resolve();
       });
 
