@@ -10,6 +10,18 @@ import os from 'os';
 const screen = getScreenManager();
 const state = getRuntimeState();
 
+// Terminal bell sound (可配置开关)
+const BELL_ENABLED = process.env.SPICA_BELL !== 'false';  // 默认开启，设置 SPICA_BELL=false 关闭
+function bell(reason: 'permission' | 'done' | 'error'): void {
+  if (BELL_ENABLED) {
+    process.stdout.write('\x07');  // Terminal bell
+    // 可选：根据reason不同声音（需要系统支持）
+    // permission: 急促提示
+    // done: 完成提示
+    // error: 错误提示
+  }
+}
+
 // 构建状态栏文本（模型 | 模式 | 工作区）
 function buildStatusText(
   agent: SpicaAgent,
@@ -190,6 +202,7 @@ export function setupAgentEvents(
   });
 
   on('permission_request', async (data: any) => {
+    bell('permission');  // 需要用户交互时发出提示音
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(false);
       process.stdin.pause();

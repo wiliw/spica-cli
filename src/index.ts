@@ -515,82 +515,66 @@ program
 
             const initPrompt = `I am using the init skill to analyze the codebase and create AGENTS.md.
 
-<HARD-GATE>
-Before outputting any document, you must:
-1. Complete all analysis steps
-2. Understand the project's core architecture
-3. Verify all commands are actually available
-</HARD-GATE>
+AGENTS.md is an open standard (https://agents.md/) — a dedicated, predictable place to give AI coding agents context and instructions for working on a project. Think of it as a README for agents.
 
 ## Analysis Steps (must complete in order)
 
 - [ ] **Step 1: Read project config**
   - package.json / Cargo.toml / setup.py / pyproject.toml etc.
-  - Identify: language, framework, dependencies, script commands
+  - Identify: language, framework, scripts (dev, build, test, lint)
 
-- [ ] **Step 2: Read existing documentation**
-  - README.md / CHANGELOG.md / docs/ directory
-  - Understand: project purpose, features, usage
+- [ ] **Step 2: Verify every command works**
+  - Run each script at least once to confirm it exists and succeeds
+  - Only include commands you have personally verified
 
-- [ ] **Step 3: View directory structure**
-  - List src/ lib/ app/ tests/ and other main directories
-  - Identify entry points: index.ts / main.py / app.js etc.
+- [ ] **Step 3: Read existing documentation**
+  - README.md, CONTRIBUTING.md, docs/ directory
+  - Understand: project purpose, architecture, conventions
 
-- [ ] **Step 4: Check test and build configuration**
-  - Test framework, test commands, CI configuration
-  - Build/package configuration
+- [ ] **Step 4: Explore directory structure**
+  - Identify entry points, core modules, test locations
+  - Note large or tangled files that need extra care
 
-- [ ] **Step 5: Review core code**
-  - Implementation of main modules
-  - Data flow and architecture patterns
+- [ ] **Step 5: Review key source files**
+  - Understand the main data flow and design patterns
+  - Note code conventions, error handling patterns, gotchas
 
 ## Document Structure
 
-If AGENTS.md exists, preserve valuable content and supplement updates. If not, create a new file.
+Follow the AGENTS.md standard format. If AGENTS.md already exists, preserve valuable content and supplement updates. If new, use these sections:
 
-Must include the following sections:
+### Dev environment tips
+Practical, project-specific tips an agent needs to work efficiently:
+- How to start the dev server (exact command)
+- How to build (exact command)
+- Setup gotchas (e.g. "run npm install after adding deps")
+- Large or tricky files to be aware of
+- Any project-specific conventions that aren't obvious
 
-### Project Overview
-- Type: CLI tool / Web application / Library / Service
-- Purpose: One-sentence description of core functionality
-- Use case: Target users and usage scenarios
+### Testing instructions
+- Exact test command(s)
+- Where tests live
+- Test framework in use
+- Any test gotchas (e.g. "some tests need Docker")
+- Rule: fix all tests before committing, add tests for changed code
 
-### Tech Stack
-- Language and version requirements
-- Core frameworks/libraries (only key ones, max 5)
-- Runtime environment requirements
+### Code style
+Only if the project has specific conventions beyond the language defaults. Keep it short — things an agent would actually get wrong.
 
-### Project Structure
-Use a table to list key directories and files:
-| Directory/File | Purpose |
-|----------------|---------|
-| src/           | ...     |
-
-### Development Commands
-List verified available commands:
-- Dev: npm run dev
-- Build: npm run build
-- Test: npm test
-- Other key commands
-
-### Core Architecture
-- Main modules and responsibilities (max 3-4)
-- Data flow/processing flow (one sentence)
-- Key design patterns
-
-### Development Notes
-- Code style highlights
-- Common pitfalls (if found)
-- Modules requiring special attention
+### PR instructions
+- Branch naming or PR title format
+- Pre-commit checklist (lint, test, build)
+- Any project-specific review requirements
 
 ## Anti-Pattern Warnings
 
 | Thought | Correct Approach |
 |---------|------------------|
 | "Just write a random overview" | Must be based on actual analysis, cite specific files |
-| "List all dependencies" | Only list core dependencies, don't copy entire package.json |
-| "Guess commands" | Must verify commands exist and are usable |
-| "Write lengthy architecture docs" | Keep it concise, AI agents need quick understanding |
+| "List all dependencies" | Only mention deps that affect the dev workflow |
+| "Guess commands" | Must verify commands exist and actually work |
+| "Write lengthy architecture docs" | Focus on what an agent needs to know to work safely |
+| "Use generic templates" | Every tip should be specific to this project |
 
 ${userArgs ? `\n## Additional Instructions\n${userArgs}\n` : ''}
 Start the analysis, execute step by step, then output the document.`;

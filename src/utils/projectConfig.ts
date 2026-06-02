@@ -150,15 +150,14 @@ function extractFieldValue(section: string, field: string): string | undefined {
   return match ? match[1].trim().replace(/`([^`]+)`/, '$1') : undefined;
 }
 
-// 提取命令（如 "- Build: `npm run build`"）
+// 提取命令（如 "- Build: `npm run build`" 或 "- Use `npm run dev` to start"）
 function extractCommand(section: string, type?: string): string | undefined {
-  // 尝试多种格式
   const patterns = [
     // - Build: `npm run build`
     new RegExp(`[-*]\\s+(?:${type || 'Build|Test|Dev|Start|Run|Lint'}):\\s*\\x60([^\\x60]+)\\x60`, 'i'),
-    // - `npm run build`
-    /[-*]\s+\x60([^\x60]+)\x60/,
-    // npm run build（裸命令）
+    // - Use `npm run dev` / - Run `npm test`
+    /[-*]\s+(?:Use|Run|Execute)\s+\x60([^\x60]+)\x60/i,
+    // npm run build（裸命令，行首）
     new RegExp(`(?:${type || 'build|test|dev|lint'}):\\s*([^\n]+)`, 'i'),
   ];
 
@@ -258,51 +257,47 @@ export function autoDetectProject(workspace: string): ProjectConfig {
   return { type: 'Unknown', language: 'Unknown' };
 }
 
-// 生成 AGENTS.md
+// 生成 AGENTS.md（符合 agentsmd/agents.md 标准）
 export function generateAgentsMd(config: ProjectConfig): string {
+  const dev = config.commands?.dev || 'npm run dev';
+  const build = config.commands?.build || 'npm run build';
+  const testCmd = config.commands?.test || 'npm test';
+  const lint = config.commands?.lint || 'npm run lint';
+
   let content = `# AGENTS.md
 
-## Project
-- Type: ${config.type || 'Unknown'}
-- Language: ${config.language || 'Unknown'}
+## Dev environment tips
+- Start the dev server: \`${dev}\`
+- Build for production: \`${build}\`${lint ? `\n- Lint before committing: \`${lint}\`` : ''}
+- Use \`${testCmd}\` to run the test suite.
 `;
 
-  if (config.framework) {
-    content += `- Framework: ${config.framework}\n`;
+  if (config.devTips?.length) {
+    content += config.devTips.map(t => `- ${t}`).join('\n') + '\n';
   }
 
   content += `
-## Dev environment
-- Start: \` ${config.commands?.dev || 'npm run dev'}\`
+## Testing instructions
+- Run \`${testCmd}\` to execute all tests.
+- Fix any test or type errors before committing — the whole suite must pass.
+- Add or update tests for code you change, even if nobody asked.
 `;
 
-  if (config.commands?.build) {
+  if (config.testingInstructions) {
+    content += `${config.testingInstructions}\n`;
+  }
+
+  if (config.codeStyle?.length) {
     content += `
-## Build
-- Build: \` ${config.commands.build}\`
-`;
-  }
-
-  content += `
-## Testing
-- Test: \` ${config.commands?.test || 'npm test'}\`
-- Run tests before committing
-`;
-
-  if (config.commands?.lint) {
-    content += `- Lint: \` ${config.commands.lint}\`\n`;
-  }
-
-  content += `
 ## Code style
-- No comments unless explicitly requested
-- Prefer concise, readable code
+${config.codeStyle.map(c => `- ${c}`).join('\n')}
 `;
+  }
 
-  if (config.constraints?.length) {
+  if (config.prInstructions) {
     content += `
-## Constraints
-${config.constraints.map(c => `- ${c}`).join('\n')}
+## PR instructions
+${config.prInstructions}
 `;
   }
 
