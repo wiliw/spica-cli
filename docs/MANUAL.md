@@ -166,5 +166,4 @@ spica set local http://localhost:11434/v1 dummy llama3
 ## See Also
 
 - [CONFIGURATION.md](CONFIGURATION.md) - Configuration guide
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Architecture
 - [STORAGE.md](STORAGE.md) - Storage locations
