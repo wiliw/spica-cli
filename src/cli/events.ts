@@ -7,6 +7,188 @@ import { getRuntimeState } from '../core/RuntimeState';
 import os from 'os';
 import { playBell } from '../utils/bell';
 
+// 事件数据类型定义
+interface ConnectionErrorData {
+  type: string;
+  hint: string;
+}
+
+interface StreamData {
+  chunk: string;
+}
+
+// Note: Some interfaces are kept for future use or documentation purposes
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
+interface ReasoningData {
+  content: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
+interface ToolCallData {
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+interface ToolResultData {
+  name: string;
+  success: boolean;
+  output?: string;
+  error?: string;
+  diff?: string;
+  syntaxErrors?: string[];
+}
+
+interface PermissionRequestData {
+  reason: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
+interface PermissionResultData {
+  approved: boolean;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
+interface ContextWarningData {
+  level: string;
+  usage: number;
+  message: string;
+  suggestion?: string;
+}
+
+interface ContextCompressedData {
+  before: number;
+  after: number;
+  tokensBefore?: number;
+  tokensAfter?: number;
+  message?: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
+interface QueueInjectedData {
+  content: string;
+}
+
+interface RetryAttemptData {
+  operation: string;
+  attempt: number;
+  maxRetries: number;
+  delay: number;
+  error: string;
+}
+
+interface ErrorSuggestionData {
+  tool?: string;
+  toolName?: string;
+  error: string;
+  suggestion: string;
+}
+
+interface DiffPreviewData {
+  filePath: string;
+  diff: string;
+}
+
+interface HookBlockedData {
+  tool: string;
+  reason: string;
+}
+
+interface HookWarningData {
+  tool: string;
+  message: string;
+}
+
+interface HookLogData {
+  tool: string;
+  message: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
+interface BypassChangedData {
+  enabled: boolean;
+}
+
+interface WorkspaceChangedData {
+  path: string;
+}
+
+interface PermissionBypassedData {
+  reason: string;
+}
+
+interface SubAgentStartData {
+  id: string;
+  prompt: string;
+  type?: string;
+  description?: string;
+}
+
+interface SubAgentToolCallData {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+interface SubAgentToolResultData {
+  id: string;
+  name: string;
+  result: string;
+  success?: boolean;
+}
+
+interface SubAgentDoneData {
+  id: string;
+  result: string;
+  summary?: string;
+}
+
+interface SubAgentErrorData {
+  id: string;
+  error: string;
+}
+
+interface PendingInputDetectedData {
+  content: string;
+  input?: string;
+}
+
+interface ToolStuckWarningData {
+  tool: string;
+  timeout: number;
+  elapsedMs?: number;
+}
+
+interface ToolAbortedData {
+  tool: string;
+  reason: string;
+}
+
+interface TodoUpdateData {
+  todos: Array<{ content: string; status: string }>;
+}
+
+interface AgentInterruptedData {
+  toolResults: Array<{ name: string; result: string }>;
+}
+
+interface AgentStoppedOnErrorData {
+  tool: string;
+  error: string;
+  suggestion: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
+interface SkillAutoTriggeredData {
+  skill: string;
+  description?: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
+interface MessageData {
+  role: string;
+  content: string;
+}
+
 
 const screen = getScreenManager();
 const state = getRuntimeState();
@@ -67,8 +249,10 @@ export function setupAgentEvents(
   _tokenCounter?: TokenCounter
 ): () => void {
   // 收集所有注册的监听器，用于 cleanup
-  const listeners: Array<{ event: string; handler: (...args: any[]) => void }> = [];
-  const on = (event: string, handler: (...args: any[]) => void) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- EventEmitter requires any[] for handler compatibility
+  type EventHandler = (...args: any[]) => void;
+  const listeners: Array<{ event: string; handler: EventHandler }> = [];
+  const on = (event: string, handler: EventHandler) => {
     agent.on(event, handler);
     listeners.push({ event, handler });
   };
@@ -83,12 +267,12 @@ export function setupAgentEvents(
     justSwitchedFromReasoning = false;
   });
 
-  on('connection_error', (data: any) => {
+  on('connection_error', (data: ConnectionErrorData) => {
     state.setConnectionErrorShown(true);
     screen.appendScroll(COLORS.error(`\n[ERR] ${data.type}: ${data.hint}\n`));
   });
 
-  on('stream', (data: any) => {
+  on('stream', (data: StreamData) => {
 
     // 从 reasoning 切换到 stream 时，加分隔线
     if (reasoningStarted && !justSwitchedFromReasoning) {
@@ -146,7 +330,7 @@ export function setupAgentEvents(
 
   });
 
-  on('tool_result', (data: any) => {
+  on('tool_result', (data: ToolResultData) => {
     state.setStreamingOutput(false);
     screen.setStreaming(false);
     const icon = data.success ? '✓' : '✗';
@@ -184,13 +368,13 @@ export function setupAgentEvents(
   });
 
   // Diff预览（文件编辑时显示详细diff）
-  on('diff_preview', (data: any) => {
+  on('diff_preview', (data: DiffPreviewData) => {
     screen.appendScroll(COLORS.file(`\n[DIFF] ${data.filePath}\n`));
     screen.appendScroll(data.diff + '\n');
     screen.restoreCursor();
   });
 
-  on('permission_request', async (data: any) => {
+  on('permission_request', async (data: PermissionRequestData) => {
     playBell('permission');
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(false);
@@ -236,17 +420,17 @@ export function setupAgentEvents(
     }
   });
 
-  on('error_suggestion', (data: any) => {
+  on('error_suggestion', (data: ErrorSuggestionData) => {
     screen.appendScroll(COLORS.warning(`\n[HINT] ${data.suggestion}\n`));
   });
 
-  on('retry_attempt', (data: any) => {
+  on('retry_attempt', (data: RetryAttemptData) => {
     screen.appendScroll(COLORS.muted(`\n[RETRY] ${data.operation} attempt ${data.attempt}/${data.maxRetries} in ${Math.floor(data.delay/1000)}s...\n`));
     screen.appendScroll(COLORS.muted(`  Error: ${data.error}\n`));
     screen.restoreCursor();
   });
 
-  on('workspace_changed', (data: any) => {
+  on('workspace_changed', (data: WorkspaceChangedData) => {
     screen.appendScroll(COLORS.file(`\n[DIR] Workspace: ${data.path}\n`));
   });
 
@@ -269,61 +453,62 @@ export function setupAgentEvents(
     }
   });
 
-  on('permission_bypassed', (data: any) => {
+  on('permission_bypassed', (data: PermissionBypassedData) => {
     screen.appendScroll(COLORS.bypassAuto(`\n[AUTO] Approved: ${data.reason}\n`));
   });
 
-  on('sub_agent_start', (data: any) => {
+  on('sub_agent_start', (data: SubAgentStartData) => {
     screen.appendScroll(COLORS.subAgent(`\n  [${data.type || 'sub'}] ${data.description}\n`));
   });
 
-  on('sub_agent_tool_call', (data: any) => {
+  on('sub_agent_tool_call', (data: SubAgentToolCallData) => {
     screen.appendScroll(COLORS.subAgent(`    -> [sub] ${data.name}\n`));
   });
 
-  on('sub_agent_tool_result', (data: any) => {
+  on('sub_agent_tool_result', (data: SubAgentToolResultData) => {
     const icon = data.success ? COLORS.success('[OK]') : COLORS.error('[ERR]');
     screen.appendScroll(COLORS.subAgent(`    ${icon} [sub] ${data.name}\n`));
   });
 
-  on('sub_agent_done', (data: any) => {
+  on('sub_agent_done', (data: SubAgentDoneData) => {
     screen.appendScroll(COLORS.success(`\n  [OK] [sub] Done: ${data.summary}\n`));
   });
 
-  on('sub_agent_error', (data: any) => {
+  on('sub_agent_error', (data: SubAgentErrorData) => {
     screen.appendScroll(COLORS.error(`\n  [ERR] [sub] Error: ${data.error}\n`));
   });
 
-  on('hook_blocked', (data: any) => {
+  on('hook_blocked', (data: HookBlockedData) => {
     screen.appendScroll(COLORS.error(`\n[BLOCKED] ${data.tool} - ${data.reason}\n`));
   });
 
-  on('hook_warning', (data: any) => {
+  on('hook_warning', (data: HookWarningData) => {
     screen.appendScroll(COLORS.warning(`\n[WARN] ${data.message}\n`));
   });
 
-  on('hook_log', (data: any) => {
+  on('hook_log', (data: HookLogData) => {
     screen.appendScroll(COLORS.muted(`\n[LOG] ${data.message}\n`));
   });
 
-  on('pending_input_detected', (data: any) => {
+  on('pending_input_detected', (data: PendingInputDetectedData) => {
     screen.appendScroll(COLORS.warning(`\n[NEW INPUT] Detected during tool execution\n`));
     screen.appendScroll(COLORS.muted(`  ${data.input}\n`));
     screen.restoreCursor();
     screen.refreshInput();
   });
 
-  on('tool_stuck_warning', (data: any) => {
-    screen.appendScroll(COLORS.warning(`\n[STUCK] ${data.tool}: stalled ${data.elapsedMs / 1000}s. Auto-aborting and retrying with alternative strategy...\n`));
+  on('tool_stuck_warning', (data: ToolStuckWarningData) => {
+    const elapsedSec = (data.elapsedMs ?? data.timeout) / 1000;
+    screen.appendScroll(COLORS.warning(`\n[STUCK] ${data.tool}: stalled ${elapsedSec}s. Auto-aborting and retrying with alternative strategy...\n`));
   });
 
-  on('tool_aborted', (data: any) => {
+  on('tool_aborted', (data: ToolAbortedData) => {
     screen.appendScroll(COLORS.warning(`\n[ABORT] ${data.tool} 已中断\n`));
     screen.restoreCursor();
     screen.refreshInput();
   });
 
-  on('agent_interrupted', (data: any) => {
+  on('agent_interrupted', (data: AgentInterruptedData) => {
     // 重置流式状态
     state.setStreamingOutput(false);
     screen.setStreaming(false);
@@ -336,7 +521,7 @@ export function setupAgentEvents(
     screen.refreshInput();
   });
 
-  on('agent_stopped_on_error', (data: any) => {
+  on('agent_stopped_on_error', (data: AgentStoppedOnErrorData) => {
     screen.appendScroll(COLORS.error(`\n[STOPPED] Agent stopped due to critical error.\n`));
     screen.appendScroll(COLORS.muted(`  Error: ${data.error || 'Unknown'}\n`));
     screen.appendScroll(COLORS.muted(`  Tool: ${data.tool || 'Unknown'}\n`));
@@ -352,7 +537,7 @@ export function setupAgentEvents(
     }
   });
 
-  on('todo_update', (data: any) => {
+  on('todo_update', (data: TodoUpdateData) => {
     if (data.todos && data.todos.length > 0) {
       displayTodoProgress(data.todos);
     }
@@ -382,7 +567,7 @@ export function setupAgentEvents(
     screen.refreshInput();
   }
 
-  on('context_compressed', (data: any) => {
+  on('context_compressed', (data: ContextCompressedData) => {
     const formatTokens = (t: number) => t >= 1000 ? `${Math.floor(t/1000)}k` : `${t}`;
     const tokensInfo = data.tokensBefore && data.tokensAfter
       ? ` (${formatTokens(data.tokensBefore)} -> ${formatTokens(data.tokensAfter)} tokens)`

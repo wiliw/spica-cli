@@ -2,9 +2,21 @@
 
 import { SpicaAgent } from '../agent';
 
+interface ProviderConfig {
+  provider: string;
+  apiKey: string;
+  model: string;
+  baseUrl?: string;
+  name?: string;
+  rateLimit?: {
+    requestsPerMinute?: number;
+    tokensPerMinute?: number;
+  };
+}
+
 interface RuntimeState {
   agent: SpicaAgent | null;
-  providerConfig: any;
+  providerConfig: ProviderConfig | null;
   isProcessing: boolean;
   bypassMode: boolean;
   connectionErrorShown: boolean;
@@ -37,11 +49,11 @@ class RuntimeStateManager {
   }
 
   // Provider Config
-  setProviderConfig(config: any): void {
+  setProviderConfig(config: ProviderConfig | null): void {
     this.state.providerConfig = config;
   }
 
-  getProviderConfig(): any {
+  getProviderConfig(): ProviderConfig | null {
     return this.state.providerConfig;
   }
 
