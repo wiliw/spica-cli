@@ -211,6 +211,13 @@ export class LLMClient extends EventEmitter {
     }
   }
 
+  // 公开方法：批量添加tool messages（用于中断时保存已执行的结果）
+  addToolMessages(toolResults: Array<{ id: string; result: string }>): void {
+    for (const { id, result } of toolResults) {
+      this.provider.addToolMessage(id, result);
+    }
+  }
+
   async executeWithTools(prompt: string, maxIterations: number = 10): Promise<string> {
     let response = await this.generate(prompt);
     let iterations = 0;

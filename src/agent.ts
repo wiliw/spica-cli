@@ -1006,8 +1006,12 @@ async init() {
 
         allToolResults.push(...toolResults);
 
-        // 中断检查：如果被中断，立即停止整个生成循环
+        // 中断检查：如果被中断，先保存tool results到历史，再停止
         if (this.interruptFlag) {
+          // 重要：保存已执行的tool results，避免历史损坏（缺少tool messages导致API报错）
+          if (toolResults.length > 0 && this.llm) {
+            this.llm.addToolMessages(toolResults.map(t => ({ id: t.id, result: t.result })));
+          }
           this.emit('agent_interrupted', {
             toolResults: toolResults.map(t => ({ name: t.name, result: t.result.slice(0, 100) })),
           });
