@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { BaseProvider, ToolDefinition, LLMResponse, LLMProviderConfig, ChatMessage, ToolCall } from './BaseProvider';
+import { cleanMessages } from '../../utils/messageCleaner';
 
 // Error types and hints
 const ERROR_MESSAGES: Record<string, { type: string; hint: string }> = {
@@ -164,9 +165,13 @@ export class OpenAICompatibleProvider extends BaseProvider {
   }
 
 async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): Promise<LLMResponse> {
+    // 关键修复：在添加新用户消息前，清理不完整的消息序列
+    // 防止出现 assistant toolCalls 没有对应 tool messages 的情况
+    this.messages = cleanMessages(this.messages);
+
     this.messages.push({ role: 'user', content: prompt });
 
-    // DEBUG: 检查消息序列是否正确
+    // DEBUG: 检查消息序列是否正确（清理后应该总是正确）
     const converted = this.convertMessages();
     const lastAssistantWithToolCalls = converted.filter(m => m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0).pop() as any;
     if (lastAssistantWithToolCalls) {
@@ -177,11 +182,13 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
       const foundIds = toolMessagesFollowing.map((m: any) => m.tool_call_id);
 
       if (expectedIds.some((id: string) => !foundIds.includes(id))) {
-        console.error('[DEBUG] Invalid message sequence detected before API call:');
+        console.error('[DEBUG] Invalid message sequence detected AFTER cleaning (should not happen):');
         console.error('[DEBUG] Expected tool_call_ids:', expectedIds);
         console.error('[DEBUG] Found tool_call_ids:', foundIds);
         console.error('[DEBUG] Last assistant message index:', lastIndex);
         console.error('[DEBUG] Following messages:', followingMessages.slice(0, 5));
+        // 再次紧急清理（防御性）
+        this.messages = cleanMessages(this.messages, true);
       }
     }
 
@@ -481,6 +488,9 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
 
   // 从当前历史发起生成请求（不添加新的user消息）
   async generateFromHistory(tools?: ToolDefinition[], signal?: AbortSignal): Promise<LLMResponse> {
+    // 关键修复：清理不完整的消息序列，防止 API 报错
+    this.messages = cleanMessages(this.messages);
+
     try {
       const stream = await this.client.chat.completions.create({
         model: this.config.model,
