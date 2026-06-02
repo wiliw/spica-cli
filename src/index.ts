@@ -533,71 +533,12 @@ program
             // 提取用户额外指令
             const userArgs = cmd.startsWith('init ') ? cmd.slice(5).trim() : '';
 
-            const initPrompt = `I am using the init skill to analyze the codebase and create AGENTS.md.
+            const initPrompt = `Analyze this project and create AGENTS.md. Reference https://agents.md/ for the standard.
 
-AGENTS.md is an open standard (https://agents.md/) — a dedicated, predictable place to give AI coding agents context and instructions for working on a project. Think of it as a README for agents.
+What to include: how to build, how to test, code conventions, PR workflow.
+Verify every command by running it. Don't guess. Be specific to this project.
 
-## Analysis Steps (must complete in order)
-
-- [ ] **Step 1: Read project config**
-  - package.json / Cargo.toml / setup.py / pyproject.toml etc.
-  - Identify: language, framework, scripts (dev, build, test, lint)
-
-- [ ] **Step 2: Verify every command works**
-  - Run each script at least once to confirm it exists and succeeds
-  - Only include commands you have personally verified
-
-- [ ] **Step 3: Read existing documentation**
-  - README.md, CONTRIBUTING.md, docs/ directory
-  - Understand: project purpose, architecture, conventions
-
-- [ ] **Step 4: Explore directory structure**
-  - Identify entry points, core modules, test locations
-  - Note large or tangled files that need extra care
-
-- [ ] **Step 5: Review key source files**
-  - Understand the main data flow and design patterns
-  - Note code conventions, error handling patterns, gotchas
-
-## Document Structure
-
-Follow the AGENTS.md standard format. If AGENTS.md already exists, preserve valuable content and supplement updates. If new, use these sections:
-
-### Dev environment tips
-Practical, project-specific tips an agent needs to work efficiently:
-- How to start the dev server (exact command)
-- How to build (exact command)
-- Setup gotchas (e.g. "run npm install after adding deps")
-- Large or tricky files to be aware of
-- Any project-specific conventions that aren't obvious
-
-### Testing instructions
-- Exact test command(s)
-- Where tests live
-- Test framework in use
-- Any test gotchas (e.g. "some tests need Docker")
-- Rule: fix all tests before committing, add tests for changed code
-
-### Code style
-Only if the project has specific conventions beyond the language defaults. Keep it short — things an agent would actually get wrong.
-
-### PR instructions
-- Branch naming or PR title format
-- Pre-commit checklist (lint, test, build)
-- Any project-specific review requirements
-
-## Anti-Pattern Warnings
-
-| Thought | Correct Approach |
-|---------|------------------|
-| "Just write a random overview" | Must be based on actual analysis, cite specific files |
-| "List all dependencies" | Only mention deps that affect the dev workflow |
-| "Guess commands" | Must verify commands exist and actually work |
-| "Write lengthy architecture docs" | Focus on what an agent needs to know to work safely |
-| "Use generic templates" | Every tip should be specific to this project |
-
-${userArgs ? `\n## Additional Instructions\n${userArgs}\n` : ''}
-Start the analysis, execute step by step, then output the document.`;
+If AGENTS.md already exists, preserve valuable content and supplement updates.`;
 
             handleInput(initPrompt);
             return;
