@@ -85,19 +85,25 @@ export function getSystemPrompt(projectConfig?: any, skillsMetadata?: string, us
     prompt += '\n\n' + usingSuperpowersContent;
   }
 
-  // Project context (compact format)
-  if (projectConfig?.type) {
-    const parts = [projectConfig.type];
-    if (projectConfig.language) parts.push(projectConfig.language);
-    if (projectConfig.framework) parts.push(projectConfig.framework);
-    prompt += `\nProject: ${parts.join(' | ')}`;
-    
-    if (projectConfig.commands?.build || projectConfig.commands?.test) {
-      prompt += `\nCommands: build=${projectConfig.commands.build || 'N/A'}, test=${projectConfig.commands.test || 'N/A'}`;
-    }
-    
-    if (projectConfig.constraints?.length > 0) {
-      prompt += `\nConstraints: ${projectConfig.constraints.slice(0, 3).join(', ')}`;
+  // Project context - inject full AGENTS.md content
+  if (projectConfig) {
+    // Inject raw AGENTS.md content as project guidelines
+    if (projectConfig.rawContent) {
+      prompt += '\n\n## Project Guidelines (from AGENTS.md)\n' + projectConfig.rawContent;
+    } else {
+      // Fallback: compact format if no raw content
+      const parts = [projectConfig.type];
+      if (projectConfig.language) parts.push(projectConfig.language);
+      if (projectConfig.framework) parts.push(projectConfig.framework);
+      prompt += `\nProject: ${parts.join(' | ')}`;
+
+      if (projectConfig.commands?.build || projectConfig.commands?.test) {
+        prompt += `\nCommands: build=${projectConfig.commands.build || 'N/A'}, test=${projectConfig.commands.test || 'N/A'}`;
+      }
+
+      if (projectConfig.constraints?.length > 0) {
+        prompt += `\nConstraints: ${projectConfig.constraints.slice(0, 3).join(', ')}`;
+      }
     }
   }
 
