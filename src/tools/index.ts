@@ -1798,6 +1798,7 @@ function resolvePath(path: string): string {
           try {
             realTarget = fs.realpathSync(resolvedTarget);
             if (isOutside(realTarget)) {
+              // eslint-disable-next-line preserve-caught-error -- caught below as _e and re-thrown
               throw new Error('Access denied: symlink points outside workspace');
             }
           } catch (_e) {
