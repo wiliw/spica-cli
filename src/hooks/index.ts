@@ -3,7 +3,6 @@
 import fs from 'fs-extra';
 import { join } from 'path';
 import {
-  loadGlobalSettings,
   GLOBAL_DIR,
   HookDefinition,
   HookMatcher,
@@ -138,7 +137,7 @@ export function runPreHooks(toolName: string, args: Record<string, any>): HookRe
 }
 
 // 执行PostToolUse hooks（返回日志消息）
-export function runPostHooks(toolName: string, args: Record<string, any>, result: any): string | null {
+export function runPostHooks(toolName: string, args: Record<string, any>, _result: any): string | null {
   const safeArgs = args || {};  // 保护 args 参数
   const hooks = loadHooks();
   const postHooks = hooks.hooks.PostToolUse || [];

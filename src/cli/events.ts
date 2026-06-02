@@ -62,9 +62,9 @@ function formatArgs(args: Record<string, any>): string {
 
 export function setupAgentEvents(
   agent: SpicaAgent,
-  interactive: boolean = false,
+  _interactive: boolean = false,
   model?: string,
-  tokenCounter?: TokenCounter
+  _tokenCounter?: TokenCounter
 ): () => void {
   // 收集所有注册的监听器，用于 cleanup
   const listeners: Array<{ event: string; handler: (...args: any[]) => void }> = [];
@@ -219,7 +219,7 @@ export function setupAgentEvents(
       if (answer && typeof answer.approve === 'boolean') {
         approved = answer.approve;
       }
-    } catch (e) {
+    } catch {
       approved = false;
     } finally {
       state.setPermissionDialogActive(false);
@@ -366,7 +366,7 @@ export function setupAgentEvents(
     };
 
     const lines: string[] = [];
-    todos.forEach((todo, i) => {
+    todos.forEach((todo, _i) => {
       const icon = statusIcons[todo.status] || '◻';
       const colorFn = todo.status === 'completed'
         ? COLORS.success

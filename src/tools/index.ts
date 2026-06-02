@@ -4,10 +4,10 @@ import simpleGit from 'simple-git';
 import { resolve as pathResolve, isAbsolute, dirname, join, basename } from 'path';
 import fastGlob from 'fast-glob';
 import { SpicaAgent } from '../agent';
-import { SubAgentTask, getSubAgentConfig, isToolAllowed, summarizeResult } from './subAgent';
+import { SubAgentTask, getSubAgentConfig, summarizeResult } from './subAgent';
 import { computeDiff, formatDiff, generateEditDiff } from '../cli/ui/diff';
 import { getMCPManager } from '../mcp/client';
-import { getBashPath, supportsTmux } from '../utils/platform';
+import { getBashPath } from '../utils/platform';
 import axios from 'axios';
 
 const isWindows = process.platform === 'win32';
@@ -513,7 +513,7 @@ export async function executeTool(
             const backupDir = join(WORKSPACE, '.spica', 'backups');
             await fs.ensureDir(backupDir);
             const timestamp = Date.now();
-            const safeName = safeArgs.path.replace(/[\/\\]/g, '_');
+            const safeName = safeArgs.path.replace(/[/\\]/g, '_');
             const backupPath = join(backupDir, `${timestamp}-${safeName}`);
             await fs.writeFile(backupPath, oldContentForBackup, 'utf-8');
           }
@@ -628,7 +628,7 @@ export async function executeTool(
           const backupDir = join(WORKSPACE, '.spica', 'backups');
           await fs.ensureDir(backupDir);
           const timestamp = Date.now();
-          const safeName = safeArgs.path.replace(/[\/\\]/g, '_');
+          const safeName = safeArgs.path.replace(/[/\\]/g, '_');
           const backupPath = join(backupDir, `${timestamp}-${safeName}`);
           await fs.writeFile(backupPath, originalContent, 'utf-8');
         } catch { /* 新文件无需备份 */ }
@@ -786,7 +786,7 @@ export async function executeTool(
                   matches.push(`${relativePath}:${i + 1}: ${lines[i].trim()}`);
                 }
               }
-            } catch (readError) {
+            } catch {
               // Skip unreadable files
             }
           }
@@ -814,7 +814,7 @@ export async function executeTool(
         const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
         const detached = safeArgs.detached === true;
         const interactive = safeArgs.interactive === true;
-        const autoRetry = safeArgs.autoRetry !== false;
+        const _autoRetry = safeArgs.autoRetry !== false;
         const maxOutputLength = (safeArgs.maxOutputLength as number) || 50000;
         let inputs = (safeArgs.inputs as string[]) || [];
         const inputFile = safeArgs.inputFile as string;
@@ -1794,25 +1794,28 @@ function resolvePath(path: string): string {
           const resolvedTarget = isAbsolute(linkTarget)
             ? linkTarget
             : pathResolve(dirname(resolved), linkTarget);
+          let realTarget: string;
           try {
-            const realTarget = fs.realpathSync(resolvedTarget);
-            if (isOutside(realTarget)) {
-              throw new Error('Access denied: symlink points outside workspace');
-            }
-          } catch {
+            realTarget = fs.realpathSync(resolvedTarget);
+          } catch (_e) {
             const targetParent = dirname(resolvedTarget);
             try {
               const realTargetParent = fs.realpathSync(targetParent);
               const fullPath = pathResolve(realTargetParent, basename(resolvedTarget));
               if (isOutside(fullPath)) {
-                throw new Error('Access denied: symlink points outside workspace');
+                throw new Error('Access denied: symlink points outside workspace', { cause: _e });
               }
-            } catch {
+            } catch (_e2) {
               if (isOutside(pathResolve(resolvedTarget))) {
-                throw new Error('Access denied: symlink points outside workspace');
+                throw new Error('Access denied: symlink points outside workspace', { cause: _e2 });
               }
             }
+            return resolved;
           }
+          if (isOutside(realTarget)) {
+            throw new Error('Access denied: symlink points outside workspace');
+          }
+          return resolved;
           return resolved;
         }
       } catch (lstErr: any) {
@@ -1820,14 +1823,15 @@ function resolvePath(path: string): string {
       }
 
       const parent = dirname(resolved);
+      let realParent: string;
       try {
-        const realParent = fs.realpathSync(parent);
-        if (isOutside(realParent)) {
-          throw new Error(`Access denied: path "${path}" is outside workspace`);
-        }
+        realParent = fs.realpathSync(parent);
       } catch (parentErr: any) {
         if (parentErr.message?.includes('Access denied')) throw parentErr;
-        throw new Error(`Access denied: cannot resolve path "${path}"`);
+        throw new Error(`Access denied: cannot resolve path "${path}"`, { cause: parentErr });
+      }
+      if (isOutside(realParent)) {
+        throw new Error(`Access denied: path "${path}" is outside workspace`);
       }
       return resolved;
     }

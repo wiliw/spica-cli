@@ -19,7 +19,7 @@ export function loadHistory(): ChatMessage[] {
       const data = fs.readFileSync(HISTORY_FILE, 'utf-8');
       return JSON.parse(data);
     }
-  } catch (error) {
+  } catch {
     // Failed to load history - returning empty array
   }
   return [];
@@ -31,7 +31,7 @@ export function saveHistory(history: ChatMessage[]): void {
     const trimmed = history.slice(-MAX_HISTORY);
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(trimmed, null, 2), { mode: 0o600 });
     fs.chmodSync(HISTORY_FILE, 0o600);
-  } catch (error) {
+  } catch {
     // Failed to save history - non-critical
   }
 }
@@ -41,7 +41,7 @@ export function clearHistory(): void {
     if (fs.existsSync(HISTORY_FILE)) {
       fs.unlinkSync(HISTORY_FILE);
     }
-  } catch (error) {
+  } catch {
     // Failed to clear history - non-critical
   }
 }

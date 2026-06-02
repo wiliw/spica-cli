@@ -5,10 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { EventEmitter } from 'events';
-import fs from 'fs-extra';
-import { join } from 'path';
 import {
-  GLOBAL_DIR,
   MCPServerConfig,
   loadGlobalSettings,
 } from '../utils/settings';
@@ -167,7 +164,7 @@ export class MCPManager extends EventEmitter {
 
   // 断开所有连接
   async disconnectAll(): Promise<void> {
-    for (const [name, client] of this.clients) {
+    for (const [_name, client] of this.clients) {
       try {
         await client.close();
       } catch {

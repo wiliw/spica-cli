@@ -30,7 +30,7 @@ export class TokenCounter {
     }
 
     // Code indicators: braces, semicolons, arrows, dots
-    const codePatterns = /[{}();=><\[\].]/g;
+    const codePatterns = /[{}();=><[\].]/g;
     const codeMatches = text.match(codePatterns);
     if (codeMatches) codeIndicators = codeMatches.length;
 

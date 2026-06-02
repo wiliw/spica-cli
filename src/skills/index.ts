@@ -295,8 +295,8 @@ export async function installSkill(source: string): Promise<{ success: boolean; 
       message: `Installed ${pkgName}`,
       skills,
     };
-  } catch (error: any) {
-    return { success: false, message: `Install failed: ${error.message}` };
+  } catch (_error: any) {
+    return { success: false, message: `Install failed: ${_error.message}` };
   }
 }
 
@@ -311,8 +311,8 @@ export async function uninstallSkill(packageName: string): Promise<{ success: bo
 
     await fs.remove(pkgDir);
     return { success: true, message: `Uninstalled ${packageName}` };
-  } catch (error: any) {
-    return { success: false, message: `Uninstall failed: ${error.message}` };
+  } catch (_error: any) {
+    return { success: false, message: `Uninstall failed: ${_error.message}` };
   }
 }
 
@@ -330,7 +330,7 @@ export async function saveSkill(skillName: string, skill: SkillDefinition, pkgNa
     await fs.writeFile(skillFile, content);
 
     return true;
-  } catch (error: any) {
+  } catch {
     // Failed to save skill - non-critical error
     return false;
   }
@@ -365,7 +365,7 @@ export async function deleteSkill(skillName: string, pkgName?: string): Promise<
     }
 
     return false;
-  } catch (error: any) {
+  } catch {
     // Failed to delete skill - non-critical error
     return false;
   }

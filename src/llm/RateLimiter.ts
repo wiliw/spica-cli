@@ -93,7 +93,7 @@ export class RateLimiter {
 
   // 可中断的sleep
   private interruptibleSleep(ms: number, signal?: AbortSignal): Promise<void> {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve, _reject) => {
       if (signal?.aborted || this.pendingInterrupt) {
         resolve();
         return;

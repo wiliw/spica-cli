@@ -14,7 +14,7 @@ export async function autoDrainQueue(
     return false;
   }
 
-  const pendingCount = queue.getPending().length;
+  queue.getPending();
   const merged = queue.mergePending();
 
   await handler(merged);
