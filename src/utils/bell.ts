@@ -35,6 +35,7 @@ const WIN_SOUNDS: Record<BellReason, string> = {
 function tryPlay(commands: string[]): void {
   if (commands.length === 0) return;
   const [cmd, ...rest] = commands;
+  // Use sh -c so 2>/dev/null works cross-shell on Linux/macOS
   const shellCmd = currentPlatform === 'win32'
     ? cmd
     : `sh -c '${cmd.replace(/'/g, "'\\''")}' 2>/dev/null`;
