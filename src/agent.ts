@@ -1253,10 +1253,39 @@ async init() {
 
     if (finalOldMessages.length > 0) {
       const summary = await this.generateSummary(finalOldMessages);
-      // Filter tool messages before setting
-      const safetyTruncatedClean = safetyTruncated.filter(m => 
-        m.role === 'user' || m.role === 'assistant' || m.role === 'system'
-      );
+      // 保留 assistant + 对应的 tool messages，过滤掉孤立的 tool messages
+      const safetyTruncatedClean: ChatMessage[] = [];
+      const keptToolCallIds = new Set<string>();
+
+      // 第一遍：收集所有保留的 assistant message 的 toolCall IDs
+      for (const m of safetyTruncated) {
+        if (m.role === 'assistant' && m.toolCalls) {
+          for (const tc of m.toolCalls) {
+            keptToolCallIds.add(tc.id);
+          }
+        }
+      }
+
+      // 第二遍：保留 user/assistant/system，以及对应 keptToolCallIds 的 tool messages
+      for (const m of safetyTruncated) {
+        if (m.role === 'user' || m.role === 'assistant' || m.role === 'system') {
+          // 如果是 assistant with toolCalls 但对应的 tool messages 不在 kept 范围内，去掉 toolCalls
+          if (m.role === 'assistant' && m.toolCalls) {
+            const validToolCalls = m.toolCalls.filter(tc => keptToolCallIds.has(tc.id));
+            if (validToolCalls.length < m.toolCalls.length) {
+              // 部分 tool calls 缺少对应的 tool messages，去掉所有 toolCalls
+              safetyTruncatedClean.push({ ...m, toolCalls: undefined });
+            } else {
+              safetyTruncatedClean.push(m);
+            }
+          } else {
+            safetyTruncatedClean.push(m);
+          }
+        } else if (m.role === 'tool' && keptToolCallIds.has(m.toolCallId || '')) {
+          safetyTruncatedClean.push(m);
+        }
+      }
+
       const compressed = [summary, ...safetyTruncatedClean];
       this.llm.setMessages(compressed);
 
