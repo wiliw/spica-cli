@@ -1,10 +1,10 @@
 # AGENTS.md
 
-## Project Overview
+## Project
 
-- **Type**: CLI tool (Node.js, ESM)
-- **Purpose**: AI coding agent with three-step workflow (analyze → plan → execute). Runs in interactive TUI mode or single-task `run` mode.
-- **Users**: Developers using spica as an AI pair programmer in the terminal.
+- Type: CLI tool
+- Language: TypeScript (strict, ES2022)
+- Purpose: AI coding agent with three-step workflow (analyze → plan → execute). Runs in interactive TUI mode or single-task `run` mode.
 
 ## Tech Stack
 
@@ -35,7 +35,14 @@
 | `src/prompts/system.ts` | System prompt (English) |
 | `bin/spica` | Built executable entry point |
 
-## Development Commands
+## Dev environment
+
+- Dev: `npm run dev`
+- Build: `npm run build`
+- Test: `npm run test:run`
+- Lint: `npm run lint`
+
+The full command set:
 
 ```bash
 npm run dev              # Development mode (tsx)
