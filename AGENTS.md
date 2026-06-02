@@ -9,7 +9,7 @@
 - Run `npm run lint` to verify ESLint rules pass after moving files or changing imports.
 
 ## Testing instructions
-- Run `npm run test:run` to execute all tests (285 tests, vitest).
+- Run `npm run test:run` to execute all tests (285 tests, 23 test files, vitest).
 - Run `npx vitest run <file-pattern>` to focus on specific test files.
 - Run `npx vitest run -t "<test name>"` to focus on one test.
 - Tests are in `src/__tests__/` and `src/**/__tests__/` directories.

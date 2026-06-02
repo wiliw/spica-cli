@@ -218,7 +218,7 @@ npx tsc --noEmit   # Type check
 ## Testing
 
 ```bash
-npm run test:run           # Run all 272 tests (22 test files)
+npm run test:run           # Run all 285 tests (23 test files)
 npx vitest run <pattern>   # Run specific test file (e.g., tools.test)
 npx tsc --noEmit           # Type check
 npm run build              # Build executable
