@@ -31,7 +31,6 @@ import * as readline from 'readline';
 import prompts from 'prompts';
 import fs from 'fs-extra';
 import { join } from 'path';
-import os from 'os';
 
 const program = new Command();
 const state = getRuntimeState();
