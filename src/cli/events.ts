@@ -5,78 +5,11 @@ import { TokenCounter } from '../llm/TokenCounter';
 import prompts from 'prompts';
 import { getRuntimeState } from '../core/RuntimeState';
 import os from 'os';
-import { exec } from 'child_process';
-import fs from 'fs-extra';
+import { playBell } from '../utils/bell';
 
 
 const screen = getScreenManager();
 const state = getRuntimeState();
-
-// 提示音配置
-const BELL_ENABLED = process.env.SPICA_BELL !== 'false';
-const BELL_PERMISSION = process.env.SPICA_BELL_PERMISSION || '';  // 自定义声音文件路径
-const BELL_DONE = process.env.SPICA_BELL_DONE || '';
-const BELL_ERROR = process.env.SPICA_BELL_ERROR || '';
-
-function bell(reason: 'permission' | 'done' | 'error'): void {
-  if (!BELL_ENABLED) {
-    console.error('[BELL] Disabled by SPICA_BELL=false');
-    return;
-  }
-
-  const platform = os.platform();
-  console.error(`[BELL] reason=${reason}, platform=${platform}`);
-
-  // 优先使用用户自定义声音文件
-  const customSound = reason === 'permission' ? BELL_PERMISSION : reason === 'done' ? BELL_DONE : BELL_ERROR;
-
-  if (customSound && fs.existsSync(customSound)) {
-    console.error(`[BELL] Playing custom: ${customSound}`);
-    playSound(customSound);
-    return;
-  }
-
-  // 默认系统声音
-  if (platform === 'linux') {
-    const sounds: Record<string, string> = {
-      permission: '/usr/share/sounds/freedesktop/stereo/bell.oga',
-      done: '/usr/share/sounds/freedesktop/stereo/complete.oga',
-      error: '/usr/share/sounds/freedesktop/stereo/dialog-error.oga',
-    };
-    const defaultSound = sounds[reason];
-    console.error(`[BELL] Linux default: ${defaultSound}, exists=${fs.existsSync(defaultSound)}`);
-    if (defaultSound) {
-      playSound(defaultSound);
-    }
-  } else if (platform === 'darwin') {
-    const sounds: Record<string, string> = {
-      permission: '/System/Library/Sounds/Ping.aiff',
-      done: '/System/Library/Sounds/Glass.aiff',
-      error: '/System/Library/Sounds/Sosumi.aiff',
-    };
-    playSound(sounds[reason] || '/System/Library/Sounds/Glass.aiff');
-  } else if (platform === 'win32') {
-    const sounds: Record<string, string> = {
-      permission: 'C:\\Windows\\Media\\Windows Notify System Generic.wav',
-      done: 'C:\\Windows\\Media\\Windows Notify Calendar.wav',
-      error: 'C:\\Windows\\Media\\Windows Critical Stop.wav',
-    };
-    playSoundWindows(sounds[reason] || 'C:\\Windows\\Media\\notify.wav');
-  }
-}
-
-function playSound(soundFile: string): void {
-  const platform = os.platform();
-  if (platform === 'linux') {
-    exec(`paplay "${soundFile}" 2>/dev/null || true`);
-  } else if (platform === 'darwin') {
-    exec(`afplay "${soundFile}" 2>/dev/null || true`);
-  }
-}
-
-function playSoundWindows(soundFile: string): void {
-  exec(`powershell -c "(New-Object Media.SoundPlayer '${soundFile}').PlaySync()" 2>/dev/null || true`);
-}
 
 // 构建状态栏文本（模型 | 模式 | 工作区）
 function buildStatusText(
@@ -258,7 +191,7 @@ export function setupAgentEvents(
   });
 
   on('permission_request', async (data: any) => {
-    bell('permission');  // 需要用户交互时发出提示音
+    playBell('permission');
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(false);
       process.stdin.pause();
