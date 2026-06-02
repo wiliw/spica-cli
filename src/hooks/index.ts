@@ -29,13 +29,41 @@ export function loadHooks(workspacePath?: string): HooksConfig {
   const globalSettings = loadGlobalSettingsSync();
   let hooks = globalSettings.hooks || { PreToolUse: [], PostToolUse: [] };
 
-  // 加载项目 hooks（追加）
+  // 加载项目 hooks（追加，但不能比全局 hooks 更宽松）
   const projectHooks = loadProjectHooks(ws);
   if (projectHooks) {
+    // 构建全局 PreToolUse actions 映射（key: tool pattern）
+    const globalPreActions = new Map<string, string>();
+    for (const hook of (hooks.PreToolUse || [])) {
+      const key = hook.matcher.tool || '*';
+      globalPreActions.set(key, hook.action);
+    }
+
+    // 严格程度排序：none < warn < confirm < block
+    const strictnessOrder: Record<string, number> = {
+      'none': 0,
+      'warn': 1,
+      'confirm': 2,
+      'block': 3,
+    };
+
+    // 过滤项目 PreToolUse hooks：不能比全局更宽松
+    const filteredProjectPre = (projectHooks.PreToolUse || []).filter(hook => {
+      const key = hook.matcher.tool || '*';
+      const globalAction = globalPreActions.get(key);
+      if (!globalAction) return true; // 全局未定义此工具，允许项目 hook
+
+      const globalStrictness = strictnessOrder[globalAction] || 0;
+      const projectStrictness = strictnessOrder[hook.action] || 0;
+
+      // 项目 hooks 只能与全局同等或更严格，不能更宽松
+      return projectStrictness >= globalStrictness;
+    });
+
     hooks = {
       PreToolUse: [
         ...(hooks.PreToolUse || []),
-        ...(projectHooks.PreToolUse || []),
+        ...filteredProjectPre,
       ],
       PostToolUse: [
         ...(hooks.PostToolUse || []),
