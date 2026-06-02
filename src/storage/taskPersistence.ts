@@ -32,7 +32,7 @@ export function loadPersistedTasks(workspacePath: string): PersistedTask[] {
       const state: TasksState = fs.readJsonSync(tasksPath);
       return state.tasks.filter(t => t.status !== 'deleted');
     }
-  } catch (_error) {
+  } catch {
     // Failed to load - return empty
   }
   return [];

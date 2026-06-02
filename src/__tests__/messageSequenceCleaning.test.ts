@@ -57,7 +57,7 @@ describe('Message Sequence Cleaning', () => {
     // 调用 generate，应该先清理消息序列
     try {
       await provider.generate('new prompt');
-    } catch (e) {
+    } catch {
       // 可能因为 mock 不完整而失败，但我们主要检查消息是否被清理
     }
 
@@ -97,7 +97,7 @@ describe('Message Sequence Cleaning', () => {
 
     try {
       await provider.generate('new prompt');
-    } catch (e) {
+    } catch {
       // Mock 可能不完整，但我们主要检查消息是否保留
     }
 
@@ -129,7 +129,7 @@ describe('Message Sequence Cleaning', () => {
 
     try {
       await provider.generateFromHistory();
-    } catch (e) {
+    } catch {
       // Mock 不完整可能失败
     }
 

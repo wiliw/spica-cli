@@ -1828,6 +1828,7 @@ function resolvePath(path: string): string {
       try {
         realParent = fs.realpathSync(parent);
         if (isOutside(realParent)) {
+          // eslint-disable-next-line preserve-caught-error -- caught below and re-thrown
           throw new Error(`Access denied: path "${path}" is outside workspace`);
         }
       } catch (parentErr: any) {
