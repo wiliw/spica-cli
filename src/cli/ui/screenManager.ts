@@ -126,14 +126,11 @@ export class ScreenManager {
 
   appendScroll(text: string): void {
     if (!this.state.cursorInScrollArea) {
+      writeStdout(`${ESC}[?25l`);
       writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
       this.state.cursorInScrollArea = true;
     }
     writeStdout(text);
-    // streaming 时显示光标
-    if (this.state.isStreaming) {
-      writeStdout(`${ESC}[?25h`);
-    }
   }
 
   refreshStatus(): void {
@@ -246,30 +243,9 @@ export class ScreenManager {
   }
 
   refreshInputAndKeepCursor(): void {
-    // Streaming 时刷新输入区，然后恢复光标到滚动区的原位置
-    // 关键：需要保存和恢复光标的精确位置（包括列）
-
-    // 记录 streaming 状态（用于检测中断）
-    const wasStreaming = this.state.isStreaming;
-
-    // 使用 DEC save 来保存当前光标位置（滚动区）
-    if (wasStreaming) {
-      writeStdout('\x1b7');  // DECSC: save cursor position
-    }
-
-    // 刷新输入区（使用绝对定位）
+    // 刷新输入区，光标永远在输入框显示
     this.refreshInput();
-
-    // 检查 streaming 状态是否被中断
-    if (wasStreaming && this.state.isStreaming) {
-      // Streaming 未被中断，恢复光标到滚动区的原位置
-      writeStdout('\x1b8');  // DECRC: restore cursor position
-      writeStdout(`${ESC}[?25h`);  // 显示光标
-      this.state.cursorInScrollArea = true;
-    } else {
-      // Streaming 被中断了，恢复到输入区
-      this.restoreCursor();
-    }
+    this.restoreCursor();
   }
 
   getDisplayCol(line: string, col: number): number {
