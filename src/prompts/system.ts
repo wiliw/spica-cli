@@ -21,7 +21,7 @@ export function buildSkillsSection(skillsMetadata: string): string {
 ## Available Skills
 ${skillsMetadata}
 
-**Usage**: When your task matches a skill above, call skill(name) to load its instructions, then follow them precisely.
+**IMPORTANT**: Before starting any task, call \`skill('using-superpowers')\` to learn how to use skills effectively. This skill explains when and how to invoke other skills.
 `;
 }
 
