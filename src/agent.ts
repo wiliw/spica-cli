@@ -155,11 +155,32 @@ export class SpicaAgent extends EventEmitter {
   private _cachedSkills: SkillDefinition[] = [];
   private _compacting = false;
 
-  // 权限确认状态
-  private permissionQueue: Array<{ reason: string; resolve: (approved: boolean) => void }> = [];
-  private permissionPending = false;
-  private permissionResolve: ((approved: boolean) => void) | null = null;
-  private bypassPermissions = false;
+  // 极危险操作模式（即使在 bypass 模式也需要确认）
+  private static readonly DANGEROUS_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+    { pattern: /rm\s+-rf\s+\//, label: 'Recursive force delete root' },
+    { pattern: /rm\s+-rf\s+\*/, label: 'Recursive force delete all' },
+    { pattern: />\s*\/dev\//, label: 'Write to device' },
+    { pattern: /mkfs\./, label: 'Filesystem format' },
+    { pattern: /dd\s+if=/, label: 'Disk copy' },
+    { pattern: /chmod\s+777/, label: 'World-writable permissions' },
+    { pattern: /:\(\)\s*\{\s*:\|:&\s*\};:/, label: 'Fork bomb' },
+    { pattern: /sudo\s+su\b/, label: 'Switch to root' },
+  ];
+
+  // 检查是否为极危险操作
+  isDangerousOperation(command: string): boolean {
+    return SpicaAgent.DANGEROUS_PATTERNS.some(p => p.pattern.test(command));
+  }
+
+  // 获取危险操作的标签
+  getDangerLabel(command: string): string | null {
+    for (const { pattern, label } of SpicaAgent.DANGEROUS_PATTERNS) {
+      if (pattern.test(command)) {
+        return label;
+      }
+    }
+    return null;
+  }
 
   // 工具级 AbortController（用于中断单个工具）
   private toolAbortControllers: Map<string, AbortController> = new Map();
@@ -191,7 +212,6 @@ export class SpicaAgent extends EventEmitter {
  * - Aborts initialization if in progress
  * - Interrupts LLM streaming
  * - Aborts all active tool executions
- * - Clears permission queue
  *
  * @emits tool_aborted when a tool is aborted
  */
@@ -210,182 +230,9 @@ interrupt() {
       this.emit('tool_aborted', { tool: toolName });
     });
     this.toolAbortControllers.clear();
-    // 拒绝所有待处理的权限请求
-    this.permissionQueue.forEach(p => p.resolve(false));
-    this.permissionQueue = [];
-    this.permissionPending = false;
   }
 
-  // 权限检查
-  private checkNeedsPermission(toolName: string, args: Record<string, any>): string | null {
-    const safeArgs = args || {};
-
-    if (toolName === 'file_delete') {
-      return `Delete: ${safeArgs.path || 'unknown'}`;
-    }
-
-    if (toolName === 'bash') {
-      const cmd = String(safeArgs.command || '');
-
-      // 更精确的危险命令检测
-      const dangerousPatterns = [
-        { pattern: 'rm -rf', name: 'Delete entire directory' },
-        { pattern: 'rm /*', name: 'Delete root directory' },
-        { pattern: 'rm -r /', name: 'Recursive delete root' },
-        { pattern: 'chmod 777', name: 'Open all permissions' },
-        { pattern: 'chmod -R 777', name: 'Recursive open all permissions' },
-        { pattern: 'chown ', name: 'Change file owner' },
-        { pattern: 'sudo ', name: 'Use sudo privileges' },
-        { pattern: 'dd if=', name: 'Disk operation' },
-        { pattern: 'mkfs', name: 'Format disk' },
-        { pattern: '> /dev/', name: 'Write to device file' },
-        { pattern: 'mv /', name: 'Move root directory files' },
-        { pattern: 'git push --force', name: 'Force push' },
-        { pattern: 'git reset --hard', name: 'Hard reset (protected)' },
-        { pattern: 'git clean -fd', name: 'Delete untracked files' },
-        { pattern: ':(){ :|:& };:', name: 'Fork bomb' },
-        { pattern: 'wget ', name: 'Remote download (potential malware)' },
-        { pattern: 'curl ', name: 'Remote request (potential malware)' },
-        { pattern: 'shutdown', name: 'Shutdown system' },
-        { pattern: 'reboot', name: 'Reboot system' },
-        { pattern: 'init 0', name: 'Shutdown system' },
-        { pattern: 'mkswap', name: 'Format swap partition' },
-        { pattern: 'fdisk', name: 'Disk partition operation' },
-      { pattern: 'doas ', name: 'Use doas privileges' },
-      { pattern: 'run0 ', name: 'Use run0 privileges' },
-      ];
-
-      for (const { pattern, name } of dangerousPatterns) {
-        if (cmd.includes(pattern)) {
-          return `${name}: ${cmd.slice(0, 60)}`;
-        }
-      }
-    }
-    
-    // Git工具的危险操作（增强保护）
-    if (toolName === 'git') {
-      const action = safeArgs.action;
-      const gitArgs = safeArgs.args || {};
-      
-      // clean操作 - 删除未跟踪文件
-      if (action === 'clean') {
-        return `Delete all untracked files and directories, cannot recover!`;
-      }
-
-      if (action === 'reset') {
-        return `git reset ${gitArgs.mode || 'mixed'} will lose uncommitted changes`;
-      }
-    }
-
-    return null;
-  }
-
-  // 永远不会被 bypass 的危险操作模式
-  private static readonly NEVER_BYPASS_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
-    { pattern: /rm\s+-rf\b/, label: 'Recursive force delete' },
-    { pattern: />\s*\/dev\//, label: 'Write to device' },
-    { pattern: /mkfs\./, label: 'Filesystem format' },
-    { pattern: /dd\s+if=/, label: 'Disk copy' },
-    { pattern: /chmod\s+777/, label: 'World-writable permissions' },
-    { pattern: /:\(\)\s*\{\s*:\|:&\s*\};:/, label: 'Fork bomb' },
-    { pattern: /sudo\s+su\b/, label: 'Switch to root' },
-  ];
-
-  // 等待权限确认（串行处理）
-  async waitForPermission(reason: string): Promise<boolean> {
-    // 检查是否为永不 bypass 的危险操作
-    for (const { pattern, label } of SpicaAgent.NEVER_BYPASS_PATTERNS) {
-      if (pattern.test(reason)) {
-        // 危险操作：即使在 bypass 模式也强制请求权限
-        break;
-      }
-    }
-
-    // 如果bypass模式开启且不在永不bypass列表中，自动批准
-    const isNeverBypass = SpicaAgent.NEVER_BYPASS_PATTERNS.some(p => p.pattern.test(reason));
-    if (this.bypassPermissions && !isNeverBypass) {
-      this.auditLog('BYPASS_APPROVED', reason);
-      this.emit('permission_bypassed', { reason });
-      return true;
-    }
-
-    // 将请求加入队列
-    const request = { reason, resolve: null as ((approved: boolean) => void) | null };
-    const promise = new Promise<boolean>((resolve) => {
-      request.resolve = resolve;
-    });
-    this.permissionQueue.push(request as any);
-
-    // 如果当前没有正在处理的请求，开始处理队列
-    if (!this.permissionPending) {
-      this.processPermissionQueue();
-    }
-
-    return promise;
-  }
-
-  // 危险操作审计日志
-  private auditLog(action: string, detail: string): void {
-    try {
-      const logDir = path.join(this.workspacePath, '.spica');
-      fs.ensureDirSync(logDir);
-      const logPath = path.join(logDir, 'audit.log');
-      const timestamp = new Date().toISOString();
-      const entry = `[${timestamp}] ${action}: ${detail}\n`;
-      fs.appendFileSync(logPath, entry);
-    } catch {
-      // 审计日志失败不应阻塞正常操作
-    }
-  }
-
-  // 处理权限队列
-  private async processPermissionQueue(): Promise<void> {
-    // Gate: 防止并发处理循环
-    if (this.permissionPending) return;
-    
-    while (this.permissionQueue.length > 0 && !this.interruptFlag) {
-      this.permissionPending = true;
-      const request = this.permissionQueue.shift()!;
-
-      // 发送事件给CLI
-      this.emit('permission_request', { reason: request.reason });
-
-      // 等待用户响应（通过 approvePermission/denyPermission）
-      const approved = await new Promise<boolean>((resolve) => {
-        this.permissionResolve = resolve;
-      });
-
-      // 处理结果
-      if (request.resolve) {
-        request.resolve(approved);
-      }
-      this.auditLog(approved ? 'USER_APPROVED' : 'USER_DENIED', request.reason);
-      this.emit('permission_result', { approved });
-    }
-    this.permissionPending = false;
-    this.permissionResolve = null;
-  }
-
-  // 用户批准（处理当前请求）
-  approvePermission() {
-    if (this.permissionResolve) {
-      this.permissionResolve(true);
-      this.permissionResolve = null;
-    }
-  }
-
-  // 用户拒绝（处理当前请求）
-  denyPermission() {
-    if (this.permissionResolve) {
-      this.permissionResolve(false);
-      this.permissionResolve = null;
-    }
-  }
-
-  get isPermissionPending(): boolean {
-    return this.permissionPending;
-  }
-
+  
   // 中断单个工具（不中断整个 runLoop）
   abortTool(toolName: string): void {
     const controller = this.toolAbortControllers.get(toolName);
@@ -427,16 +274,6 @@ interrupt() {
       return this.queueInputCallback();
     }
     return this.pendingInput;
-  }
-
-  // 设置 Bypass 模式
-  setBypassPermissions(enabled: boolean): void {
-    this.bypassPermissions = enabled;
-    this.emit('bypass_changed', { enabled });
-  }
-
-  get isBypassPermissions(): boolean {
-    return this.bypassPermissions;
   }
 
   setToolWhitelist(allowedTools: string[]): void {
@@ -1043,7 +880,7 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
 
           const tcArgs = tc.arguments || {};
 
-          // Hooks检查（优先于权限检查）
+          // Hooks检查
           const hookResult = runPreHooks(tc.name, tcArgs);
           if (hookResult.matched) {
             if (hookResult.action === 'block') {
@@ -1052,26 +889,8 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
               return { name: tc.name, id: tc.id, result: `Blocked: ${hookResult.message}` };
             }
 
-            if (hookResult.action === 'confirm') {
-              const approved = await this.waitForPermission(hookResult.message);
-              if (!approved) {
-                this.emit('tool_result', { name: tc.name, success: false, error: 'Permission denied by user' });
-                return { name: tc.name, id: tc.id, result: 'Permission denied by user' };
-              }
-            }
-
             if (hookResult.action === 'warn') {
               this.emit('hook_warning', { tool: tc.name, message: hookResult.message });
-            }
-          }
-
-          // 权限检查
-          const permissionReason = this.checkNeedsPermission(tc.name, tcArgs);
-          if (permissionReason) {
-            const approved = await this.waitForPermission(permissionReason);
-            if (!approved) {
-              this.emit('tool_result', { name: tc.name, success: false, error: 'Permission denied by user' });
-              return { name: tc.name, id: tc.id, result: 'Permission denied by user' };
             }
           }
 
@@ -1096,9 +915,6 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
               this.interruptFlag = true;
             }
           };
-
-          // 传递 bypass 状态给工具执行（用于跳过 shell injection 检测）
-          tcArgs._bypassMode = this.bypassPermissions;
 
           try {
             const result = await executeTool(tc.name, tcArgs, eventCallback);

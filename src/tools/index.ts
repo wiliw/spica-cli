@@ -829,23 +829,23 @@ export async function executeTool(
         // 卡住检测阈值（默认30秒，可通过 stuckWarning 参数调整）
         const stuckWarningMs = (safeArgs.stuckWarning as number) || 60000;
 
-        // Shell 注入检测 — 仅在 strict 模式下检测
+        // Shell 注入检测 — 只检测真正危险的模式，允许常用操作符 (; && || ${} <<)
+        // 注意：bypassPermissions 设置已跳过此检查，此代码为历史遗留，未来可移除
         if (!bypassMode) {
-          const injectionPatterns = [
-            { pattern: /\$\(/, name: 'command substitution $(...)' },
-            { pattern: /`[^`]+`/, name: 'backtick command substitution' },
+          const dangerousPatterns = [
+            // 网络连接 - 真正危险
             { pattern: /\/dev\/tcp\//, name: 'bash network connection' },
-            { pattern: /\|\s*(bash|sh|zsh|python|perl|ruby)\b/, name: 'piping to shell interpreter' },
-            { pattern: /mkfifo/, name: 'named pipe creation' },
             { pattern: /\bnc\s+-[el]/, name: 'netcat listener' },
-            { pattern: /;/, name: 'command separator' },
-            { pattern: /&&/, name: 'AND operator' },
-            { pattern: /\|\|/, name: 'OR operator' },
-            { pattern: /\$\{/, name: 'variable expansion' },
-            { pattern: /<<\s*/, name: 'heredoc' },
+            { pattern: /mkfifo/, name: 'named pipe creation' },
+            // 管道到 shell 解释器 - 可能被利用
+            { pattern: /\|\s*(bash|sh|zsh|python|perl|ruby)\b/, name: 'piping to shell interpreter' },
+            // eval - 极危险
             { pattern: /\beval\b/, name: 'eval command' },
+            // 嵌套命令替换 - 需谨慎但允许简单使用
+            // { pattern: /\$\(/, name: 'command substitution $(...)' },  // 允许
+            // { pattern: /`[^`]+`/, name: 'backtick command substitution' }, // 允许
           ];
-          for (const { pattern, name } of injectionPatterns) {
+          for (const { pattern, name } of dangerousPatterns) {
             if (pattern.test(command)) {
               return {
                 success: false,

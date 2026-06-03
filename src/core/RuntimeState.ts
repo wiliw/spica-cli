@@ -21,12 +21,10 @@ interface RuntimeState {
 
   // Processing state
   isProcessing: boolean;
-  bypassMode: boolean;
   streamingOutput: boolean;
 
   // UI state
   connectionErrorShown: boolean;
-  permissionDialogActive: boolean;
   verboseMode: boolean;
   showThinking: boolean;
 
@@ -42,7 +40,7 @@ interface RuntimeState {
  * Manages:
  * - Agent instance
  * - Provider configuration
- * - Processing state (isProcessing, bypassMode)
+ * - Processing state (isProcessing)
  * - UI state (verbose, showThinking)
  * - Interrupt state (count, shouldExit)
  *
@@ -62,10 +60,8 @@ class RuntimeStateManager {
     agent: null,
     providerConfig: null,
     isProcessing: false,
-    bypassMode: false,
     streamingOutput: false,
     connectionErrorShown: false,
-    permissionDialogActive: false,
     verboseMode: false,
     showThinking: false,
     interruptCount: 0,
@@ -104,15 +100,6 @@ class RuntimeStateManager {
     return this.state.isProcessing;
   }
 
-  // Bypass Mode
-  setBypassMode(bypass: boolean): void {
-    this.state.bypassMode = bypass;
-  }
-
-  isBypassMode(): boolean {
-    return this.state.bypassMode;
-  }
-
   // Streaming Output
   setStreamingOutput(streaming: boolean): void {
     this.state.streamingOutput = streaming;
@@ -129,15 +116,6 @@ class RuntimeStateManager {
 
   isConnectionErrorShown(): boolean {
     return this.state.connectionErrorShown;
-  }
-
-  // Permission Dialog Active
-  setPermissionDialogActive(active: boolean): void {
-    this.state.permissionDialogActive = active;
-  }
-
-  isPermissionDialogActive(): boolean {
-    return this.state.permissionDialogActive;
   }
 
   // Verbose Mode
@@ -209,10 +187,8 @@ class RuntimeStateManager {
       agent: null,
       providerConfig: null,
       isProcessing: false,
-      bypassMode: false,
       streamingOutput: false,
       connectionErrorShown: false,
-      permissionDialogActive: false,
       verboseMode: false,
       showThinking: false,
       interruptCount: 0,

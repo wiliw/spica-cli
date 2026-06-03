@@ -183,8 +183,6 @@ program
           "/help",
           "/h",
           "/status",
-          "/bypass",
-          "/strict",
           "/queue",
           "/q",
           "/undo",
@@ -208,12 +206,8 @@ program
         });
 
         // 显示状态栏（简洁版）
-        // 状态栏：模型 | 模式 | 工作区（智能缩写长路径）
+        // 状态栏：模型 | 工作区（智能缩写长路径）
         const updateStatusBar = () => {
-          const modeLabel = state.isBypassMode()
-            ? "\x1b[33mBYPASS\x1b[0m"
-            : "\x1b[32mSTRICT\x1b[0m";
-
           // 工作区路径显示（Windows 下缩写长路径）
           const workspace = agent.getWorkspacePath();
           const homeDir = os.homedir();
@@ -233,7 +227,7 @@ program
           }
 
           screen.setStatus(
-            `${providerConfig.model} | ${modeLabel} | ${displayPath}`,
+            `${providerConfig.model} | ${displayPath}`,
           );
         };
         updateStatusBar();
@@ -272,7 +266,7 @@ program
         process.stdin.on("data", (chunk: Buffer) => {
           const result = tuiHandler!.handleStdin(
             chunk.toString("utf8"),
-            state.isPermissionDialogActive(),
+            false,
           );
 
           // ESC ESC 中断
@@ -574,27 +568,8 @@ program
               return;
             }
 
-            // 权限模式 (bypass / strict)
-            if (cmd === "bypass") {
-              agent.setBypassPermissions(true);
-              state.setBypassMode(true);
-              screen.appendScroll(
-                COLORS.warning("\n[BYPASS] Auto-approve mode activated\n"),
-              );
-              return;
-            }
-            if (cmd === "strict") {
-              agent.setBypassPermissions(false);
-              state.setBypassMode(false);
-              screen.appendScroll(
-                COLORS.success("\n[STRICT] Permission mode activated\n"),
-              );
-              return;
-            }
-
             // 状态
             if (cmd === "status") {
-              const mode = state.isBypassMode() ? "BYPASS" : "STRICT";
               const msgs = agent.getMessages().length;
               const queue = getInputQueue();
               const queueStatus = queue.getStatus();
@@ -620,7 +595,6 @@ program
                   : String(contextWindow);
 
               screen.appendScroll(COLORS.primary.bold("\nStatus:\n"));
-              screen.appendScroll(`  Mode: ${mode.toUpperCase()}\n`);
               screen.appendScroll(`  Messages: ${msgs}\n`);
               screen.appendScroll(
                 `  Context: ${usagePercent.toFixed(1)}% (${usedK} / ${maxK} tokens)\n`,
@@ -944,13 +918,6 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
             COLORS.muted("  /undo       Remove last input\n"),
           );
           screen.appendScroll("\n");
-          screen.appendScroll(COLORS.primary.bold("Mode:\n"));
-          screen.appendScroll(
-            COLORS.muted("  /bypass     Auto-approve all permissions\n"),
-          );
-          screen.appendScroll(
-            COLORS.muted("  /strict     Ask permission (default)\n"),
-          );
           screen.appendScroll(COLORS.muted("  /status     Show status\n"));
           screen.appendScroll("\n");
           screen.appendScroll(COLORS.primary.bold("Skills:\n"));
@@ -1525,7 +1492,6 @@ async function runSimpleMode(
           const messages = agent.getMessages();
           console.log(COLORS.primary(`\n[Status]`));
           console.log(`  Messages: ${messages.length}`);
-          console.log(`  Mode: ${state.isBypassMode() ? "BYPASS" : "STRICT"}`);
         } else {
           console.log(COLORS.warning(`Unknown command: ${trimmed}`));
         }

@@ -23,10 +23,6 @@ export function displayStatusLine(): void {
     parts.push(COLORS.primary(`queue: ${queueStatus.pending}`));
   }
 
-  parts.push(state.isBypassMode()
-    ? COLORS.bypass('bypass')
-    : COLORS.success('strict'));
-
   const statusLine = parts.join(' | ');
   console.log(COLORS.muted(statusLine));
 }

@@ -97,20 +97,4 @@ describe('Interrupt Handling - Enhanced Regression Tests', () => {
       expect(agent).toBeDefined();
     });
   });
-
-  describe('Permission queue handling', () => {
-    it('should clear permission queue on interrupt', () => {
-      agent.interrupt();
-
-      // Permission队列应该被清除
-      expect(agent.isPermissionPending).toBe(false);
-    });
-
-    it('should resolve pending permission requests', () => {
-      // Interrupt应该解决pending的权限请求
-      agent.interrupt();
-
-      expect(agent.isPermissionPending).toBe(false);
-    });
-  });
 });

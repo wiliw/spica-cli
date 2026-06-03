@@ -16,12 +16,11 @@ describe('shell injection prevention', () => {
     await fs.remove(tmpDir);
   });
 
+  // 放宽后的安全策略：只阻止真正危险的操作
   const blockedCommands = [
-    { cmd: 'ls; rm -rf /', name: 'command separator (;)' },
-    { cmd: 'echo hello && whoami', name: 'AND operator (&&)' },
-    { cmd: 'false || cat /etc/passwd', name: 'OR operator (||)' },
-    { cmd: 'echo ${HOME}', name: 'variable expansion (${})' },
-    { cmd: 'cat << EOF\ntest\nEOF', name: 'heredoc' },
+    { cmd: 'mkfifo /tmp/pipe', name: 'named pipe creation' },
+    { cmd: 'nc -l 8080', name: 'netcat listener' },
+    { cmd: 'bash -c "cat /etc/passwd" | sh', name: 'piping to shell interpreter' },
     { cmd: 'eval echo bad', name: 'eval command' },
   ];
 
@@ -33,16 +32,26 @@ describe('shell injection prevention', () => {
     });
   }
 
+  // 现在允许的常用操作符（之前被阻止）
+  const allowedCommands = [
+    { cmd: 'ls; echo done', name: 'command separator (;)' },
+    { cmd: 'echo hello && echo world', name: 'AND operator (&&)' },
+    { cmd: 'false || echo fallback', name: 'OR operator (||)' },
+    { cmd: 'echo ${HOME}', name: 'variable expansion (${})' },
+    { cmd: 'echo $(whoami)', name: 'command substitution ($())' },
+  ];
+
+  for (const { cmd, name } of allowedCommands) {
+    it(`should now allow ${name} (relaxed for usability)`, async () => {
+      const result = await executeTool('bash', { command: cmd });
+      expect(result.success).toBe(true);
+    });
+  }
+
   it('should still allow safe commands', async () => {
     const result = await executeTool('bash', { command: 'echo hello world' });
     expect(result.success).toBe(true);
     expect(result.output).toContain('hello world');
-  });
-
-  it('should block existing patterns (regression)', async () => {
-    const result = await executeTool('bash', { command: 'echo $(whoami)' });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('Blocked');
   });
 });
 

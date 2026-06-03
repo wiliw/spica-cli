@@ -37,15 +37,6 @@ interface ToolResultData {
   syntaxErrors?: string[];
 }
 
-interface PermissionRequestData {
-  reason: string;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
-interface PermissionResultData {
-  approved: boolean;
-}
-
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
 interface ContextWarningData {
   level: string;
@@ -101,16 +92,8 @@ interface HookLogData {
   message: string;
 }
 
-interface BypassChangedData {
-  enabled: boolean;
-}
-
 interface WorkspaceChangedData {
   path: string;
-}
-
-interface PermissionBypassedData {
-  reason: string;
 }
 
 interface SubAgentStartData {
@@ -190,15 +173,11 @@ interface MessageData {
 const screen = getScreenManager();
 const state = getRuntimeState();
 
-// 构建状态栏文本（模型 | 模式 | 工作区）
+// 构建状态栏文本（模型 | 工作区）
 function buildStatusText(
   agent: SpicaAgent,
-  model: string | undefined,
-  bypassMode: boolean
+  model: string | undefined
 ): string {
-  const modeLabel = bypassMode ? 'BYPASS' : 'STRICT';
-  const modeColor = bypassMode ? '\x1b[33m' : '\x1b[32m';
-
   // 工作区路径显示（智能缩写）
   const workspace = agent.getWorkspacePath();
   const homeDir = os.homedir();
@@ -217,7 +196,7 @@ function buildStatusText(
     }
   }
 
-  return `${model || '?'} | ${modeColor}${modeLabel}\x1b[0m | ${displayPath}`;
+  return `${model || '?'} | ${displayPath}`;
 }
 
 function formatArgs(args: Record<string, unknown>): string {
@@ -374,52 +353,6 @@ export function setupAgentEvents(
     screen.restoreCursor();
   });
 
-  on('permission_request', async (data: PermissionRequestData) => {
-    playBell('permission');
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(false);
-      process.stdin.pause();
-      state.setPermissionDialogActive(true);
-    }
-
-    let approved = false;
-    try {
-      screen.appendScroll(format.permissionBox(data.reason));
-      const answer = await prompts(
-        {
-          type: 'confirm',
-          name: 'approve',
-          message: COLORS.primary.bold('Do you want to allow this action?'),
-          initial: false,
-        },
-        {
-          onCancel: () => {
-            approved = false;
-            return true;
-          }
-        }
-      );
-      screen.appendScroll(COLORS.permissionBorder('═'.repeat(50)) + '\n');
-      if (answer && typeof answer.approve === 'boolean') {
-        approved = answer.approve;
-      }
-    } catch {
-      approved = false;
-    } finally {
-      state.setPermissionDialogActive(false);
-      if (process.stdin.isTTY) {
-        process.stdin.resume();
-        process.stdin.setRawMode(true);
-      }
-    }
-
-    if (approved) {
-      agent.approvePermission();
-    } else {
-      agent.denyPermission();
-    }
-  });
-
   on('error_suggestion', (data: ErrorSuggestionData) => {
     screen.appendScroll(COLORS.warning(`\n[HINT] ${data.suggestion}\n`));
   });
@@ -434,27 +367,11 @@ export function setupAgentEvents(
     screen.appendScroll(COLORS.file(`\n[DIR] Workspace: ${data.path}\n`));
   });
 
-  on('bypass_changed', (data: BypassChangedData) => {
-    state.setBypassMode(data.enabled);
-    const msg = data.enabled
-      ? '[BYPASS] Auto-approve mode activated'
-      : '[STRICT] Permission mode activated';
-    const color = data.enabled ? COLORS.warning : COLORS.success;
-    screen.appendScroll(color(`\n${msg}\n`));
-    if (model) {
-      screen.setStatus(buildStatusText(agent, model, data.enabled));
-    }
-  });
-
   // 工具执行完成后刷新状态栏（更新工作区等）
   on('tool_result', () => {
     if (model) {
-      screen.setStatus(buildStatusText(agent, model, state.isBypassMode()));
+      screen.setStatus(buildStatusText(agent, model));
     }
-  });
-
-  on('permission_bypassed', (data: PermissionBypassedData) => {
-    screen.appendScroll(COLORS.bypassAuto(`\n[AUTO] Approved: ${data.reason}\n`));
   });
 
   on('sub_agent_start', (data: SubAgentStartData) => {
