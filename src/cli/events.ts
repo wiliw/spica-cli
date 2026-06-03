@@ -18,12 +18,10 @@ interface StreamData {
 }
 
 // Note: Some interfaces are kept for future use or documentation purposes
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
 interface ReasoningData {
   content: string;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
 interface ToolCallData {
   name: string;
   arguments: Record<string, unknown>;

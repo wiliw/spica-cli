@@ -100,9 +100,7 @@ export class MCPManager extends EventEmitter {
     // 监听stderr日志（通过transport.stderr获取，仅 Stdio 模式）
     if (transport instanceof StdioClientTransport) {
       const stdioTransport = transport as StdioClientTransport;
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
       if ((stdioTransport as unknown as { stderr?: { on?: (event: string, cb: (data: Buffer) => void) => void } }).stderr) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
         (stdioTransport as unknown as { stderr: { on: (event: string, cb: (data: Buffer) => void) => void } }).stderr.on('data', (data: Buffer) => {
           this.emit('server_log', { name: config.name, log: data.toString() });
         });
