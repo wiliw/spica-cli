@@ -20,20 +20,93 @@ import os from 'os';
 import simpleGit from 'simple-git';
 import type { ChatMessage } from './llm/providers/BaseProvider';
 
+// 工具冲突检测：提取资源路径
+function extractResourcePath(toolName: string, args: Record<string, unknown>): string | null {
+  // 文件操作工具
+  if (['file_read', 'file_write', 'file_edit', 'file_multi_edit', 'file_delete', 'file_copy', 'file_move', 'file_exists', 'file_patch'].includes(toolName)) {
+    return (args.path || args.file_path || args.source || args.from) as string | null;
+  }
+  // bash 命令中可能涉及的文件（检测 rm、mv、cp 等操作）
+  if (toolName === 'bash') {
+    const cmd = (args.command as string) || '';
+    // 提取 rm/mv/cp/cat/echo > 等操作的文件路径
+    const fileOpMatch = cmd.match(/(?:rm|mv|cp|cat|head|tail|sed|awk|echo\s*>>|echo\s*>)\s+(['"]?)([^\s'"]+)\1/);
+    if (fileOpMatch) return fileOpMatch[2];
+  }
+  // git 操作（整个仓库）
+  if (toolName === 'git') {
+    return 'git:repo';  // git 操作视为同资源
+  }
+  return null;
+}
+
+// 检测工具调用冲突：返回需要顺序执行的工具组
+function detectToolConflicts(toolCalls: Array<{ name: string; id: string; arguments: Record<string, unknown> }>): {
+  parallel: Array<{ name: string; id: string; arguments: Record<string, unknown> }>;
+  sequential: Array<Array<{ name: string; id: string; arguments: Record<string, unknown> }>>;
+  conflicts: Array<{ path: string; tools: string[] }>;
+} {
+  const pathToTools: Map<string, Array<{ name: string; id: string; arguments: Record<string, unknown> }>> = new Map();
+  const noConflictTools: Array<{ name: string; id: string; arguments: Record<string, unknown> }> = [];
+
+  for (const tc of toolCalls) {
+    const resourcePath = extractResourcePath(tc.name, tc.arguments);
+    if (resourcePath) {
+      if (!pathToTools.has(resourcePath)) {
+        pathToTools.set(resourcePath, []);
+      }
+      pathToTools.get(resourcePath)!.push(tc);
+    } else {
+      noConflictTools.push(tc);
+    }
+  }
+
+  // 分组：无冲突的并行执行，有冲突的顺序执行
+  const sequential: Array<Array<{ name: string; id: string; arguments: Record<string, unknown> }>> = [];
+  const parallel: Array<{ name: string; id: string; arguments: Record<string, unknown> }> = [...noConflictTools];
+  const conflicts: Array<{ path: string; tools: string[] }> = [];
+
+  for (const [path, tools] of pathToTools) {
+    if (tools.length === 1) {
+      // 单个工具操作该资源，可以并行
+      parallel.push(tools[0]);
+    } else {
+      // 多个工具操作同一资源，需要顺序执行
+      sequential.push(tools);
+      conflicts.push({ path, tools: tools.map(t => t.name) });
+    }
+  }
+
+  return { parallel, sequential, conflicts };
+}
+
+/**
+ * Todo item for task tracking
+ */
 export interface Todo {
+  /** Task content/description */
   content: string;
+  /** Task status: pending, in_progress, or completed */
   status: 'pending' | 'in_progress' | 'completed';
 }
 
+/**
+ * Project configuration detected from workspace
+ */
 export interface ProjectConfig {
+  /** Project type: e.g., 'typescript', 'python' */
   type?: string;
+  /** Framework: e.g., 'react', 'vue' */
   framework?: string;
+  /** Primary language */
   language?: string;
+  /** Build/test/dev commands */
   commands?: {
     build?: string;
     test?: string;
     dev?: string;
   };
+  /** Project-specific constraints */
   constraints?: string[];
 }
 
@@ -44,9 +117,30 @@ export class InterruptError extends Error {
   }
 }
 
+/**
+ * SpicaAgent - AI coding agent with three-step workflow
+ *
+ * Core responsibilities:
+ * - Manage LLM client and tool orchestration
+ * - Handle interrupt signals (ESC ESC / Ctrl+C)
+ * - Manage project state and session persistence
+ * - Coordinate MCP servers and skills
+ *
+ * @extends EventEmitter
+ * @example
+ * ```ts
+ * const agent = new SpicaAgent('openai', '/path/to/workspace');
+ * await agent.init();
+ * const result = await agent.runLoop('fix the bug in app.ts');
+ * ```
+ */
 export class SpicaAgent extends EventEmitter {
   private llm: LLMClient | null = null;
 
+  /**
+   * Get the LLM client instance
+   * @returns LLMClient instance or null if not initialized
+   */
   getLLM(): LLMClient | null {
     return this.llm;
   }
@@ -89,7 +183,19 @@ export class SpicaAgent extends EventEmitter {
     return this._todos;
   }
 
-  interrupt() {
+  /**
+ * Interrupt agent execution
+ *
+ * Effects:
+ * - Sets interrupt flag to stop current operation
+ * - Aborts initialization if in progress
+ * - Interrupts LLM streaming
+ * - Aborts all active tool executions
+ * - Clears permission queue
+ *
+ * @emits tool_aborted when a tool is aborted
+ */
+interrupt() {
     this.interruptFlag = true;
     // 中断 init 中的连接检测
     if (this._initAbortController) {
@@ -123,30 +229,30 @@ export class SpicaAgent extends EventEmitter {
 
       // 更精确的危险命令检测
       const dangerousPatterns = [
-        { pattern: 'rm -rf', name: '删除整个目录' },
-        { pattern: 'rm /*', name: '删除根目录' },
-        { pattern: 'rm -r /', name: '递归删除根目录' },
-        { pattern: 'chmod 777', name: '开放所有权限' },
-        { pattern: 'chmod -R 777', name: '递归开放所有权限' },
-        { pattern: 'chown ', name: '修改文件所有者' },
-        { pattern: 'sudo ', name: '使用sudo权限' },
-        { pattern: 'dd if=', name: '磁盘操作' },
-        { pattern: 'mkfs', name: '格式化磁盘' },
-        { pattern: '> /dev/', name: '写入设备文件' },
-        { pattern: 'mv /', name: '移动根目录文件' },
-        { pattern: 'git push --force', name: '强制推送' },
-        { pattern: 'git reset --hard', name: '硬重置（已保护）' },
-        { pattern: 'git clean -fd', name: '删除未跟踪文件' },
-        { pattern: ':(){ :|:& };:', name: 'Fork 炸弹' },
-        { pattern: 'wget ', name: '远程下载（可能下载恶意脚本）' },
-        { pattern: 'curl ', name: '远程请求（可能下载恶意脚本）' },
-        { pattern: 'shutdown', name: '关机' },
-        { pattern: 'reboot', name: '重启' },
-        { pattern: 'init 0', name: '关机' },
-        { pattern: 'mkswap', name: '格式化交换分区' },
-        { pattern: 'fdisk', name: '磁盘分区操作' },
-      { pattern: 'doas ', name: '使用doas权限' },
-      { pattern: 'run0 ', name: '使用run0权限' },
+        { pattern: 'rm -rf', name: 'Delete entire directory' },
+        { pattern: 'rm /*', name: 'Delete root directory' },
+        { pattern: 'rm -r /', name: 'Recursive delete root' },
+        { pattern: 'chmod 777', name: 'Open all permissions' },
+        { pattern: 'chmod -R 777', name: 'Recursive open all permissions' },
+        { pattern: 'chown ', name: 'Change file owner' },
+        { pattern: 'sudo ', name: 'Use sudo privileges' },
+        { pattern: 'dd if=', name: 'Disk operation' },
+        { pattern: 'mkfs', name: 'Format disk' },
+        { pattern: '> /dev/', name: 'Write to device file' },
+        { pattern: 'mv /', name: 'Move root directory files' },
+        { pattern: 'git push --force', name: 'Force push' },
+        { pattern: 'git reset --hard', name: 'Hard reset (protected)' },
+        { pattern: 'git clean -fd', name: 'Delete untracked files' },
+        { pattern: ':(){ :|:& };:', name: 'Fork bomb' },
+        { pattern: 'wget ', name: 'Remote download (potential malware)' },
+        { pattern: 'curl ', name: 'Remote request (potential malware)' },
+        { pattern: 'shutdown', name: 'Shutdown system' },
+        { pattern: 'reboot', name: 'Reboot system' },
+        { pattern: 'init 0', name: 'Shutdown system' },
+        { pattern: 'mkswap', name: 'Format swap partition' },
+        { pattern: 'fdisk', name: 'Disk partition operation' },
+      { pattern: 'doas ', name: 'Use doas privileges' },
+      { pattern: 'run0 ', name: 'Use run0 privileges' },
       ];
 
       for (const { pattern, name } of dangerousPatterns) {
@@ -163,11 +269,11 @@ export class SpicaAgent extends EventEmitter {
       
       // clean操作 - 删除未跟踪文件
       if (action === 'clean') {
-        return `删除所有未跟踪文件和目录，无法恢复！`;
+        return `Delete all untracked files and directories, cannot recover!`;
       }
-      
+
       if (action === 'reset') {
-        return `git reset ${gitArgs.mode || 'mixed'}操作将丢失未提交的更改`;
+        return `git reset ${gitArgs.mode || 'mixed'} will lose uncommitted changes`;
       }
     }
 
@@ -598,7 +704,7 @@ private matchSkill(prompt: string): SkillDefinition | null {
           this.emit('error_suggestion', {
             tool: operationName,
             error: errorMsg,
-            suggestion: `错误不可重试，需要用户处理: ${errorMsg}`
+            suggestion: `Error not retryable, user needs to handle: ${errorMsg}`
           });
           throw error;
         }
@@ -634,6 +740,19 @@ private matchSkill(prompt: string): SkillDefinition | null {
     throw lastError;
   }
 
+/**
+ * Initialize agent and LLM client
+ *
+ * Steps:
+ * 1. Initialize skills system
+ * 2. Initialize MCP servers
+ * 3. Load provider configuration
+ * 4. Create LLM client instance
+ * 5. Load workspace state and session
+ *
+ * @returns Promise that resolves when initialization complete
+ * @throws Error if initialization fails or is interrupted
+ */
 async init() {
     if (this._initialized) return;
     if (this._initPromise) return this._initPromise;
@@ -770,7 +889,23 @@ async init() {
     return cleanMessages(messages);
   }
 
-  async runLoop(prompt: string, maxIterations = 50): Promise<string> {
+  /**
+ * Main agent execution loop
+ *
+ * Workflow:
+ * 1. Match skill if input matches skill pattern
+ * 2. Create auto checkpoint before work
+ * 3. Compress context if needed
+ * 4. Generate LLM response
+ * 5. Execute tools (parallel or sequential based on conflicts)
+ * 6. Continue until finished or max iterations
+ *
+ * @param prompt - User input/prompt
+ * @param maxIterations - Maximum loop iterations (default: 50)
+ * @returns Final response string
+ * @throws InterruptError if interrupted by user
+ */
+async runLoop(prompt: string, maxIterations = 50): Promise<string> {
     this.interruptFlag = false;
     if (!this.llm) {
       await this.init();
@@ -891,20 +1026,28 @@ async init() {
       }
 
       if (response.toolCalls && response.toolCalls.length > 0) {
-        const toolResults = await Promise.all(response.toolCalls.map(async (tc) => {
+        // 冲突检测：检测同一资源的并发操作
+        const { parallel, sequential, conflicts } = detectToolConflicts(response.toolCalls);
+
+        // 发送冲突警告
+        if (conflicts.length > 0) {
+          this.emit('tool_conflict_warning', {
+            conflicts,
+            message: `Detected ${conflicts.length} resource conflicts. Tools targeting same resources will execute sequentially.`
+          });
+        }
+
+        // 执行单个工具的内部函数
+        const executeSingleTool = async (tc: { name: string; id: string; arguments: Record<string, unknown> }): Promise<{ name: string; id: string; result: string; isCritical?: boolean; referencedSkills?: string[] }> => {
           if (this.interruptFlag) return { name: tc.name, id: tc.id, result: 'interrupted' };
 
-          const tcArgs = tc.arguments || {};  // 确保 arguments 存在
+          const tcArgs = tc.arguments || {};
 
           // Hooks检查（优先于权限检查）
           const hookResult = runPreHooks(tc.name, tcArgs);
           if (hookResult.matched) {
             if (hookResult.action === 'block') {
-              this.emit('tool_result', {
-                name: tc.name,
-                success: false,
-                error: `Blocked: ${hookResult.message}`,
-              });
+              this.emit('tool_result', { name: tc.name, success: false, error: `Blocked: ${hookResult.message}` });
               this.emit('hook_blocked', { tool: tc.name, reason: hookResult.message });
               return { name: tc.name, id: tc.id, result: `Blocked: ${hookResult.message}` };
             }
@@ -912,11 +1055,7 @@ async init() {
             if (hookResult.action === 'confirm') {
               const approved = await this.waitForPermission(hookResult.message);
               if (!approved) {
-                this.emit('tool_result', {
-                  name: tc.name,
-                  success: false,
-                  error: 'Permission denied by user',
-                });
+                this.emit('tool_result', { name: tc.name, success: false, error: 'Permission denied by user' });
                 return { name: tc.name, id: tc.id, result: 'Permission denied by user' };
               }
             }
@@ -926,137 +1065,108 @@ async init() {
             }
           }
 
-          // 权限检查（原有逻辑）
+          // 权限检查
           const permissionReason = this.checkNeedsPermission(tc.name, tcArgs);
           if (permissionReason) {
             const approved = await this.waitForPermission(permissionReason);
             if (!approved) {
-              this.emit('tool_result', {
-                name: tc.name,
-                success: false,
-                error: 'Permission denied by user',
-              });
+              this.emit('tool_result', { name: tc.name, success: false, error: 'Permission denied by user' });
               return { name: tc.name, id: tc.id, result: 'Permission denied by user' };
             }
           }
 
-          // 工具白名单检查（subagent权限控制）
+          // 工具白名单检查
           if (this.toolWhitelist && !this.toolWhitelist.includes(tc.name)) {
-            this.emit('tool_result', {
-              name: tc.name,
-              success: false,
-              error: `Tool ${tc.name} not allowed for this subagent`,
-            });
+            this.emit('tool_result', { name: tc.name, success: false, error: `Tool ${tc.name} not allowed for this subagent` });
             return { name: tc.name, id: tc.id, result: `Tool ${tc.name} blocked by whitelist` };
           }
 
           this.emit('tool_call', { name: tc.name, arguments: tcArgs });
-
-          // 同步 workspace 到 tools 模块
           setWorkspace(this.workspacePath);
 
-          // 创建工具级 AbortController（用于中断单个工具）
           const toolAbortController = new AbortController();
           this.registerToolAbortController(tc.name, toolAbortController);
-
-          // 传递 AbortSignal 给工具
           tcArgs._abortSignal = toolAbortController.signal;
 
-          // 事件回调 - 用于转发子agent事件和处理卡住警告
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Event data is dynamic
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const eventCallback = (event: string, data: any) => {
             this.emit(event, data);
-
-            // 处理工具卡住警告：自动中断并尝试其他方案
             if (event === 'tool_stuck_warning') {
-              // 自动中断卡住的工具（30秒后仍未完成）
               this.abortTool(tc.name);
-              // 设置中断标志，让 agent 退出循环
               this.interruptFlag = true;
             }
           };
 
+          // 传递 bypass 状态给工具执行（用于跳过 shell injection 检测）
+          tcArgs._bypassMode = this.bypassPermissions;
+
           try {
             const result = await executeTool(tc.name, tcArgs, eventCallback);
-
-            // 清除 AbortController
             this.clearToolAbortController(tc.name);
 
             if (!result.success) {
-              // 检查是否是被中断的
               if (result.error?.includes('aborted') || result.error?.includes('interrupted')) {
-                this.emit('tool_result', {
-                  name: tc.name,
-                  success: false,
-                  error: `Tool execution aborted (stuck or interrupted). Try: detached=true, shorter timeout, or interactive mode.`,
-                });
+                this.emit('tool_result', { name: tc.name, success: false, error: `Tool execution aborted (stuck or interrupted). Try: detached=true, shorter timeout, or interactive mode.` });
                 return { name: tc.name, id: tc.id, result: `Tool interrupted, need to try other approaches`, isCritical: true };
               }
 
-              // 检查是否是关键错误（应该停止整个生成）
               if (this.isCriticalToolError(tc.name, result)) {
                 const suggestion = this.generateErrorSuggestion(tc.name, result.error || '', tcArgs);
                 criticalErrorDetected = { tool: tc.name, error: result.error || 'Unknown error', suggestion };
-                this.emit('tool_result', {
-                  name: tc.name,
-                  success: false,
-                  error: result.error,
-                });
+                this.emit('tool_result', { name: tc.name, success: false, error: result.error });
                 return { name: tc.name, id: tc.id, result: `Critical error: ${result.error}`, isCritical: true };
               }
 
-              this.emit('error_suggestion', {
-                toolName: tc.name,
-                error: result.error || 'Unknown error',
-                suggestion: this.generateErrorSuggestion(tc.name, result.error || '', tcArgs),
-              });
+              this.emit('error_suggestion', { toolName: tc.name, error: result.error || 'Unknown error', suggestion: this.generateErrorSuggestion(tc.name, result.error || '', tcArgs) });
             }
 
-            // 文件编辑成功时发送diff预览
             if (result.success && (tc.name === 'file_write' || tc.name === 'file_edit' || tc.name === 'file_multi_edit') && result.diff) {
-              this.emit('diff_preview', {
-                filePath: tcArgs.path || tcArgs.file_path,
-                diff: result.diff,
-              });
+              this.emit('diff_preview', { filePath: tcArgs.path || tcArgs.file_path, diff: result.diff });
             }
 
-            this.emit('tool_result', {
-              name: tc.name,
-              success: result.success,
-              output: result.output,
-              error: result.error,
-              diff: result.diff,
-            });
+            this.emit('tool_result', { name: tc.name, success: result.success, output: result.output, error: result.error, diff: result.diff });
 
-            // PostToolUse hooks
             const postHookMessage = runPostHooks(tc.name, tcArgs, result);
             if (postHookMessage) {
               this.emit('hook_log', { tool: tc.name, message: postHookMessage });
             }
 
-            // workspace切换处理
             if (tc.name === 'workspace' && result.success && tcArgs.path) {
-              await this.switchWorkspace(tcArgs.path);
+              await this.switchWorkspace(tcArgs.path as string);
             }
 
-            return { 
-              name: tc.name, 
-              id: tc.id, 
+            return {
+              name: tc.name,
+              id: tc.id,
               result: result.content || result.output || result.error || '',
               referencedSkills: tc.name === 'skill' && result.success ? result.referencedSkills : undefined
             };
           } catch (toolError: unknown) {
-            // 清除 AbortController
             this.clearToolAbortController(tc.name);
             const errorMsg = toolError instanceof Error ? toolError.message : String(toolError);
-            this.emit('tool_result', {
-              name: tc.name,
-              success: false,
-              error: errorMsg,
-            });
-            return { name: tc.name, id: tc.id, result: `工具执行错误: ${errorMsg}` };
+            this.emit('tool_result', { name: tc.name, success: false, error: errorMsg });
+            return { name: tc.name, id: tc.id, result: `Tool execution error: ${errorMsg}` };
           }
-        }));
+        };
+
+        // 并行执行无冲突的工具
+        const parallelResults = await Promise.all(parallel.map(tc => executeSingleTool(tc)));
+
+        // 顺序执行有冲突的工具组
+        const sequentialResults: Array<{ name: string; id: string; result: string; isCritical?: boolean; referencedSkills?: string[] }> = [];
+        for (const conflictGroup of sequential) {
+          for (const tc of conflictGroup) {
+            if (this.interruptFlag) {
+              sequentialResults.push({ name: tc.name, id: tc.id, result: 'interrupted' });
+              break;
+            }
+            const result = await executeSingleTool(tc);
+            sequentialResults.push(result);
+          }
+        }
+
+        // 合并所有结果
+        const toolResults = [...parallelResults, ...sequentialResults];
 
         allToolResults.push(...toolResults);
 
@@ -1120,63 +1230,33 @@ async init() {
           } catch (llmError: unknown) {
             const errorMsg = llmError instanceof Error ? llmError.message : String(llmError);
             const isRetryable = this.isRetryableError(llmError);
-            const suggestionText = isRetryable
-              ? 'Network or API temporary error (retried 10 times), tool results saved. Try continuing conversation or resend request.'
-              : `Error not retryable, user needs to handle: ${errorMsg}`;
-            
+
+            // 关键修复：保留已执行的 tool results，不要丢弃
+            // 只有当工具确实执行了才保留，否则清理不完整序列
+            const toolsActuallyExecuted = toolResults.filter(t => t.result !== 'interrupted' && !t.result.includes('blocked by whitelist'));
+
             this.emit('error_suggestion', {
               tool: 'llm_continue',
               error: errorMsg,
-              suggestion: suggestionText
+              suggestion: isRetryable
+                ? 'Network or API temporary error (retried 10 times). Tool results preserved - continue conversation.'
+                : `Error not retryable: ${errorMsg}. Tool results preserved.`
             });
-            
-            if (this.llm) {
-              const allMessages = this.llm.getMessages();
 
-              // 找到最后一个assistant with toolCalls，检查是否有对应的tool messages
-              let lastAssistantWithToolCalls: number = -1;
-              for (let i = allMessages.length - 1; i >= 0; i--) {
-                const m = allMessages[i];
-                if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
-                  lastAssistantWithToolCalls = i;
-                  break;
-                }
-              }
-
-              // 如果最后一个assistant有toolCalls但没有对应的tool messages，去掉它的toolCalls
-              if (lastAssistantWithToolCalls >= 0) {
-                const lastMsg = allMessages[lastAssistantWithToolCalls];
-                const tc = lastMsg.toolCalls;
-                if (tc) {
-                  const expectedIds = tc.map(t => t.id);
-                  // 检查后面是否有对应的tool messages
-                  const toolMessagesAfter = allMessages.slice(lastAssistantWithToolCalls + 1).filter(m => m.role === 'tool');
-                  const foundIds = toolMessagesAfter.map(m => m.toolCallId || '');
-                  const hasAllToolMessages = expectedIds.every(id => foundIds.includes(id));
-
-                  if (!hasAllToolMessages) {
-                    // 去掉这个assistant的toolCalls
-                    allMessages[lastAssistantWithToolCalls] = { ...lastMsg, toolCalls: undefined };
-                  }
-                }
-              }
-
-              // 清理所有tool messages（保持一致性）
-              const cleanedMessages = allMessages.map(m => {
-                if (m.role === 'assistant' && m.toolCalls) {
-                  return { role: 'assistant', content: m.content || '' };
-                }
-                if (m.role === 'tool') {
-                  return null;
-                }
-                return m;
-              }).filter(m => m !== null) as ChatMessage[];
-              this.llm.setMessages(cleanedMessages);
+            // 添加一个用户消息记录已执行的操作（方便继续）
+            if (toolsActuallyExecuted.length > 0) {
+              const resultsSummary = toolsActuallyExecuted.map(t => `[${t.name}] ${t.result.slice(0, 200)}`).join('\n');
+              this.llm?.addMessage({
+                role: 'user' as const,
+                content: `[SYSTEM NOTE] Previous operations completed but LLM response failed. Results:\n${resultsSummary}\nError: ${errorMsg}\nPlease continue based on these results.`
+              });
             }
-            
+
+            // 不清理 tool messages，保留完整历史
+            // cleanMessages 会在下次 generate 时处理不完整序列
+
             const resultsSummary = toolResults.map(t => `${t.name}: ${t.result.slice(0, 100)}`).join('\n');
-            const errorTypeText = isRetryable ? '网络或API临时错误' : 'API错误（请求格式问题）';
-            return `Tool execution completed but LLM response interrupted.\nError type: ${errorTypeText}\nError: ${errorMsg}\nExecuted operations:\n${resultsSummary}\nSuggestion: ${isRetryable ? 'Continue conversation, previous results retained.' : 'Fix issue and restart session. Message history cleaned.'}`;
+            return `Operations completed but LLM continuation failed.\nError: ${errorMsg}\nCompleted operations:\n${resultsSummary}\nTool results preserved in history. Continue conversation to proceed.`;
           }
         }
       } else {
@@ -1273,7 +1353,21 @@ async init() {
   }
 
   // 公开方法：手动压缩历史（使用 LLM 生成摘要）
-  public async compact(): Promise<void> {
+  /**
+ * Compact message history to reduce token usage
+ *
+ * Triggered when:
+ * - Used tokens > 80% of context window
+ *
+ * Effects:
+ * - Summarizes old messages
+ * - Keeps recent tool calls and results
+ * - Emits 'context_compressed' event
+ *
+ * @returns Promise that resolves when compression complete
+ * @emits context_compressed with { before, after, removed }
+ */
+public async compact(): Promise<void> {
     if (!this.llm || this._compacting) return;
     this._compacting = true;
     try {

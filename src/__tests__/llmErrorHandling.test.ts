@@ -101,7 +101,8 @@ describe('LLM Error Handling', () => {
 
       const result = await resultPromise;
 
-      expect(result).toContain('Tool execution completed');
+      expect(result).toContain('Operations completed');
+      expect(result).toContain('LLM continuation failed');
       expect(result).toContain('Network interrupted');
     });
 

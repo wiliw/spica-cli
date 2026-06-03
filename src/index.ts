@@ -258,7 +258,7 @@ program
         });
 
         // 启用 Bracketed Paste Mode（粘贴内容作为整体到达）
-        screen.appendScroll(`${ESC}[?2004h`);
+        screen.writeRaw(`${ESC}[?2004h`);
 
         // 启用 rawMode
         if (process.stdin.isTTY) {
@@ -294,7 +294,7 @@ program
           if (result.shouldExit) {
             shouldExit = true;
             // 禁用 Bracketed Paste Mode
-            screen.appendScroll(`${ESC}[?2004l`);
+            screen.writeRaw(`${ESC}[?2004l`);
             tuiHandler!.end();
             screen.appendScroll(COLORS.error("\n[FORCE EXIT]"));
             process.exit(0);
@@ -323,7 +323,7 @@ program
               state.getAgent()!.interrupt();
             }
             // 禁用 Bracketed Paste Mode
-            screen.appendScroll(`${ESC}[?2004l`);
+            screen.writeRaw(`${ESC}[?2004l`);
             tuiHandler!.end();
             const messages = agent.getMessages();
             saveSession(process.cwd(), messages);
@@ -480,15 +480,25 @@ program
 
             if (cmd.startsWith("switch ")) {
               const sessionId = cmd.slice(7).trim();
-              const { switchSession } = await import("./utils/session");
+              const { switchSession, loadSession } = await import("./utils/session");
 
+              // 先切换 session 文件
               if (switchSession(process.cwd(), sessionId)) {
-                screen.appendScroll(
-                  COLORS.success(`\n[OK] Switched to session ${sessionId}\n`),
-                );
-                screen.appendScroll(
-                  COLORS.muted("Session loaded. Continue conversation.\n"),
-                );
+                // 重新加载 session 到 agent 内存
+                const session = loadSession(process.cwd());
+                if (session && session.messages) {
+                  agent.setMessages(session.messages);
+                  screen.appendScroll(
+                    COLORS.success(`\n[OK] Switched to session ${sessionId}\n`),
+                  );
+                  screen.appendScroll(
+                    COLORS.muted(`Loaded ${session.messages.length} messages. Continue conversation.\n`),
+                  );
+                } else {
+                  screen.appendScroll(
+                    COLORS.warning(`\n[WARN] Session switched but no messages loaded\n`),
+                  );
+                }
               } else {
                 screen.appendScroll(
                   COLORS.error(`\n[ERR] Session ${sessionId} not found\n`),
@@ -519,6 +529,47 @@ program
                   ),
                 );
               }
+
+              return;
+            }
+
+            // 删除 session
+            if (cmd.startsWith("delete ")) {
+              const sessionId = cmd.slice(7).trim();
+              const { deleteSession } = await import("./utils/session");
+
+              if (deleteSession(process.cwd(), sessionId)) {
+                screen.appendScroll(
+                  COLORS.success(`\n[OK] Session ${sessionId} deleted\n`),
+                );
+              } else {
+                screen.appendScroll(
+                  COLORS.error(`\n[ERR] Session ${sessionId} not found or cannot delete\n`),
+                );
+              }
+
+              return;
+            }
+
+            // 创建新 session（保存当前，重新开始）
+            if (cmd === "new") {
+              // 保存当前 session
+              const currentMessages = agent.getMessages();
+              if (currentMessages.length > 0) {
+                saveSession(process.cwd(), currentMessages);
+                screen.appendScroll(
+                  COLORS.muted(`\n[ARCHIVE] Saved current session (${currentMessages.length} messages)\n`),
+                );
+              }
+
+              // 清空 agent 消息
+              agent.setMessages([]);
+              screen.appendScroll(
+                COLORS.success(`\n[NEW] Started fresh session\n`),
+              );
+              screen.appendScroll(
+                COLORS.muted("Previous session archived. Use /sessions to switch back.\n"),
+              );
 
               return;
             }
@@ -870,6 +921,7 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
           screen.appendScroll(COLORS.muted("  help        Show help\n"));
           screen.appendScroll("\n");
           screen.appendScroll(COLORS.primary.bold("Session:\n"));
+          screen.appendScroll(COLORS.muted("  /new        Start fresh session (archives current)\n"));
           screen.appendScroll(COLORS.muted("  /clear      Clear session\n"));
           screen.appendScroll(COLORS.muted("  /history    Show messages\n"));
           screen.appendScroll(COLORS.muted("  /compact    Compress context\n"));
@@ -878,6 +930,12 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
           );
           screen.appendScroll(
             COLORS.muted("  /switch <id> Switch to session\n"),
+          );
+          screen.appendScroll(
+            COLORS.muted("  /rename <id> <name> Rename session\n"),
+          );
+          screen.appendScroll(
+            COLORS.muted("  /delete <id> Delete session\n"),
           );
           screen.appendScroll("\n");
           screen.appendScroll(COLORS.primary.bold("Queue:\n"));

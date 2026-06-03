@@ -512,6 +512,33 @@ export function setupAgentEvents(
     screen.refreshInput();
   });
 
+  on('tool_conflict_warning', (data: { conflicts: Array<{ path: string; tools: string[] }>; message: string }) => {
+    screen.appendScroll(COLORS.warning(`\n[CONFLICT] ${data.message}\n`));
+    for (const conflict of data.conflicts) {
+      screen.appendScroll(COLORS.muted(`  ${conflict.path}: ${conflict.tools.join(', ')} (sequential)\n`));
+    }
+  });
+
+  // 上下文警告（添加遗漏的处理）
+  on('context_warning', (data: { level: string; usage: number; message: string; suggestion?: string }) => {
+    const color = data.level === 'warning' ? COLORS.warning : COLORS.muted;
+    screen.appendScroll(color(`\n[CONTEXT] ${data.message}\n`));
+    if (data.suggestion) {
+      screen.appendScroll(COLORS.muted(`  Suggestion: ${data.suggestion}\n`));
+    }
+  });
+
+  // Skill 自动触发（添加遗漏的处理）
+  on('skill_auto_triggered', (data: { skill: string; description: string }) => {
+    screen.appendScroll(COLORS.success(`\n[SKILL] Auto-triggered: ${data.skill}\n`));
+    screen.appendScroll(COLORS.muted(`  ${data.description}\n`));
+  });
+
+  // Checkpoint 创建（添加遗漏的处理）
+  on('checkpoint_created', (data: { hash: string; message: string }) => {
+    screen.appendScroll(COLORS.muted(`\n[CHECKPOINT] ${data.message} (${data.hash.slice(0, 7)})\n`));
+  });
+
   on('agent_interrupted', (data: AgentInterruptedData) => {
     // 重置流式状态
     state.setStreamingOutput(false);

@@ -48,11 +48,14 @@ describe('RateLimiter interruptibleSleep cleanup', () => {
     expect(result).toBe('resolved');
   });
 
-  it('should have clearInterval in abort handler (code verification)', async () => {
+  it('should have cleanup function in abort handler (code verification)', async () => {
     const fs = await import('fs-extra');
     const source = await fs.readFile('src/llm/RateLimiter.ts', 'utf-8');
-    // Verify the abort handler clears the interval
-    const abortHandler = source.match(/addEventListener\('abort'[^}]+clearInterval\(checkInterval\)/s);
+    // Verify cleanup function is called in abort handler
+    const cleanupMatch = source.match(/const cleanup = \(\) =>/);
+    expect(cleanupMatch).not.toBeNull();
+    // Verify cleanup is called in abort handler
+    const abortHandler = source.match(/addEventListener\('abort'[^}]+cleanup\(\)/s);
     expect(abortHandler).not.toBeNull();
   });
 });

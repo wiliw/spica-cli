@@ -1,6 +1,6 @@
-// 运行时状态管理 - 替代散落的全局变量
+// Runtime state management - Unified state for CLI session
 
-import { SpicaAgent } from '../agent';
+import type { SpicaAgent } from '../agent';
 
 interface ProviderConfig {
   provider?: string;
@@ -15,28 +15,62 @@ interface ProviderConfig {
 }
 
 interface RuntimeState {
+  // Agent
   agent: SpicaAgent | null;
   providerConfig: ProviderConfig | null;
+
+  // Processing state
   isProcessing: boolean;
   bypassMode: boolean;
-  connectionErrorShown: boolean;
   streamingOutput: boolean;
+
+  // UI state
+  connectionErrorShown: boolean;
   permissionDialogActive: boolean;
   verboseMode: boolean;
   showThinking: boolean;
+
+  // Interrupt state
+  interruptCount: number;
+  lastInterruptTime: number;
+  shouldExit: boolean;
 }
 
+/**
+ * RuntimeState - Unified state management for CLI session
+ *
+ * Manages:
+ * - Agent instance
+ * - Provider configuration
+ * - Processing state (isProcessing, bypassMode)
+ * - UI state (verbose, showThinking)
+ * - Interrupt state (count, shouldExit)
+ *
+ * Singleton pattern - use getRuntimeState() to access
+ *
+ * @example
+ * ```ts
+ * const state = getRuntimeState();
+ * state.setProcessing(true);
+ * if (state.isProcessing()) {
+ *   // handle processing state
+ * }
+ * ```
+ */
 class RuntimeStateManager {
   private state: RuntimeState = {
     agent: null,
     providerConfig: null,
     isProcessing: false,
     bypassMode: false,
-    connectionErrorShown: false,
     streamingOutput: false,
+    connectionErrorShown: false,
     permissionDialogActive: false,
     verboseMode: false,
     showThinking: false,
+    interruptCount: 0,
+    lastInterruptTime: 0,
+    shouldExit: false,
   };
 
   // Agent
@@ -79,15 +113,6 @@ class RuntimeStateManager {
     return this.state.bypassMode;
   }
 
-  // Connection Error
-  setConnectionErrorShown(shown: boolean): void {
-    this.state.connectionErrorShown = shown;
-  }
-
-  isConnectionErrorShown(): boolean {
-    return this.state.connectionErrorShown;
-  }
-
   // Streaming Output
   setStreamingOutput(streaming: boolean): void {
     this.state.streamingOutput = streaming;
@@ -95,6 +120,15 @@ class RuntimeStateManager {
 
   isStreamingOutput(): boolean {
     return this.state.streamingOutput;
+  }
+
+  // Connection Error
+  setConnectionErrorShown(shown: boolean): void {
+    this.state.connectionErrorShown = shown;
+  }
+
+  isConnectionErrorShown(): boolean {
+    return this.state.connectionErrorShown;
   }
 
   // Permission Dialog Active
@@ -120,7 +154,7 @@ class RuntimeStateManager {
     return this.state.verboseMode;
   }
 
-  // Thinking 显示模式（Ctrl+O 切换）
+  // Thinking display mode (Ctrl+O toggle)
   setShowThinking(show: boolean): void {
     this.state.showThinking = show;
   }
@@ -134,36 +168,75 @@ class RuntimeStateManager {
     return this.state.showThinking;
   }
 
-  // Interrupt
+  // Interrupt handling
+  recordInterrupt(): void {
+    const now = Date.now();
+    if (now - this.state.lastInterruptTime < 1000) {
+      this.state.interruptCount++;
+    } else {
+      this.state.interruptCount = 1;
+    }
+    this.state.lastInterruptTime = now;
+  }
+
+  getInterruptCount(): number {
+    return this.state.interruptCount;
+  }
+
+  resetInterruptCount(): void {
+    this.state.interruptCount = 0;
+  }
+
+  // Exit flag
+  setShouldExit(exit: boolean): void {
+    this.state.shouldExit = exit;
+  }
+
+  shouldExit(): boolean {
+    return this.state.shouldExit;
+  }
+
+  // Interrupt agent
   interrupt(): void {
     if (this.state.agent) {
       this.state.agent.interrupt();
     }
   }
 
-  // Reset
+  // Reset all state
   reset(): void {
     this.state = {
       agent: null,
       providerConfig: null,
       isProcessing: false,
       bypassMode: false,
-      connectionErrorShown: false,
       streamingOutput: false,
+      connectionErrorShown: false,
       permissionDialogActive: false,
       verboseMode: false,
       showThinking: false,
+      interruptCount: 0,
+      lastInterruptTime: 0,
+      shouldExit: false,
     };
   }
 }
 
 let instance: RuntimeStateManager | null = null;
 
+/**
+ * Get the singleton RuntimeState instance
+ * @returns RuntimeStateManager instance
+ */
 export function getRuntimeState(): RuntimeStateManager {
   if (!instance) instance = new RuntimeStateManager();
   return instance;
 }
 
+/**
+ * Reset runtime state to initial values
+ * Clears agent, provider config, and all state flags
+ */
 export function resetRuntimeState(): void {
   if (instance) instance.reset();
 }

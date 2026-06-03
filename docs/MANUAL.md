@@ -52,17 +52,27 @@ spica mcp tools
 
 | Command | Description |
 |---------|-------------|
-| `/help` | Help |
-| `/clear` | Clear session |
+| `/help` or `/h` | Show help |
+| `/clear` or `/reset` | Clear session |
 | `/history` | Show messages |
 | `/compact` | Compress context |
-| `/bypass` | Auto-approve |
-| `/strict` | Require permission |
+| `/bypass` | Auto-approve all permissions |
+| `/strict` | Require permission (default) |
 | `/status` | Show status |
 | `/skills` | List skills |
 | `/init` | Generate AGENTS.md |
-| `/queue` | Input queue |
+| `/queue` or `/q` | Input queue |
 | `/undo` | Undo queued input |
+
+### Session Management
+
+| Command | Description |
+|---------|-------------|
+| `/sessions` or `/s` | List archived sessions |
+| `/new` | Start fresh session (archives current) |
+| `/switch <id>` | Switch to specific session |
+| `/rename <id> <name>` | Rename a session |
+| `/delete <id>` | Delete a session | |
 
 ---
 

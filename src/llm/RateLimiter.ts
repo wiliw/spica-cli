@@ -99,21 +99,28 @@ export class RateLimiter {
         return;
       }
 
-      const timer = setTimeout(() => {
+      let timer: NodeJS.Timeout | null = null;
+      let checkInterval: NodeJS.Timeout | null = null;
+
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        if (checkInterval) clearInterval(checkInterval);
+      };
+
+      timer = setTimeout(() => {
+        cleanup();
         resolve();
       }, ms);
 
       signal?.addEventListener('abort', () => {
-        clearTimeout(timer);
-        clearInterval(checkInterval);
+        cleanup();
         resolve();
       });
 
       // 也检查pendingInterrupt
-      const checkInterval = setInterval(() => {
+      checkInterval = setInterval(() => {
         if (this.pendingInterrupt) {
-          clearTimeout(timer);
-          clearInterval(checkInterval);
+          cleanup();
           resolve();
         }
       }, 100);

@@ -1,4 +1,4 @@
-// 子Agent类型定义和配置
+// SubAgent type definitions and configuration
 
 export type SubAgentType = 'explore' | 'review' | 'fix' | 'build';
 
@@ -19,42 +19,42 @@ export interface SubAgentTask {
 }
 
 export interface SubAgentConfig {
-  allowedTools: string[] | '*';  // 允许的工具，'*'表示全部
-  timeout: number;               // timeout毫秒
-  description: string;           // 类型描述
+  allowedTools: string[] | '*';  // Allowed tools, '*' means all
+  timeout: number;               // Timeout in milliseconds
+  description: string;           // Type description
 }
 
 export const SUB_AGENT_CONFIGS: Record<SubAgentType, SubAgentConfig> = {
   explore: {
     allowedTools: ['glob', 'grep', 'file_read', 'directory_list', 'file_exists'],
     timeout: 30000,
-    description: '快速只读探索，定位文件和代码',
+    description: 'Fast read-only exploration, locate files and code',
   },
   review: {
     allowedTools: ['glob', 'grep', 'file_read', 'directory_list', 'lint', 'file_exists'],
     timeout: 60000,
-    description: '代码审查，找问题',
+    description: 'Code review, find issues',
   },
   fix: {
     allowedTools: ['file_read', 'file_edit', 'bash', 'lint'],
     timeout: 120000,
-    description: '修复特定问题，最小改动',
+    description: 'Fix specific issues, minimal changes',
   },
   build: {
-    allowedTools: '*',  // 所有工具
+    allowedTools: '*',  // All tools
     timeout: 180000,
-    description: '完整实现功能',
+    description: 'Full feature implementation',
   },
 };
 
-// 获取子agent配置
+// Get subagent config
 export function getSubAgentConfig(type?: SubAgentType): SubAgentConfig {
   if (!type) {
-    // 默认为完整权限
+    // Default: full access
     return {
       allowedTools: '*',
       timeout: 120000,
-      description: '通用子agent',
+      description: 'General purpose subagent',
     };
   }
   return SUB_AGENT_CONFIGS[type];
@@ -67,11 +67,11 @@ export function isToolAllowed(toolName: string, config: SubAgentConfig): boolean
   return config.allowedTools.includes(toolName);
 }
 
-// 摘要结果
+// Summarize result
 export function summarizeResult(result: string, maxLength: number = 300): string {
   if (!result || result.length <= maxLength) return result || '';
 
-  // 提取关键信息
+  // Extract key information
   const lines = result.split('\n');
   const keyLines = lines.filter(l =>
     l.includes('✓') ||
@@ -79,7 +79,11 @@ export function summarizeResult(result: string, maxLength: number = 300): string
     l.includes('完成') ||
     l.includes('成功') ||
     l.includes('失败') ||
-    l.includes('Error')
+    l.includes('Error') ||
+    l.includes('done') ||
+    l.includes('success') ||
+    l.includes('failed') ||
+    l.includes('completed')
   );
 
   if (keyLines.length > 0) {

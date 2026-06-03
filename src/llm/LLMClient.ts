@@ -14,6 +14,23 @@ export interface LLMClientConfig {
   rateLimit?: { requestsPerMinute?: number; tokensPerMinute?: number };
 }
 
+/**
+ * LLMClient - LLM API client with streaming and rate limiting
+ *
+ * Features:
+ * - OpenAI-compatible API support
+ * - Streaming response handling
+ * - Rate limiting (requests/tokens per minute)
+ * - Token counting and context management
+ * - Interrupt support
+ *
+ * @extends EventEmitter
+ * @example
+ * ```ts
+ * const client = new LLMClient(config);
+ * const response = await client.generate('Hello');
+ * ```
+ */
 export class LLMClient extends EventEmitter {
   private provider: OpenAICompatibleProvider;
   private tokenCounter: TokenCounter;

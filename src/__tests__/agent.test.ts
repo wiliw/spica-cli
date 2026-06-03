@@ -117,7 +117,7 @@ describe('SpicaAgent', () => {
 
       it('should detect dangerous bash commands', () => {
         const reason = (agent as any).checkNeedsPermission('bash', { command: 'rm -rf /data' });
-        expect(reason).toContain('删除');
+        expect(reason).toContain('Delete');
       });
 
       it('should detect sudo commands', () => {
@@ -127,7 +127,7 @@ describe('SpicaAgent', () => {
 
       it('should detect git push --force', () => {
         const reason = (agent as any).checkNeedsPermission('bash', { command: 'git push --force origin main' });
-        expect(reason).toContain('强制推送');
+        expect(reason).toContain('Force');
       });
 
       it('should return null for safe commands', () => {

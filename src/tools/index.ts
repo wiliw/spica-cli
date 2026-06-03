@@ -3,12 +3,13 @@ import { execa } from 'execa';
 import simpleGit from 'simple-git';
 import { resolve as pathResolve, isAbsolute, dirname, join, basename } from 'path';
 import fastGlob from 'fast-glob';
-import { SpicaAgent } from '../agent';
 import { SubAgentTask, getSubAgentConfig, summarizeResult } from './subAgent';
 import { computeDiff, formatDiff, generateEditDiff } from '../cli/ui/diff';
 import { getMCPManager } from '../mcp/client';
 import { getBashPath } from '../utils/platform';
 import axios from 'axios';
+import type { Todo } from '../agent';
+import type { PersistedTask } from '../storage/taskPersistence';
 
 const isWindows = process.platform === 'win32';
 
@@ -822,30 +823,35 @@ export async function executeTool(
         const inputFile = safeArgs.inputFile as string;
         const outputFile = safeArgs.outputFile as string;
 
+        // Bypass 模式：跳过 shell injection 检测（用户明确信任）
+        const bypassMode = safeArgs._bypassMode === true;
+
         // 卡住检测阈值（默认30秒，可通过 stuckWarning 参数调整）
         const stuckWarningMs = (safeArgs.stuckWarning as number) || 60000;
 
-        // Shell 注入检测 — 阻止高危 metacharacters
-        const injectionPatterns = [
-          { pattern: /\$\(/, name: 'command substitution $(...)' },
-          { pattern: /`[^`]+`/, name: 'backtick command substitution' },
-          { pattern: /\/dev\/tcp\//, name: 'bash network connection' },
-          { pattern: /\|\s*(bash|sh|zsh|python|perl|ruby)\b/, name: 'piping to shell interpreter' },
-          { pattern: /mkfifo/, name: 'named pipe creation' },
-          { pattern: /\bnc\s+-[el]/, name: 'netcat listener' },
-          { pattern: /;/, name: 'command separator' },
-          { pattern: /&&/, name: 'AND operator' },
-          { pattern: /\|\|/, name: 'OR operator' },
-          { pattern: /\$\{/, name: 'variable expansion' },
-          { pattern: /<<\s*/, name: 'heredoc' },
-          { pattern: /\beval\b/, name: 'eval command' },
-        ];
-        for (const { pattern, name } of injectionPatterns) {
-          if (pattern.test(command)) {
-            return {
-              success: false,
-              error: `Blocked: command contains ${name}. This pattern is not allowed for security reasons.`,
-            };
+        // Shell 注入检测 — 仅在 strict 模式下检测
+        if (!bypassMode) {
+          const injectionPatterns = [
+            { pattern: /\$\(/, name: 'command substitution $(...)' },
+            { pattern: /`[^`]+`/, name: 'backtick command substitution' },
+            { pattern: /\/dev\/tcp\//, name: 'bash network connection' },
+            { pattern: /\|\s*(bash|sh|zsh|python|perl|ruby)\b/, name: 'piping to shell interpreter' },
+            { pattern: /mkfifo/, name: 'named pipe creation' },
+            { pattern: /\bnc\s+-[el]/, name: 'netcat listener' },
+            { pattern: /;/, name: 'command separator' },
+            { pattern: /&&/, name: 'AND operator' },
+            { pattern: /\|\|/, name: 'OR operator' },
+            { pattern: /\$\{/, name: 'variable expansion' },
+            { pattern: /<<\s*/, name: 'heredoc' },
+            { pattern: /\beval\b/, name: 'eval command' },
+          ];
+          for (const { pattern, name } of injectionPatterns) {
+            if (pattern.test(command)) {
+              return {
+                success: false,
+                error: `Blocked: command contains ${name}. This pattern is not allowed for security reasons.\nTo allow this command, use /bypass to enter bypass mode.`,
+              };
+            }
           }
         }
 
@@ -1557,7 +1563,7 @@ Write-Output $proc.Id;
 
         const lines = [`\nPersisted Tasks (${stats.completed}/${stats.total} done)`];
         lines.push('---------------------------------');
-        tasks.forEach((t: any, i: number) => {
+        tasks.forEach((t: PersistedTask, i: number) => {
           const label = statusLabels[t.status] || '[PEND]';
           lines.push(`${label} ${i+1}. ${t.subject}`);
         });
@@ -1570,13 +1576,13 @@ Write-Output $proc.Id;
       case 'todo_write': {
         const todos = safeArgs.todos || [];
         const total = todos.length;
-        const completed = todos.filter((t: any) => t.status === 'completed').length;
-        const inProgress = todos.filter((t: any) => t.status === 'in_progress').length;
-        const pending = todos.filter((t: any) => t.status === 'pending').length;
+        const completed = todos.filter((t: Todo) => t.status === 'completed').length;
+        const inProgress = todos.filter((t: Todo) => t.status === 'in_progress').length;
+        const pending = todos.filter((t: Todo) => t.status === 'pending').length;
 
         // Persist todos to .spica/tasks.json
         const { savePersistedTasks } = await import('../storage/taskPersistence');
-        const persistedTasks = todos.map((t: any, i: number) => ({
+        const persistedTasks = todos.map((t: Todo, i: number) => ({
           id: `task_${i + 1}`,
           subject: t.content,
           description: t.content,
@@ -1606,6 +1612,7 @@ Write-Output $proc.Id;
 
       case 'task': {
         const tasks = safeArgs.tasks as SubAgentTask[];
+        const externalSignal = safeArgs._abortSignal as AbortSignal | undefined;
 
         // 限制最多3个并行任务
         if (tasks.length > 3) {
@@ -1628,32 +1635,67 @@ Write-Output $proc.Id;
             });
           }
 
+          // 动态导入避免循环依赖
+          const { SpicaAgent } = await import('../agent');
           const taskAgent = new SpicaAgent(undefined, WORKSPACE);
-          
+
           // 设置工具白名单（限制subagent权限，避免context pollution）
           if (config.allowedTools !== '*') {
             taskAgent.setToolWhitelist(config.allowedTools);
           }
 
-          taskAgent.on('tool_result', (data: any) => {
+          // 监听器引用，用于清理
+          const toolResultHandler = (data: any) => {
             if (eventCallback) {
               eventCallback('sub_agent_tool_result', { id: subTaskId, ...data });
             }
-          });
+          };
+          taskAgent.on('tool_result', toolResultHandler);
 
-          // 设置timeout
-          const timeoutPromise = new Promise<string>((_, reject) => {
-            setTimeout(() => reject(new Error('Timeout')), config.timeout);
-          });
+          // 创建超时 AbortController
+          const timeoutController = new AbortController();
+          const timeoutId = setTimeout(() => {
+            timeoutController.abort();
+            // 关键：超时时中断 sub-agent
+            taskAgent.interrupt();
+          }, config.timeout);
+
+          // 监听外部中断信号（父 agent 中断）
+          let abortHandler: (() => void) | null = null;
+          if (externalSignal) {
+            if (externalSignal.aborted) {
+              taskAgent.off('tool_result', toolResultHandler);
+              taskAgent.interrupt();
+              clearTimeout(timeoutId);
+              return `✗ ${task.description || task.prompt.slice(0, 30)}: Parent agent interrupted`;
+            }
+            abortHandler = () => {
+              taskAgent.interrupt();
+              clearTimeout(timeoutId);
+            };
+            externalSignal.addEventListener('abort', abortHandler);
+          }
 
           try {
             await taskAgent.init();
 
-            // 如果有工具限制，设置工具白名单（需要在agent添加支持）
-            // taskAgent.setToolWhitelist(config.allowedTools);
-
             const resultPromise = taskAgent.runLoop(task.prompt);
-            const result = await Promise.race([resultPromise, timeoutPromise]);
+
+            // 使用 AbortController 的 promise 来处理超时和中断
+            const abortPromise = new Promise<string>((_, reject) => {
+              timeoutController.signal.addEventListener('abort', () => {
+                reject(new Error(timeoutController.signal.reason || 'Timeout'));
+              });
+            });
+
+            const result = await Promise.race([resultPromise, abortPromise]);
+
+            // 清理资源
+            clearTimeout(timeoutId);
+            taskAgent.off('tool_result', toolResultHandler);
+            if (abortHandler && externalSignal) {
+              externalSignal.removeEventListener('abort', abortHandler);
+            }
 
             const summary = summarizeResult(result);
 
@@ -1663,6 +1705,14 @@ Write-Output $proc.Id;
 
             return `✓ ${task.description || task.prompt.slice(0, 30)}: ${summary}`;
           } catch (err: any) {
+            // 清理资源
+            clearTimeout(timeoutId);
+            taskAgent.off('tool_result', toolResultHandler);
+            if (abortHandler && externalSignal) {
+              externalSignal.removeEventListener('abort', abortHandler);
+            }
+            // 确保中断
+            taskAgent.interrupt();
             if (eventCallback) {
               eventCallback('sub_agent_error', { id: subTaskId, error: err.message });
             }
