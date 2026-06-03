@@ -849,7 +849,7 @@ export async function executeTool(
             if (pattern.test(command)) {
               return {
                 success: false,
-                error: `Blocked: command contains ${name}. This pattern is not allowed for security reasons.\nTo allow this command, use /bypass to enter bypass mode.`,
+                error: `Blocked: command contains ${name}. This pattern is not allowed for security reasons.`,
               };
             }
           }
