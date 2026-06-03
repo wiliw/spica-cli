@@ -11,6 +11,7 @@ import { playBell } from '../utils/bell';
 interface ConnectionErrorData {
   type: string;
   hint: string;
+  error?: string;
 }
 
 interface StreamData {
@@ -266,6 +267,9 @@ export function setupAgentEvents(
   on('connection_error', (data: ConnectionErrorData) => {
     state.setConnectionErrorShown(true);
     screen.appendScroll(COLORS.error(`\n[ERR] ${data.type}: ${data.hint}\n`));
+    if (data.error) {
+      screen.appendScroll(COLORS.muted(`Details: ${data.error}\n`));
+    }
   });
 
   on('stream', (data: StreamData) => {

@@ -1402,8 +1402,11 @@ async function runSimpleMode(
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Event data types are dynamic
     agent.on("connection_error", (data: any) => {
-      console.log(COLORS.error(`\nConnection Error: ${data.type}`));
-      console.log(COLORS.muted(data.hint));
+      state.setConnectionErrorShown(true);
+      console.log(COLORS.error(`\n[ERR] ${data.type}: ${data.hint}`));
+      if (data.error) {
+        console.log(COLORS.muted(`Details: ${data.error}`));
+      }
     });
 
     const providerConfig = state.getProviderConfig();
