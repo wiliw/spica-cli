@@ -126,11 +126,14 @@ export class ScreenManager {
 
   appendScroll(text: string): void {
     if (!this.state.cursorInScrollArea) {
-      writeStdout(`${ESC}[?25l`);
       writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
       this.state.cursorInScrollArea = true;
     }
     writeStdout(text);
+    // streaming 时显示光标
+    if (this.state.isStreaming) {
+      writeStdout(`${ESC}[?25h`);
+    }
   }
 
   refreshStatus(): void {
@@ -261,7 +264,7 @@ export class ScreenManager {
     if (wasStreaming && this.state.isStreaming) {
       // Streaming 未被中断，恢复光标到滚动区的原位置
       writeStdout('\x1b8');  // DECRC: restore cursor position
-      writeStdout(`${ESC}[?25l`);
+      writeStdout(`${ESC}[?25h`);  // 显示光标
       this.state.cursorInScrollArea = true;
     } else {
       // Streaming 被中断了，恢复到输入区
