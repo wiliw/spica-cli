@@ -43,9 +43,10 @@ const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
 };
 
 // 解析错误并返回友好提示
-function parseError(error: any): { type: string; message: string; hint: string } {
-  const code = String(error.code || error.status || '');
-  const message = error.message || '';
+function parseError(error: unknown): { type: string; message: string; hint: string } {
+  const errorObj = error instanceof Error ? error : { message: String(error) };
+  const code = String((error as { code?: unknown; status?: unknown }).code || (error as { code?: unknown; status?: unknown }).status || '');
+  const message = errorObj.message || '';
 
   // 查找预定义的错误
   if (ERROR_MESSAGES[code]) {
@@ -146,7 +147,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
         signal: signal,
       });
       return { success: true };
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (signal?.aborted) {
         return { success: false, type: '中断', error: 'User interrupted', hint: '用户取消' };
       }
@@ -173,12 +174,16 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
 
     // DEBUG: 检查消息序列是否正确（清理后应该总是正确）
     const converted = this.convertMessages();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- OpenAI API message type is complex
     const lastAssistantWithToolCalls = converted.filter(m => m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0).pop() as any;
     if (lastAssistantWithToolCalls) {
       const lastIndex = converted.indexOf(lastAssistantWithToolCalls);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- OpenAI tool_calls structure
       const expectedIds = lastAssistantWithToolCalls.tool_calls.map((tc: any) => tc.id);
       const followingMessages = converted.slice(lastIndex + 1);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- OpenAI message structure
       const toolMessagesFollowing = followingMessages.filter((m: any) => m.role === 'tool');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- OpenAI message structure
       const foundIds = toolMessagesFollowing.map((m: any) => m.tool_call_id);
 
       if (expectedIds.some((id: string) => !foundIds.includes(id))) {
@@ -209,6 +214,7 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
       }, { signal });
 
       let fullContent = '';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- OpenAI tool_calls structure is complex
       let toolCalls: any[] = [];
       let hasToolCalls = false;
 
@@ -222,12 +228,15 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
           this.emit('chunk', delta.content);
         }
         
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- DeepSeek reasoning_content field
         if ((delta as any)?.reasoning_content) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- DeepSeek reasoning_content field
           this.emit('reasoning', (delta as any).reasoning_content);
         }
         
         if (delta?.tool_calls) {
           hasToolCalls = true;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- OpenAI tool_calls delta structure
           delta.tool_calls.forEach((tc: any) => {
             if (tc.index !== undefined) {
               if (!toolCalls[tc.index]) {

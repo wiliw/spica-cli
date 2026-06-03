@@ -1494,10 +1494,11 @@ async function runSimpleMode(
       saveSession(process.cwd(), agent.getMessages());
       process.exit(0);
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     // 停止banner动画（如果正在运行）
     BG.stopBanner();
-    console.log(COLORS.error(`Error: ${error.message}`));
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.log(COLORS.error(`Error: ${errorMsg}`));
     process.exit(1);
   }
 }
