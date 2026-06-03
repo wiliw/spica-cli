@@ -413,6 +413,7 @@ export class SpicaAgent extends EventEmitter {
   }
   
   // 获取git状态（辅助方法）
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- simpleGit status.files type is complex
   private async getGitStatus(): Promise<{ files: any[] }> {
     try {
       const git = simpleGit(this.workspacePath);

@@ -122,9 +122,10 @@ program
       try {
         providerConfig = await getProviderConfig(providerName);
         state.setProviderConfig(providerConfig);
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
         console.log("");
-        console.log(COLORS.error(error.message));
+        console.log(COLORS.error(errorMsg));
         console.log("");
         return;
       }
@@ -763,10 +764,11 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
                   screen.setStreaming(false);
                   screen.appendScroll(COLORS.success("\n[OK] Done\n"));
                   playBell("done"); // 工作完成提示音
-                } catch (error: any) {
+                } catch (error: unknown) {
                   screen.setStreaming(false);
+                  const errorMsg = error instanceof Error ? error.message : String(error);
                   screen.appendScroll(
-                    COLORS.error(`\n[ERR] ${error.message}\n`),
+                    COLORS.error(`\n[ERR] ${errorMsg}\n`),
                   );
                   playBell("error"); // 错误提示音
                 }
@@ -831,8 +833,9 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
             screen.appendScroll(COLORS.muted(`\n${stats}\n`));
             screen.appendScroll(COLORS.success("[OK] Done\n"));
             playBell("done");
-          } catch (error: any) {
+          } catch (error: unknown) {
             const elapsed = Date.now() - startTime;
+            const errorMsg = error instanceof Error ? error.message : String(error);
             if (state.isStreamingOutput()) {
               state.setStreamingOutput(false);
               screen.setStreaming(false);
@@ -841,7 +844,7 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
             // 显示运行统计（即使失败也显示）
             const stats = formatRunStats(elapsed, agent, tokenCounter);
             screen.appendScroll(COLORS.muted(`\n${stats}\n`));
-            screen.appendScroll(COLORS.error(`[ERR] ${error.message}\n`));
+            screen.appendScroll(COLORS.error(`[ERR] ${errorMsg}\n`));
             playBell("error");
           }
           // 输出完成，恢复光标到输入框并刷新显示
@@ -903,14 +906,15 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
         await new Promise<void>((resolve) => {
           process.on("exit", resolve);
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         // 停止banner动画
         BG.stopBanner();
+        const errorMsg = error instanceof Error ? error.message : String(error);
         if (!state.isConnectionErrorShown()) {
           if (tuiHandler) {
-            screen.appendScroll(COLORS.error(`\nError: ${error.message}\n`));
+            screen.appendScroll(COLORS.error(`\nError: ${errorMsg}\n`));
           } else {
-            console.log(COLORS.error(`Error: ${error.message}`));
+            console.log(COLORS.error(`Error: ${errorMsg}`));
           }
         }
       }
@@ -938,7 +942,7 @@ program
     let providerConfig;
     try {
       providerConfig = await getProviderConfig(providerName);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.log(COLORS.error(`Provider "${providerName}" not configured.`));
       console.log(
         COLORS.warning("Set up with: spica providers set <name> <api-key>"),
@@ -956,9 +960,10 @@ program
       const result = await agent.runLoop(request);
       console.log(COLORS.success("\n[OK] Completed"));
       playBell("done");
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (!state.isConnectionErrorShown()) {
-        console.log(COLORS.error(`Error: ${error.message}`));
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.log(COLORS.error(`Error: ${errorMsg}`));
       }
       playBell("error");
     }
@@ -983,8 +988,9 @@ program
     try {
       await setDefaultProvider(name);
       console.log(COLORS.success(`[OK] using ${name}`));
-    } catch (e: any) {
-      console.log(COLORS.error(e.message));
+    } catch (e: unknown) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      console.log(COLORS.error(errorMsg));
     }
   });
 
@@ -1012,8 +1018,9 @@ program
       console.log(`url:    ${c.baseUrl}`);
       console.log(`key:    ${c.apiKey.slice(0, 8)}...`);
       console.log(`model:  ${c.model}`);
-    } catch (e: any) {
-      console.log(COLORS.error(e.message));
+    } catch (e: unknown) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      console.log(COLORS.error(errorMsg));
     }
   });
 
@@ -1277,7 +1284,7 @@ program
         const addSettings = await loadGlobalSettings();
         if (!addSettings.mcp) addSettings.mcp = { servers: [] };
 
-        const serverConfig: any = { name: addResponse.name };
+        const serverConfig: MCPServerConfig = { name: addResponse.name };
 
         if (addResponse.connType === "stdio" && addResponse.command) {
           serverConfig.command = addResponse.command;
@@ -1353,18 +1360,22 @@ async function runSimpleMode(
     await agent.init();
 
     // 设置简单的事件处理（无 TUI）
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Event data types are dynamic
     agent.on("stream", (data: any) => {
       process.stdout.write(data.chunk);
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Event data types are dynamic
     agent.on("reasoning", (data: any) => {
       process.stdout.write(COLORS.reasoning(data.content));
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Event data types are dynamic
     agent.on("tool_call", (data: any) => {
       console.log(COLORS.tool(`\n[TOOL] ${data.name}`));
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Event data types are dynamic
     agent.on("tool_result", (data: any) => {
       const icon = data.success
         ? COLORS.success("[OK]")
@@ -1375,12 +1386,14 @@ async function runSimpleMode(
       }
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Event data types are dynamic
     agent.on("message", (data: any) => {
       if (data.role === "assistant") {
         console.log(); // 新行
       }
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Event data types are dynamic
     agent.on("context_compressed", (data: any) => {
       console.log(
         COLORS.secondary(
@@ -1389,6 +1402,7 @@ async function runSimpleMode(
       );
     });
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Event data types are dynamic
     agent.on("connection_error", (data: any) => {
       console.log(COLORS.error(`\nConnection Error: ${data.type}`));
       console.log(COLORS.muted(data.hint));
@@ -1466,8 +1480,9 @@ async function runSimpleMode(
         const response = await agent.runLoop(trimmed);
         console.log(COLORS.success("\n[OK] Done"));
         playBell("done");
-      } catch (error: any) {
-        console.log(COLORS.error(`\n[ERR] ${error.message}`));
+      } catch (error: unknown) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.log(COLORS.error(`\n[ERR] ${errorMsg}`));
         playBell("error");
       }
 
