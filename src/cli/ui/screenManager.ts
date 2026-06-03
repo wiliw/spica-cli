@@ -107,6 +107,9 @@ export class ScreenManager {
 
   setStreaming(streaming: boolean): void {
     this.state.isStreaming = streaming;
+    if (!streaming) {
+      this.state.cursorInScrollArea = false;
+    }
   }
 
   start(): void {
