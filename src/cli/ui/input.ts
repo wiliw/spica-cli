@@ -257,8 +257,9 @@ export function createStableREPL(onSubmit: (text: string) => Promise<void>) {
       isProcessing = true;
       try {
         await onSubmit(trimmed);
-      } catch (error: any) {
-        console.log(`Error: ${error.message}`);
+      } catch (error: unknown) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.log(`Error: ${errorMsg}`);
       }
       isProcessing = false;
       handler.render();

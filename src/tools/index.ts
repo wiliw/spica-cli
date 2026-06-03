@@ -452,11 +452,13 @@ export function getAllToolDefinitions(): ToolDefinition[] {
 }
 
 export interface ToolEventCallback {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool events have dynamic data types
   (event: string, data: any): void;
 }
 
 export async function executeTool(
   name: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool arguments are dynamic
   args: Record<string, any>,
   eventCallback?: ToolEventCallback
 ): Promise<ToolResult> {

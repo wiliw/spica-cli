@@ -493,9 +493,9 @@ private matchSkill(prompt: string): SkillDefinition | null {
   }
 
 // 判断错误是否可重试
-  private isRetryableError(error: any): boolean {
-    const message = error.message || '';
-    const code = String(error.code || error.status || '');
+  private isRetryableError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = String((error as { code?: unknown; status?: unknown }).code || (error as { code?: unknown; status?: unknown }).status || '');
 
     // 不可重试的错误
     const nonRetryablePatterns = [
@@ -565,7 +565,7 @@ private matchSkill(prompt: string): SkillDefinition | null {
     operationName: string,
     maxRetries: number = 10
   ): Promise<T> {
-    let lastError: any;
+    let lastError: Error | undefined;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (this.interruptFlag) {
@@ -574,13 +574,13 @@ private matchSkill(prompt: string): SkillDefinition | null {
 
       try {
         return await operation();
-      } catch (error: any) {
+      } catch (error: unknown) {
         // InterruptError: don't retry, propagate immediately
-        if (error instanceof InterruptError || error.name === 'InterruptError') {
+        if (error instanceof InterruptError || (error instanceof Error && error.name === 'InterruptError')) {
           throw error;
         }
 
-        lastError = error;
+        lastError = error instanceof Error ? error : new Error(String(error));
 
         // 最后一次尝试不再重试
         if (attempt === maxRetries) {
@@ -592,11 +592,12 @@ private matchSkill(prompt: string): SkillDefinition | null {
         }
 
         // 检查是否可重试（认证等错误直接抛出）
+        const errorMsg = error instanceof Error ? error.message : String(error);
         if (!this.isRetryableError(error)) {
           this.emit('error_suggestion', {
             tool: operationName,
-            error: error.message,
-            suggestion: `错误不可重试，需要用户处理: ${error.message}`
+            error: errorMsg,
+            suggestion: `错误不可重试，需要用户处理: ${errorMsg}`
           });
           throw error;
         }
@@ -612,7 +613,7 @@ private matchSkill(prompt: string): SkillDefinition | null {
           attempt: attempt + 1,
           maxRetries,
           delay,
-          error: error.message,
+          error: errorMsg,
         });
 
         const start = Date.now();
@@ -824,15 +825,8 @@ async init() {
 
     const triggerThreshold = Math.floor(contextWindow * 0.7);  // 触发阈值：70%（现代设计，更早触发避免过满）
 
-    // 当使用超过触发阈值时自动压缩
+    // 当使用超过触发阈值时自动压缩（compact 内部会 emit context_compressed 事件）
     if (usedTokens > triggerThreshold) {
-      this.emit('context_compressed', {
-        before: existingMessages.length,
-        after: 0,
-        tokensBefore: usedTokens,
-        tokensAfter: 0,
-        message: `Context too large (${usagePercent}%), compressing...`
-      });
       await this.compact();
     }
 
@@ -847,13 +841,14 @@ async init() {
         () => this.llm!.generate(prompt, toolDefinitions),
         'llm_generate'
       );
-    } catch (llmError: any) {
+    } catch (llmError: unknown) {
+      const errorMsg = llmError instanceof Error ? llmError.message : String(llmError);
       this.emit('error_suggestion', {
         tool: 'llm_generate',
-        error: llmError.message,
+        error: errorMsg,
         suggestion: 'Network or API temporary error. Check network connection and retry later.'
       });
-      return `LLM request failed (retried 10 times): ${llmError.message}. Check API config and network.`;
+      return `LLM request failed (retried 10 times): ${errorMsg}. Check API config and network.`;
     }
 
     // 防御性检查：确保 response 存在
@@ -959,6 +954,7 @@ async init() {
           tcArgs._abortSignal = toolAbortController.signal;
 
           // 事件回调 - 用于转发子agent事件和处理卡住警告
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Event data is dynamic
           const eventCallback = (event: string, data: any) => {
             this.emit(event, data);
 
@@ -1040,16 +1036,16 @@ async init() {
               result: result.content || result.output || result.error || '',
               referencedSkills: tc.name === 'skill' && result.success ? result.referencedSkills : undefined
             };
-          } catch (toolError: any) {
+          } catch (toolError: unknown) {
             // 清除 AbortController
             this.clearToolAbortController(tc.name);
-
+            const errorMsg = toolError instanceof Error ? toolError.message : String(toolError);
             this.emit('tool_result', {
               name: tc.name,
               success: false,
-              error: toolError.message,
+              error: errorMsg,
             });
-            return { name: tc.name, id: tc.id, result: `工具执行错误: ${toolError.message}` };
+            return { name: tc.name, id: tc.id, result: `工具执行错误: ${errorMsg}` };
           }
         }));
 
@@ -1100,15 +1096,16 @@ async init() {
               ),
               'llm_continue'
             );
-          } catch (llmError: any) {
+          } catch (llmError: unknown) {
+            const errorMsg = llmError instanceof Error ? llmError.message : String(llmError);
             const isRetryable = this.isRetryableError(llmError);
             const suggestionText = isRetryable
               ? 'Network or API temporary error (retried 10 times), tool results saved. Try continuing conversation or resend request.'
-              : `Error not retryable, user needs to handle: ${llmError.message}`;
+              : `Error not retryable, user needs to handle: ${errorMsg}`;
             
             this.emit('error_suggestion', {
               tool: 'llm_continue',
-              error: llmError.message,
+              error: errorMsg,
               suggestion: suggestionText
             });
             
@@ -1158,7 +1155,7 @@ async init() {
             
             const resultsSummary = toolResults.map(t => `${t.name}: ${t.result.slice(0, 100)}`).join('\n');
             const errorTypeText = isRetryable ? '网络或API临时错误' : 'API错误（请求格式问题）';
-            return `Tool execution completed but LLM response interrupted.\nError type: ${errorTypeText}\nError: ${llmError.message}\nExecuted operations:\n${resultsSummary}\nSuggestion: ${isRetryable ? 'Continue conversation, previous results retained.' : 'Fix issue and restart session. Message history cleaned.'}`;
+            return `Tool execution completed but LLM response interrupted.\nError type: ${errorTypeText}\nError: ${errorMsg}\nExecuted operations:\n${resultsSummary}\nSuggestion: ${isRetryable ? 'Continue conversation, previous results retained.' : 'Fix issue and restart session. Message history cleaned.'}`;
           }
         }
       } else {
@@ -1231,8 +1228,8 @@ async init() {
     await this.init();
   }
 
-  private generateErrorSuggestion(toolName: string, error: string, args: any): string {
-    const suggestions: Record<string, (e: string, a: any) => string> = {
+  private generateErrorSuggestion(toolName: string, error: string, args: Record<string, unknown>): string {
+    const suggestions: Record<string, (e: string, a: Record<string, unknown>) => string> = {
       file_read: (e, a) =>
         e.includes('ENOENT') ? `File not found: ${a.path}. Check path or use glob.`
         : e.includes('EACCES') ? `Permission denied: ${a.path}. Check file permissions.`
