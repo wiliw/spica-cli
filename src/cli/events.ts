@@ -158,12 +158,6 @@ interface AgentStoppedOnErrorData {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
-interface SkillAutoTriggeredData {
-  skill: string;
-  description?: string;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
 interface MessageData {
   role: string;
   content: string;
@@ -443,12 +437,6 @@ export function setupAgentEvents(
     if (data.suggestion) {
       screen.appendScroll(COLORS.muted(`  Suggestion: ${data.suggestion}\n`));
     }
-  });
-
-  // Skill 自动触发（添加遗漏的处理）
-  on('skill_auto_triggered', (data: { skill: string; description: string }) => {
-    screen.appendScroll(COLORS.success(`\n[SKILL] Auto-triggered: ${data.skill}\n`));
-    screen.appendScroll(COLORS.muted(`  ${data.description}\n`));
   });
 
   // Checkpoint 创建（添加遗漏的处理）
