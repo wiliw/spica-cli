@@ -1,11 +1,78 @@
 // Test edge cases for session, token counter, and diff
 import { saveSession, loadSession } from '../utils/session';
+import { cleanMessages } from '../utils/messageCleaner';
 import { TokenCounter } from '../llm/TokenCounter';
 import { computeDiff, formatDiff } from '../cli/ui/diff';
 import fs from 'fs-extra';
 import type { ChatMessage } from '../llm/providers/BaseProvider';
 
 describe('Edge Cases', () => {
+  describe('Message Cleaner Edge Cases', () => {
+    it('should remove empty assistant messages (no content, no toolCalls)', () => {
+      const messages: ChatMessage[] = [
+        { role: 'user', content: 'Hello' },
+        { role: 'assistant', content: '' },  // Should be removed
+        { role: 'assistant', content: '' },  // Should be removed
+        { role: 'assistant', content: 'Response' }
+      ];
+      const cleaned = cleanMessages(messages);
+      expect(cleaned.length).toBe(2);
+      expect(cleaned[0].role).toBe('user');
+      expect(cleaned[1].role).toBe('assistant');
+      expect(cleaned[1].content).toBe('Response');
+    });
+
+    it('should keep assistant messages with toolCalls even if content is empty', () => {
+      const messages: ChatMessage[] = [
+        { role: 'user', content: 'Hello' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'tc1', name: 'bash', arguments: {} }] },
+        { role: 'tool', content: 'result', toolCallId: 'tc1' }
+      ];
+      const cleaned = cleanMessages(messages);
+      expect(cleaned.length).toBe(3);
+    });
+
+    it('should remove consecutive duplicate user messages', () => {
+      const messages: ChatMessage[] = [
+        { role: 'user', content: 'Same question' },
+        { role: 'user', content: 'Same question' },  // Duplicate, should be removed
+        { role: 'user', content: 'Same question' },  // Duplicate, should be removed
+        { role: 'user', content: 'Different question' }
+      ];
+      const cleaned = cleanMessages(messages);
+      expect(cleaned.length).toBe(2);
+      expect(cleaned[0].content).toBe('Same question');
+      expect(cleaned[1].content).toBe('Different question');
+    });
+
+    it('should handle mixed invalid messages', () => {
+      const messages: ChatMessage[] = [
+        { role: 'assistant', content: '' },  // Empty, remove
+        { role: 'user', content: 'Test' },
+        { role: 'assistant', content: '' },  // Empty, remove (after this, two 'Test' become consecutive)
+        { role: 'user', content: 'Test' },   // Now consecutive duplicate, remove
+        { role: 'assistant', content: 'Response' },
+        { role: 'assistant', content: '' },  // Empty, remove
+        { role: 'user', content: 'Next' }
+      ];
+      const cleaned = cleanMessages(messages);
+      // After first pass (remove empty assistants): user-Test, user-Test, assistant-Response, user-Next
+      // After second pass (remove consecutive dupes): user-Test, assistant-Response, user-Next
+      expect(cleaned.length).toBe(3);
+      expect(cleaned.map(m => m.content)).toEqual(['Test', 'Response', 'Next']);
+    });
+
+    it('should handle all empty assistant messages', () => {
+      const messages: ChatMessage[] = [
+        { role: 'assistant', content: '' },
+        { role: 'assistant', content: '' },
+        { role: 'assistant', content: '' }
+      ];
+      const cleaned = cleanMessages(messages);
+      expect(cleaned.length).toBe(0);
+    });
+  });
+
   describe('Session Edge Cases', () => {
     const testWorkspace = '/tmp/test-edge-session';
 
