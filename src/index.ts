@@ -806,9 +806,7 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
           agent.setQueueInputCallback(() => {
             const queue = getInputQueue();
             if (queue.hasPending()) {
-              const merged = queue.mergePending();
-              screen.appendScroll(COLORS.muted(`[QUEUE] Injected during iteration\n`));
-              return merged;
+              return queue.mergePending();
             }
             return null;
           });
