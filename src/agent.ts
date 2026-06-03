@@ -675,6 +675,13 @@ async init() {
  */
 async runLoop(prompt: string, maxIterations = 50): Promise<string> {
     this.interruptFlag = false;
+
+    // 验证 prompt 不为空
+    if (!prompt || prompt.trim().length === 0) {
+      this.emit('empty_input');
+      return 'Empty input - no task to execute. Please provide a prompt.';
+    }
+
     if (!this.llm) {
       await this.init();
     }
