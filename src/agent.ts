@@ -874,6 +874,14 @@ async init() {
         break;
       }
 
+      // 检查队列输入：在每次迭代开始时（LLM响应后）检查是否有新输入
+      const queuedInputAtStart = this.checkQueueInput();
+      if (queuedInputAtStart) {
+        this.emit('queue_injected', { input: queuedInputAtStart.slice(0, 50) });
+        // 将队列输入作为用户消息注入
+        this.llm!.addMessage({ role: 'user', content: `[QUEUED INPUT] ${queuedInputAtStart}` });
+      }
+
       // 检查response状态
       if (!response.toolCalls || response.toolCalls.length === 0) {
         if (response.content) {
@@ -1080,10 +1088,22 @@ async init() {
           .filter(t => t.referencedSkills && t.referencedSkills.length > 0)
           .flatMap(t => t.referencedSkills || []);
         
-        const postToolMessages = referencedSkills.map(refName => ({
+        const skillMessages = referencedSkills.map(refName => ({
           role: 'system' as const,
           content: `REQUIRED_SKILL: ${refName}`
         }));
+
+        // 检查队列输入：在工具执行完成后立即注入新指令
+        const queuedInput = this.checkQueueInput();
+        if (queuedInput) {
+          this.emit('queue_injected', { input: queuedInput.slice(0, 50) });
+        }
+
+        // 合并所有后置消息
+        const postToolMessages = [
+          ...skillMessages,
+          ...(queuedInput ? [{ role: 'user' as const, content: `[QUEUED INPUT] ${queuedInput}` }] : [])
+        ];
 
         // 所有工具完成后，一次性发送所有结果给LLM继续生成
         if (toolResults.length > 0) {

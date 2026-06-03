@@ -61,9 +61,8 @@ interface ContextCompressedData {
   message?: string;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
 interface QueueInjectedData {
-  content: string;
+  input: string;
 }
 
 interface RetryAttemptData {
@@ -477,6 +476,10 @@ export function setupAgentEvents(
 
   on('hook_blocked', (data: HookBlockedData) => {
     screen.appendScroll(COLORS.error(`\n[BLOCKED] ${data.tool} - ${data.reason}\n`));
+  });
+
+  on('queue_injected', (data: QueueInjectedData) => {
+    screen.appendScroll(COLORS.primary(`\n[QUEUE] Injected: ${data.input}...\n`));
   });
 
   on('hook_warning', (data: HookWarningData) => {
