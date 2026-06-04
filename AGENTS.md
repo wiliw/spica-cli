@@ -5,8 +5,9 @@
 spica-cli is an AI coding agent CLI with interactive and single-task modes. It supports multiple LLM providers, MCP servers, and a skill system for extending capabilities.
 
 **Entry points:**
-- `src/index.ts` - CLI entry, command parsing, interactive mode
-- `src/agent.ts` - Core agent loop, tool execution, message handling
+- `src/index.ts` - CLI entry, command parsing, interactive mode (1541 lines)
+- `src/agent.ts` - Core agent loop, tool execution, message handling (1338 lines)
+- `src/tools/index.ts` - All tool definitions (2566 lines)
 
 **Key directories:**
 - `src/llm/providers/` - LLM provider implementations (OpenAI-compatible)
@@ -15,6 +16,8 @@ spica-cli is an AI coding agent CLI with interactive and single-task modes. It s
 - `src/cli/` - TUI, events, input handling
 - `src/core/RuntimeState.ts` - Single source of truth for runtime state
 - `src/builtin-skills/` - Built-in skills (superpowers package, 14 skills)
+
+**Stats:** 44 source files, 44 test files
 
 ## Build
 
@@ -25,10 +28,14 @@ npm run build         # Build CLI (generates bin/spica and dist/)
 npx tsc --noEmit      # Type check without building
 ```
 
+Build outputs:
+- `bin/spica` - Executable CLI script
+- `dist/` - Compiled JavaScript and type declarations
+
 ## Test
 
 ```bash
-npm run test:run                    # Run all tests (vitest, ~838 tests)
+npm run test:run                    # Run all tests (vitest)
 npm run test:run -- src/__tests__/  # Run only src tests (exclude dist)
 npx vitest run <file-pattern>       # Run specific test file
 npx vitest run -t "<test name>"     # Run specific test by name
@@ -37,7 +44,7 @@ npm run test:run -- --coverage      # Run with coverage
 
 **Test locations:** `src/__tests__/` and `src/**/__tests__/` (44 test files)
 
-**Current status:** 7 tests fail in `boundaryCases.test.ts` (interrupt/compression edge cases). These are known issues.
+**Known issues:** 7 tests fail in `boundaryCases.test.ts` (interrupt/compression edge cases). These are expected failures related to async interrupt handling.
 
 ## Lint
 
@@ -47,7 +54,7 @@ npm run lint:fix     # Auto-fix lint issues
 npm run lint:strict  # Fail on warnings (not used in CI)
 ```
 
-**Config:** `eslint.config.js` - TypeScript strict, `@typescript-eslint/no-explicit-any` is warning.
+**Config:** `eslint.config.js` - TypeScript strict, `@typescript-eslint/no-explicit-any` is warning only.
 
 ## Code Style
 
@@ -103,7 +110,7 @@ spica skill list                   # List available skills
 - Use `npm run dev` for development mode (tsx watch)
 - Agent events via `SpicaAgent` (EventEmitter), UI subscribes in `src/cli/events.ts`
 - spica reads its own AGENTS.md at runtime via `loadProjectConfig()` — keep it parseable
-- Large files needing refactor: `src/agent.ts` (many concerns), `src/index.ts` (953 lines)
+- Large files needing refactor: `src/agent.ts`, `src/index.ts`, `src/tools/index.ts`
 
 ## Architecture Notes
 
@@ -112,3 +119,18 @@ spica skill list                   # List available skills
 - **Compression:** Context compression triggers at token threshold, preserves recent messages
 - **Interrupt handling:** ESC ESC triggers graceful interrupt, preserves tool results
 - **Bootstrap skill:** `using-superpowers` is auto-injected in system prompt to guide skill usage
+
+## Security Considerations
+
+- Never commit API keys or secrets to the repository
+- Provider credentials stored in `~/.spica/settings.json` (user's home directory)
+- Shell commands use `execa` with array arguments to prevent injection
+- File operations validate paths to prevent directory traversal
+- Use environment variables for sensitive configuration (e.g., `GITHUB_TOKEN`, `TAVILY_API_KEY`)
+
+## Config Locations
+
+```
+~/.spica/settings.json  # Global config (providers, mcp, skills, hooks)
+<project>/.spica/       # Project session (checkpoints, history, learnings)
+```
