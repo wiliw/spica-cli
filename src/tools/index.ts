@@ -2131,17 +2131,39 @@ function resolvePath(path: string): string {
       }
 
       const parent = dirname(resolved);
+      // 递归向上查找已存在的父目录，验证它在 workspace 内（允许创建嵌套路径）
+      let currentParent = parent;
       let realParent: string;
-      try {
-        realParent = fs.realpathSync(parent);
-        if (isOutside(realParent)) {
-          // eslint-disable-next-line preserve-caught-error -- caught below and re-thrown
-          throw new Error(`Access denied: path "${path}" is outside workspace`);
+      let foundExistingParent = false;
+
+      while (currentParent && currentParent !== '/' && currentParent !== '.') {
+        try {
+          realParent = fs.realpathSync(currentParent);
+          if (isOutside(realParent)) {
+            // eslint-disable-next-line preserve-caught-error -- caught below and re-thrown
+            throw new Error(`Access denied: path "${path}" is outside workspace`);
+          }
+          foundExistingParent = true;
+          break;
+        } catch (parentErr: any) {
+          if (parentErr.message?.includes('Access denied')) throw parentErr;
+          // 继续向上查找
+          currentParent = dirname(currentParent);
         }
-      } catch (parentErr: any) {
-        if (parentErr.message?.includes('Access denied')) throw parentErr;
-        throw new Error(`Access denied: cannot resolve path "${path}"`, { cause: parentErr });
       }
+
+      // 如果没找到已存在的父目录，检查 workspace 本身
+      if (!foundExistingParent) {
+        try {
+          realParent = fs.realpathSync(pathResolve(WORKSPACE));
+          if (isOutside(realParent)) {
+            throw new Error(`Access denied: path "${path}" is outside workspace`);
+          }
+        } catch {
+          throw new Error(`Access denied: cannot resolve path "${path}"`);
+        }
+      }
+
       return resolved;
     }
     throw err;
@@ -2257,7 +2279,14 @@ async function runSyntaxCheck(filePath: string): Promise<SyntaxCheckResult> {
   try {
     switch (fileType) {
       case 'typescript': {
-        // TypeScript: 优先使用项目级别的 tsc
+        // TypeScript: 多层检测策略
+        // 1. 项目级 tsc 检查（如果文件在 include 范围内）
+        // 2. 单文件 tsc 检查（始终运行，捕获不在 include 范围的文件）
+        // 3. Bracket matching（基础语法检查）
+
+        const relativePath = filePath.replace(WORKSPACE, '').replace(/^\/+/, '');
+        let fileErrorsFoundInProjectCheck = false;
+
         if (isProjectFile) {
           // 在项目目录下运行 tsc
           const checkResult = await execa('npx tsc --noEmit --skipLibCheck', {
@@ -2268,21 +2297,50 @@ async function runSyntaxCheck(filePath: string): Promise<SyntaxCheckResult> {
           });
           const output = (checkResult.stdout || '') + '\n' + (checkResult.stderr || '');
           if (output.trim()) {
-            const lines = output.split('\n').filter(l => l.includes('error'));
+            // 提取包含目标文件的错误行（匹配相对路径和绝对路径）
+            const lines = output.split('\n');
             for (const line of lines) {
-              if (line.includes(filePath) || line.includes('error TS')) {
+              // 匹配格式: filePath(line,col): error TSxxxx
+              // tsc 输出通常是相对路径
+              if ((line.includes(relativePath) || line.includes(filePath)) && line.includes('error TS')) {
                 result.errors.push(line.trim());
                 result.hasErrors = true;
+                fileErrorsFoundInProjectCheck = true;
               }
             }
           }
-        } else {
-          // 非项目文件：使用简单的括号匹配检查
-          const content = await fs.readFile(absolutePath, 'utf-8');
-          const bracketErrors = checkBracketMatching(content, filePath);
-          if (bracketErrors.length > 0) {
-            result.errors.push(...bracketErrors);
-            result.hasErrors = true;
+        }
+
+        // 基础语法检查：Bracket matching
+        const content = await fs.readFile(absolutePath, 'utf-8');
+        const bracketErrors = checkBracketMatching(content, filePath);
+        if (bracketErrors.length > 0) {
+          result.errors.push(...bracketErrors);
+          result.hasErrors = true;
+        }
+
+        // 单文件 tsc 检查（始终运行，捕获不在 tsconfig include 范围的文件）
+        // 只在项目级检查没有发现文件错误时运行（避免重复）
+        // 注意：tsc 需要在有 TypeScript 安装的目录运行（通常是 spica-cli 自身或项目目录）
+        if (!fileErrorsFoundInProjectCheck) {
+          // 使用 spica-cli 目录或当前工作目录（确保 TypeScript 可用）
+          const tscCwd = await fs.pathExists(join(WORKSPACE, 'node_modules', 'typescript'))
+            ? WORKSPACE
+            : process.cwd();
+
+          const singleFileCheck = await execa(`npx tsc --noEmit --skipLibCheck --esModuleInterop --target ES2020 --module ESNext "${absolutePath}" 2>&1`, {
+            shell: true,
+            cwd: tscCwd,
+            timeout: 15000,
+            reject: false,
+          });
+          if (singleFileCheck.exitCode !== 0) {
+            const errorOutput = singleFileCheck.stderr || singleFileCheck.stdout;
+            if (errorOutput && errorOutput.includes('error TS')) {
+              const errorLines = errorOutput.split('\n').filter(l => l.includes('error TS'));
+              result.errors.push(...errorLines.map(l => l.trim()));
+              result.hasErrors = true;
+            }
           }
         }
         break;
