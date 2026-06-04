@@ -6,6 +6,7 @@ export default defineConfig({
     environment: 'node',
     exclude: [
       '.spica/**',
+      'node_modules/**',
     ],
     coverage: {
       provider: 'v8',

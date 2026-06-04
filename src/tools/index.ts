@@ -1375,6 +1375,20 @@ Write-Output $proc.Id;
           if (abortController.signal.aborted || fetchError.code === 'ERR_CANCELED' || fetchError.message?.includes('abort')) {
             return { success: false, error: 'Tool execution aborted by user (ESC ESC).' };
           }
+
+          // 检查是否是不可重试的错误（404, 403, 401 等）
+          const errorMsg = fetchError.message || '';
+          const statusCode = fetchError.response?.status || '';
+          if (statusCode === 404 || errorMsg.includes('404')) {
+            return { success: false, error: `404 Not Found - URL does not exist (DO NOT RETRY this URL). Error: ${errorMsg}` };
+          }
+          if (statusCode === 403 || errorMsg.includes('403')) {
+            return { success: false, error: `403 Forbidden - Access denied (DO NOT RETRY). Error: ${errorMsg}` };
+          }
+          if (statusCode === 401 || errorMsg.includes('401')) {
+            return { success: false, error: `401 Unauthorized - Authentication required (DO NOT RETRY). Error: ${errorMsg}` };
+          }
+
           return { success: false, error: fetchError.message };
         }
       }

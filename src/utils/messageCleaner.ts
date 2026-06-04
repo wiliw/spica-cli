@@ -21,8 +21,9 @@ export function cleanMessages(messages: ChatMessage[], debug = false): ChatMessa
     return true;
   });
 
-  // Second pass: remove consecutive duplicate user messages (after filtering empty messages)
+  // Second pass: remove consecutive duplicate user messages AND duplicate tool messages
   const dedupedMessages = validMessages.filter((m, i) => {
+    // Deduplicate user messages
     if (m.role === 'user' && i > 0) {
       const prev = validMessages[i - 1];
       if (prev.role === 'user' && prev.content === m.content) {
@@ -32,6 +33,18 @@ export function cleanMessages(messages: ChatMessage[], debug = false): ChatMessa
         return false;
       }
     }
+
+    // Deduplicate tool messages (same toolCallId and same result)
+    if (m.role === 'tool' && i > 0) {
+      const prev = validMessages[i - 1];
+      if (prev.role === 'tool' && prev.toolCallId === m.toolCallId && prev.content === m.content) {
+        if (debug) {
+          console.error('[cleanMessages] Removing duplicate tool message at index', i, 'toolCallId:', m.toolCallId);
+        }
+        return false;
+      }
+    }
+
     return true;
   });
 

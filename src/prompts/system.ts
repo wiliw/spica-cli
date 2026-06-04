@@ -21,7 +21,17 @@ export function buildSkillsSection(skillsMetadata: string): string {
 ## Available Skills
 ${skillsMetadata}
 
-**Usage**: Skills are reusable workflows. When a skill's description matches your task, call \`skill(name)\` to load its full instructions, then follow them precisely. If uncertain whether a skill applies, invoke it to check.
+**Skill Invocation Rules**:
+1. **Check skills BEFORE any action** - Read skill descriptions carefully. If a skill's description matches your task context, invoke \`skill(name)\` immediately.
+2. **Invoke early, not late** - Call skills before starting work, not after encountering problems.
+3. **Even 1% match means invoke** - If there's any possibility a skill applies, invoke it to check its full instructions.
+4. **Follow skill instructions exactly** - After invoking a skill, read its full content and follow its workflow precisely.
+
+**Common triggers**:
+- "create/build/implement" → likely needs brainstorming skill
+- "fix/bug/error/debug" → likely needs systematic-debugging skill
+- "complete/done/verify" → likely needs verification-before-completion skill
+- "review/merge/pr" → likely needs requesting-code-review skill
 `;
 }
 

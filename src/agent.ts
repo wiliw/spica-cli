@@ -481,8 +481,8 @@ interrupt() {
           break;
         }
 
-        // 指数退避：1s, 2s, 4s, 8s, 16s, 32s, 60s...（最大60秒）
-        const delay = Math.min(1000 * Math.pow(2, attempt), 60000);
+        // 指数退避：2s, 4s, 8s, 16s, 32s, 64s, 120s...（最大120秒）
+        const delay = Math.min(2000 * Math.pow(2, attempt), 120000);
         this.emit('retry_attempt', {
           operation: operationName,
           attempt: attempt + 1,
@@ -764,9 +764,11 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
 
     const allToolResults: Array<{ name: string; id: string; result: string }> = [];
     let criticalErrorDetected: { tool: string; error: string; suggestion: string } | null = null;
+    let queueInjectedThisIteration = false;  // 防止同一迭代内重复注入队列
 
     while (!response.finished && iterations < maxIterations && !this.interruptFlag) {
       iterations++;
+      queueInjectedThisIteration = false;  // 每次迭代重置
 
       if (this.interruptFlag) {
         break;
@@ -778,6 +780,7 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
         this.emit('queue_injected', { input: queuedInputAtStart.slice(0, 50) });
         // 将队列输入作为用户消息注入
         this.llm!.addMessage({ role: 'user', content: `[QUEUED INPUT] ${queuedInputAtStart}` });
+        queueInjectedThisIteration = true;  // 标记已注入
       }
 
       // 检查response状态
@@ -945,10 +948,14 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
           content: `REQUIRED_SKILL: ${refName}`
         }));
 
-        // 检查队列输入：在工具执行完成后立即注入新指令
-        const queuedInput = this.checkQueueInput();
-        if (queuedInput) {
-          this.emit('queue_injected', { input: queuedInput.slice(0, 50) });
+        // 检查队列输入：在工具执行完成后注入新指令（如果迭代开始时没有注入过）
+        // 只有当迭代开始时没有注入队列，才在这里检查并注入
+        let queuedInput: string | null = null;
+        if (!queueInjectedThisIteration) {
+          queuedInput = this.checkQueueInput();
+          if (queuedInput) {
+            this.emit('queue_injected', { input: queuedInput.slice(0, 50) });
+          }
         }
 
         // 合并所有后置消息

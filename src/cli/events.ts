@@ -1,11 +1,9 @@
 import { SpicaAgent } from '../agent';
 import { getScreenManager } from './ui/screenManager';
-import { COLORS, format } from './ui/colors';
+import { COLORS } from './ui/colors';
 import { TokenCounter } from '../llm/TokenCounter';
-import prompts from 'prompts';
 import { getRuntimeState } from '../core/RuntimeState';
 import os from 'os';
-import { playBell } from '../utils/bell';
 
 // 事件数据类型定义
 interface ConnectionErrorData {

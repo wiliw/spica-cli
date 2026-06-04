@@ -108,7 +108,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseUrl,
-      timeout: 60000,  // 60秒超时 (优化)
+      timeout: 120000,  // 120秒超时（支持较慢的 API 如阿里云 GLM）
       maxRetries: 0,  // Spica handles retries via callLLMWithRetry
     });
   }
