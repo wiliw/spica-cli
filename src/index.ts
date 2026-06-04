@@ -10,7 +10,6 @@ import {
   setDefaultProvider,
   GLOBAL_SETTINGS_FILE,
 } from "./utils/settings";
-import { MCPServerConfig } from "./utils/settings";
 import { loadSession, saveSession } from "./utils/session";
 import {
   parseSkillInput,
@@ -37,13 +36,13 @@ import {
   generateExampleConfig,
   shutdownMCP,
 } from "./mcp/client";
-import { COLORS, format, BG } from "./cli/ui/colors";
+import { COLORS, BG } from "./cli/ui/colors";
 import { getInputQueue, clearInputQueue } from "./cli/ui/queue";
 import { autoDrainQueue } from "./cli/queueDrain";
 import { TUIInputHandler } from "./cli/ui/tuiInput";
 import { setupAgentEvents, formatRunStats } from "./cli/events";
-import { displayStatusLine, updateStatusBar, setUpdateStatusBarFn } from "./cli/status";
-import { getRuntimeState, resetRuntimeState } from "./core/RuntimeState";
+import { updateStatusBar, setUpdateStatusBarFn } from "./cli/status";
+import { getRuntimeState } from "./core/RuntimeState";
 
 import { getScreenManager } from "./cli/ui/screenManager";
 import { TokenCounter } from "./llm/TokenCounter";
@@ -103,7 +102,7 @@ program
   .version("1.0.0")
   .addHelpText(
     "after",
-    '\nCommands:\n  spica                    Start session\n  spica run "task"         Execute one task\n  spica set name url key model  Add provider\n  spica use name           Switch provider\n  spica list               List providers\n  spica remove name...     Remove providers',
+    '\nExamples:\n  spica                    Start interactive session\n  spica run "fix bug"      Execute one task\n  spica set openai https://api.openai.com/v1 sk-xxx gpt-4o\n\nInternal commands (in session):\n  /checkpoint, /skill, /mcp, /session, /queue, /status, /help',
   );
 
 // 默认：持续对话模式（自动加载历史）
@@ -195,13 +194,17 @@ program
           "/undo",
           "/clear",
           "/reset",
-          "/skills",
-          "/skill-add",
-          "/skill-remove",
-          "/skill-edit",
+          "/checkpoint",
+          "/skill",
+          "/mcp",
           "/history",
           "/compact",
           "/init",
+          "/new",
+          "/sessions",
+          "/switch",
+          "/rename",
+          "/delete",
         ];
         const getCommands = () => {
           const skills = listSkills(process.cwd());
@@ -619,22 +622,221 @@ program
               return;
             }
 
-            // Skills
-            if (cmd === "skills") {
-              const skills = listSkills(process.cwd());
+            // Checkpoint 管理
+            if (cmd === "checkpoint" || cmd.startsWith("checkpoint ")) {
+              const subCmd = cmd.startsWith("checkpoint ") ? cmd.slice(11).trim() : "";
+              const parts = subCmd.split(" ");
+              const action = parts[0];
+              const id = parts.slice(1).join(" ");
 
-              screen.appendScroll(COLORS.primary.bold("\nSkills:\n"));
-              if (skills.length === 0) {
-                screen.appendScroll(COLORS.muted("  (none)\n"));
+              if (!action || action === "list") {
+                const checkpoints = await listCheckpoints(process.cwd(), 20);
+                screen.appendScroll(COLORS.primary.bold("\nCheckpoints:\n"));
+                if (checkpoints.length === 0) {
+                  screen.appendScroll(COLORS.muted("  (none)\n"));
+                } else {
+                  checkpoints.forEach((c) => {
+                    const date = new Date(c.timestamp).toLocaleString();
+                    screen.appendScroll(`  ${COLORS.success(c.id)} - ${date}\n`);
+                    screen.appendScroll(COLORS.muted(`    ${c.promptPreview}\n`));
+                  });
+                }
+                screen.appendScroll(COLORS.muted("\n  Commands: /checkpoint show <id>, /checkpoint restore <id>, /checkpoint clean\n"));
+              } else if (action === "show") {
+                if (!id) {
+                  screen.appendScroll(COLORS.warning("\nUsage: /checkpoint show <id>\n"));
+                } else {
+                  const meta = await getCheckpoint(process.cwd(), id);
+                  if (!meta) {
+                    screen.appendScroll(COLORS.error(`\n[ERR] Checkpoint not found: ${id}\n`));
+                  } else {
+                    screen.appendScroll(COLORS.primary.bold(`\nCheckpoint: ${meta.id}\n`));
+                    screen.appendScroll(`  Timestamp: ${new Date(meta.timestamp).toLocaleString()}\n`);
+                    screen.appendScroll(`  Prompt: ${meta.promptPreview}\n`);
+                    screen.appendScroll(COLORS.primary.bold("  Files:\n"));
+                    meta.filesBackedUp.forEach((f) => {
+                      screen.appendScroll(COLORS.muted(`    - ${f}\n`));
+                    });
+                  }
+                }
+              } else if (action === "restore") {
+                if (!id) {
+                  screen.appendScroll(COLORS.warning("\nUsage: /checkpoint restore <id>\n"));
+                } else {
+                  const result = await restoreCheckpoint(process.cwd(), id);
+                  if (result.success) {
+                    screen.appendScroll(COLORS.success(`\n[OK] Restored ${result.restoredFiles.length} files from ${id}\n`));
+                    result.restoredFiles.forEach((f) => {
+                      screen.appendScroll(COLORS.muted(`  - ${f}\n`));
+                    });
+                  } else {
+                    screen.appendScroll(COLORS.error(`\n[ERR] ${result.error}\n`));
+                  }
+                }
+              } else if (action === "clean") {
+                const result = await cleanCheckpoints(process.cwd(), 20);
+                screen.appendScroll(COLORS.success(`\n[OK] Cleaned checkpoints\n`));
+                screen.appendScroll(COLORS.muted(`  Deleted: ${result.deleted.length}, Kept: ${result.kept.length}\n`));
               } else {
-                skills.forEach((s) => {
-                  screen.appendScroll(
-                    COLORS.muted(`  /${s.name} - ${s.description || ""}\n`),
-                  );
-                });
+                screen.appendScroll(COLORS.warning("\nUsage: /checkpoint [list|show <id>|restore <id>|clean]\n"));
               }
-              screen.appendScroll("\n");
+              screen.restoreCursor();
+              return;
+            }
 
+            // Skill 管理
+            if (cmd === "skill" || cmd.startsWith("skill ")) {
+              const subCmd = cmd.startsWith("skill ") ? cmd.slice(6).trim() : "";
+              const parts = subCmd.split(" ");
+              const action = parts[0];
+
+              if (!action || action === "list") {
+                const skills = listSkills(process.cwd());
+                const packages = await listInstalledPackages();
+
+                screen.appendScroll(COLORS.primary.bold("\nSkill Packages:\n"));
+                if (packages.length === 0) {
+                  screen.appendScroll(COLORS.muted("  (none)\n"));
+                } else {
+                  packages.forEach((p) => {
+                    screen.appendScroll(`  ${COLORS.success("●")} ${p.name} (${p.skills.length} skills)\n`);
+                  });
+                }
+
+                screen.appendScroll(COLORS.primary.bold("\nAvailable Skills:\n"));
+                if (skills.length === 0) {
+                  screen.appendScroll(COLORS.muted("  (none)\n"));
+                  screen.appendScroll(COLORS.muted("\n  Install: /skill install <url>\n"));
+                } else {
+                  skills.forEach((s) => {
+                    screen.appendScroll(COLORS.muted(`  /${s.name} - ${s.description || ""}\n`));
+                  });
+                }
+              } else if (action === "install") {
+                const source = parts.slice(1).join(" ");
+                if (!source) {
+                  screen.appendScroll(COLORS.warning("\nUsage: /skill install <url-or-path>\n"));
+                } else {
+                  const result = await installSkill(source);
+                  if (result.success) {
+                    screen.appendScroll(COLORS.success(`\n[OK] ${result.message}\n`));
+                    if (result.skills) {
+                      result.skills.forEach((s) => screen.appendScroll(COLORS.muted(`  /${s}\n`)));
+                    }
+                  } else {
+                    screen.appendScroll(COLORS.error(`\n[ERR] ${result.message}\n`));
+                  }
+                }
+              } else if (action === "uninstall") {
+                const pkgName = parts.slice(1).join(" ");
+                if (!pkgName) {
+                  screen.appendScroll(COLORS.warning("\nUsage: /skill uninstall <package-name>\n"));
+                } else {
+                  const result = await uninstallSkill(pkgName);
+                  if (result.success) {
+                    screen.appendScroll(COLORS.success(`\n[OK] ${result.message}\n`));
+                  } else {
+                    screen.appendScroll(COLORS.error(`\n[ERR] ${result.message}\n`));
+                  }
+                }
+              } else if (action === "add") {
+                const skillName = parts[1];
+                const promptTemplate = parts.slice(2).join(" ") || "{input}";
+                if (!skillName) {
+                  screen.appendScroll(COLORS.warning("\nUsage: /skill add <name> [promptTemplate]\n"));
+                } else {
+                  await saveSkill(skillName, { name: skillName, description: `Custom skill: ${skillName}`, promptTemplate });
+                  screen.appendScroll(COLORS.success(`\n[OK] Skill added: ${skillName}\n`));
+                }
+              } else if (action === "remove") {
+                const skillName = parts[1];
+                if (!skillName) {
+                  screen.appendScroll(COLORS.warning("\nUsage: /skill remove <name>\n"));
+                } else {
+                  const result = await deleteSkill(skillName);
+                  if (result) {
+                    screen.appendScroll(COLORS.success(`\n[OK] Skill removed: ${skillName}\n`));
+                  } else {
+                    screen.appendScroll(COLORS.warning(`\n[WARN] Skill not found: ${skillName}\n`));
+                  }
+                }
+              } else if (action === "edit") {
+                const skillName = parts[1];
+                const promptTemplate = parts.slice(2).join(" ");
+                if (!skillName || !promptTemplate) {
+                  screen.appendScroll(COLORS.warning("\nUsage: /skill edit <name> <promptTemplate>\n"));
+                } else {
+                  const existing = getSkill(skillName, process.cwd());
+                  if (!existing) {
+                    screen.appendScroll(COLORS.warning(`\n[WARN] Skill not found: ${skillName}\n`));
+                  } else {
+                    await saveSkill(skillName, { ...existing, promptTemplate });
+                    screen.appendScroll(COLORS.success(`\n[OK] Skill updated: ${skillName}\n`));
+                  }
+                }
+              } else {
+                screen.appendScroll(COLORS.warning("\nUsage: /skill [list|install|uninstall|add|remove|edit]\n"));
+              }
+              screen.restoreCursor();
+              return;
+            }
+
+            // MCP 管理
+            if (cmd === "mcp" || cmd.startsWith("mcp ")) {
+              const subCmd = cmd.startsWith("mcp ") ? cmd.slice(4).trim() : "";
+              const parts = subCmd.split(" ");
+              const action = parts[0];
+              const manager = getMCPManager();
+
+              if (!action || action === "status") {
+                const connected = manager.listConnectedServers();
+                const tools = manager.listAvailableTools();
+
+                screen.appendScroll(COLORS.primary.bold("\nMCP Status:\n"));
+                if (connected.length === 0) {
+                  screen.appendScroll(COLORS.muted("  No servers connected\n"));
+                  screen.appendScroll(COLORS.muted("\n  Run /mcp init to create example config\n"));
+                } else {
+                  screen.appendScroll(COLORS.success(`  Connected: ${connected.join(", ")}\n`));
+                  screen.appendScroll(COLORS.muted(`  Tools: ${tools.length}\n`));
+                  if (tools.length > 0) {
+                    tools.slice(0, 5).forEach((t) => {
+                      screen.appendScroll(COLORS.muted(`    - ${t}\n`));
+                    });
+                    if (tools.length > 5) {
+                      screen.appendScroll(COLORS.muted(`    ... and ${tools.length - 5} more\n`));
+                    }
+                  }
+                }
+              } else if (action === "init") {
+                const currentSettings = await loadGlobalSettings();
+                if ((currentSettings.mcp?.servers?.length ?? 0) > 0) {
+                  screen.appendScroll(COLORS.warning("\nMCP servers already configured\n"));
+                  screen.appendScroll(COLORS.muted("  Edit ~/.spica/settings.json to modify\n"));
+                } else {
+                  currentSettings.mcp = generateExampleConfig();
+                  await saveGlobalSettings(currentSettings);
+                  screen.appendScroll(COLORS.success(`\n[OK] MCP config added to ${GLOBAL_SETTINGS_FILE}\n`));
+                  screen.appendScroll(COLORS.muted("  Edit ~/.spica/settings.json to customize\n"));
+                }
+              } else if (action === "tools") {
+                const allTools = manager.listAvailableTools();
+                screen.appendScroll(COLORS.primary.bold("\nMCP Tools:\n"));
+                if (allTools.length === 0) {
+                  screen.appendScroll(COLORS.muted("  (none)\n"));
+                  screen.appendScroll(COLORS.muted("  Connect a MCP server first\n"));
+                } else {
+                  allTools.forEach((t) => {
+                    screen.appendScroll(COLORS.muted(`  ${t}\n`));
+                  });
+                }
+              } else if (action === "disconnect") {
+                await manager.disconnectAll();
+                screen.appendScroll(COLORS.success("\n[OK] All MCP servers disconnected\n"));
+              } else {
+                screen.appendScroll(COLORS.warning("\nUsage: /mcp [status|init|tools|disconnect]\n"));
+              }
+              screen.restoreCursor();
               return;
             }
 
@@ -698,89 +900,6 @@ Verify every command by running it. Don't guess. Be specific to this project.
 If AGENTS.md already exists, preserve valuable content and supplement updates.`;
 
               handleInput(initPrompt);
-              return;
-            }
-
-            // 动态 skill 管理
-            if (cmd.startsWith("skill-add ")) {
-              const parts = cmd.slice("skill-add ".length).split(" ");
-              const skillName = parts[0];
-              if (!skillName) {
-                screen.appendScroll(
-                  COLORS.warning(
-                    "\nUsage: /skill-add <name> [promptTemplate]\n",
-                  ),
-                );
-
-                return;
-              }
-              const promptTemplate = parts.slice(1).join(" ") || "{input}";
-              const description = `Custom skill: ${skillName}`;
-              await saveSkill(skillName, {
-                name: skillName,
-                description,
-                promptTemplate,
-              });
-
-              screen.appendScroll(
-                COLORS.success(`\n[OK] Skill added: ${skillName}\n`),
-              );
-
-              return;
-            }
-
-            if (cmd.startsWith("skill-remove ")) {
-              const skillName = cmd.slice("skill-remove ".length).trim();
-              if (!skillName) {
-                screen.appendScroll(
-                  COLORS.warning("\nUsage: /skill-remove <name>\n"),
-                );
-
-                return;
-              }
-              const result = await deleteSkill(skillName);
-
-              if (result) {
-                screen.appendScroll(
-                  COLORS.success(`\n[OK] Skill removed: ${skillName}\n`),
-                );
-              } else {
-                screen.appendScroll(
-                  COLORS.warning(`\n[WARN] Skill not found: ${skillName}\n`),
-                );
-              }
-
-              return;
-            }
-
-            if (cmd.startsWith("skill-edit ")) {
-              const rest = cmd.slice("skill-edit ".length);
-              const firstSpace = rest.indexOf(" ");
-              if (firstSpace === -1) {
-                screen.appendScroll(
-                  COLORS.warning(
-                    "\nUsage: /skill-edit <name> <promptTemplate>\n",
-                  ),
-                );
-
-                return;
-              }
-              const skillName = rest.slice(0, firstSpace);
-              const promptTemplate = rest.slice(firstSpace + 1) || "{input}";
-              const existing = getSkill(skillName, process.cwd());
-              if (!existing) {
-                screen.appendScroll(
-                  COLORS.warning(`\n[WARN] Skill not found: ${skillName}\n`),
-                );
-
-                return;
-              }
-              await saveSkill(skillName, { ...existing, promptTemplate });
-
-              screen.appendScroll(
-                COLORS.success(`\n[OK] Skill updated: ${skillName}\n`),
-              );
-
               return;
             }
 
@@ -934,10 +1053,25 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
             COLORS.muted("  /undo       Remove last input\n"),
           );
           screen.appendScroll("\n");
-          screen.appendScroll(COLORS.muted("  /status     Show status\n"));
+          screen.appendScroll(COLORS.primary.bold("Checkpoint:\n"));
+          screen.appendScroll(COLORS.muted("  /checkpoint list        List checkpoints\n"));
+          screen.appendScroll(COLORS.muted("  /checkpoint show <id>   Show checkpoint\n"));
+          screen.appendScroll(COLORS.muted("  /checkpoint restore <id> Restore files\n"));
+          screen.appendScroll(COLORS.muted("  /checkpoint clean       Clean old checkpoints\n"));
           screen.appendScroll("\n");
-          screen.appendScroll(COLORS.primary.bold("Skills:\n"));
-          screen.appendScroll(COLORS.muted("  /skills     List skills\n"));
+          screen.appendScroll(COLORS.primary.bold("Skill:\n"));
+          screen.appendScroll(COLORS.muted("  /skill list             List skills\n"));
+          screen.appendScroll(COLORS.muted("  /skill install <url>    Install skill package\n"));
+          screen.appendScroll(COLORS.muted("  /skill add <name> [tpl] Add custom skill\n"));
+          screen.appendScroll(COLORS.muted("  /skill remove <name>   Remove skill\n"));
+          screen.appendScroll("\n");
+          screen.appendScroll(COLORS.primary.bold("MCP:\n"));
+          screen.appendScroll(COLORS.muted("  /mcp status     Show MCP status\n"));
+          screen.appendScroll(COLORS.muted("  /mcp init       Create example config\n"));
+          screen.appendScroll(COLORS.muted("  /mcp tools      List available tools\n"));
+          screen.appendScroll(COLORS.muted("  /mcp disconnect  Disconnect all servers\n"));
+          screen.appendScroll("\n");
+          screen.appendScroll(COLORS.muted("  /status     Show status\n"));
           screen.appendScroll("\n");
         };
 
@@ -1090,385 +1224,11 @@ program
     await saveGlobalSettings(config);
   });
 
-// Skills管理
-program
-  .command("skills")
-  .description("Manage custom skills (extendable AI templates)")
-  .argument("[action]", "list|install|uninstall")
-  .argument("[source]", "Skill source (URL or path)")
-  .addHelpText(
-    "after",
-    "\nExamples:\n  spica skills list            # List installed skills\n  spica skills install https://github.com/user/skill",
-  )
-  .action(async (action?: string, source?: string) => {
-    if (!action) {
-      // 默认列出所有skills
-      const skills = listSkills(process.cwd());
-      const packages = await listInstalledPackages();
+// Skills管理已移至内部命令 /skill
 
-      console.log(COLORS.primary.bold("\nInstalled skill packages:"));
-      if (packages.length === 0) {
-        console.log(COLORS.muted("  (none)"));
-      } else {
-        packages.forEach((p) => {
-          console.log(
-            `  ${COLORS.success("●")} ${p.name} (${p.skills.length} skills)`,
-          );
-        });
-      }
+// MCP管理已移至内部命令 /mcp
 
-      console.log(COLORS.primary.bold("\nAvailable skills:"));
-      if (skills.length === 0) {
-        console.log(COLORS.muted("  (none)"));
-        console.log(COLORS.muted("\nInstall skills with:"));
-        console.log(COLORS.muted("  spica skills install <url-or-file>"));
-      } else {
-        skills.forEach((s) => {
-          console.log(`  ${COLORS.muted(`/${s.name}`)} - ${s.description}`);
-        });
-      }
-      console.log("");
-      return;
-    }
-
-    switch (action) {
-      case "list":
-        const skills = listSkills(process.cwd());
-        console.log(COLORS.primary.bold("\nAvailable skills:"));
-        skills.forEach((s) => {
-          console.log(`  ${COLORS.muted(`/${s.name}`)} - ${s.description}`);
-        });
-        break;
-
-      case "install":
-        if (!source) {
-          console.log(
-            COLORS.warning("Usage: spica skills install <url-or-file>"),
-          );
-          console.log(
-            COLORS.muted(
-              "Example: spica skills install https://example.com/skills.json",
-            ),
-          );
-          return;
-        }
-        const result = await installSkill(source);
-        if (result.success) {
-          console.log(COLORS.success(`[OK] ${result.message}`));
-          if (result.skills) {
-            console.log(COLORS.muted("Installed skills:"));
-            result.skills.forEach((s) => console.log(COLORS.muted(`  /${s}`)));
-          }
-        } else {
-          console.log(COLORS.error(`[ERR] ${result.message}`));
-        }
-        break;
-
-      case "uninstall":
-        if (!source) {
-          console.log(
-            COLORS.warning("Usage: spica skills uninstall <package-name>"),
-          );
-          return;
-        }
-        const uninstallResult = await uninstallSkill(source);
-        if (uninstallResult.success) {
-          console.log(COLORS.success(`[OK] ${uninstallResult.message}`));
-        } else {
-          console.log(COLORS.error(`[ERR] ${uninstallResult.message}`));
-        }
-        break;
-
-      case "packages":
-        const packages = await listInstalledPackages();
-        console.log(COLORS.primary.bold("\nInstalled skill packages:"));
-        if (packages.length === 0) {
-          console.log(COLORS.muted("  (none)"));
-        } else {
-          packages.forEach((p) => {
-            console.log(`  ${COLORS.success("●")} ${p.name}`);
-            console.log(COLORS.muted(`    Skills: ${p.skills.join(", ")}`));
-          });
-        }
-        break;
-
-      default:
-        console.log(
-          COLORS.warning(
-            "Available actions: list, install, uninstall, packages",
-          ),
-        );
-    }
-  });
-
-// MCP管理
-program
-  .command("mcp")
-  .description("Manage MCP servers (external tool servers)")
-  .argument("[action]", "list|add|remove")
-  .argument("[server]", "Server name")
-  .addHelpText(
-    "after",
-    "\nExamples:\n  spica mcp list              # List configured MCP servers",
-  )
-  .action(async (action?: string, server?: string) => {
-    const manager = getMCPManager(); // 定义在开头，所有case都能用
-
-    if (!action) {
-      // 默认显示状态
-      const connected = manager.listConnectedServers();
-      const tools = manager.listAvailableTools();
-
-      console.log(COLORS.primary.bold("\nMCP Status:"));
-      if (connected.length === 0) {
-        console.log(COLORS.muted("  No servers connected"));
-        console.log(
-          COLORS.muted("\n  Run `spica mcp init` to create example config"),
-        );
-      } else {
-        console.log(
-          COLORS.success(`  Connected servers: ${connected.join(", ")}`),
-        );
-        console.log(COLORS.muted(`  Available tools: ${tools.length}`));
-        if (tools.length > 0) {
-          tools.slice(0, 10).forEach((t) => {
-            console.log(COLORS.muted(`    - ${t}`));
-          });
-          if (tools.length > 10) {
-            console.log(COLORS.muted(`    ... and ${tools.length - 10} more`));
-          }
-        }
-      }
-      console.log("");
-      return;
-    }
-
-    switch (action) {
-      case "list":
-        const servers = manager.listConnectedServers();
-        console.log(COLORS.primary.bold("\nConnected MCP servers:"));
-        if (servers.length === 0) {
-          console.log(COLORS.muted("  (none)"));
-        } else {
-          servers.forEach((s) => {
-            const toolsCount = manager
-              .listAvailableTools()
-              .filter((t) => t.startsWith(`${s}/`)).length;
-            console.log(`  ${COLORS.success("●")} ${s} (${toolsCount} tools)`);
-          });
-        }
-        break;
-
-      case "init":
-        // 写入 settings.json
-        const currentSettings = await loadGlobalSettings();
-
-        if ((currentSettings.mcp?.servers?.length ?? 0) > 0) {
-          console.log(
-            COLORS.warning(`MCP servers already configured in settings.json`),
-          );
-          console.log(COLORS.muted("Edit ~/.spica/settings.json to modify"));
-        } else {
-          currentSettings.mcp = generateExampleConfig();
-          await saveGlobalSettings(currentSettings);
-          console.log(
-            COLORS.success(`[OK] MCP config added to ${GLOBAL_SETTINGS_FILE}`),
-          );
-          console.log(
-            COLORS.muted("Edit ~/.spica/settings.json to customize servers"),
-          );
-        }
-        break;
-
-      case "add": {
-        const addResponse = await prompts([
-          { type: "text", name: "name", message: "Server name:" },
-          {
-            type: "select",
-            name: "connType",
-            message: "Connection type:",
-            choices: [
-              { title: "stdio (command)", value: "stdio" },
-              { title: "SSE (URL)", value: "sse" },
-            ],
-          },
-          {
-            type: "text",
-            name: "command",
-            message: "Start command (e.g. npx):",
-            hint: "For stdio mode",
-          },
-          {
-            type: "text",
-            name: "args",
-            message: "Arguments (space-separated):",
-            hint: "e.g. -y @anthropic-ai/mcp-server-filesystem /path",
-          },
-          {
-            type: "text",
-            name: "url",
-            message: "SSE URL:",
-            hint: "For SSE mode",
-          },
-          {
-            type: "text",
-            name: "headers",
-            message: "Headers (key=value,key=value):",
-            hint: "Optional, for OAuth etc.",
-          },
-        ]);
-
-        if (!addResponse.name) break;
-
-        const addSettings = await loadGlobalSettings();
-        if (!addSettings.mcp) addSettings.mcp = { servers: [] };
-
-        const serverConfig: MCPServerConfig = { name: addResponse.name };
-
-        if (addResponse.connType === "stdio" && addResponse.command) {
-          serverConfig.command = addResponse.command;
-          if (addResponse.args)
-            serverConfig.args = addResponse.args.split(/\s+/);
-        } else if (addResponse.connType === "sse" && addResponse.url) {
-          serverConfig.url = addResponse.url;
-        } else {
-          console.log(COLORS.warning("Invalid configuration"));
-          break;
-        }
-
-        if (addResponse.headers) {
-          serverConfig.headers = {};
-          for (const pair of addResponse.headers.split(",")) {
-            const [k, ...v] = pair.split("=");
-            if (k) serverConfig.headers[k.trim()] = v.join("=").trim();
-          }
-        }
-
-        addSettings.mcp.servers.push(serverConfig);
-        await saveGlobalSettings(addSettings);
-        console.log(
-          COLORS.success(`[OK] MCP server "${addResponse.name}" added`),
-        );
-        break;
-      }
-
-      case "tools":
-        const allTools = manager.listAvailableTools();
-        console.log(COLORS.primary.bold("\nAvailable MCP tools:"));
-        if (allTools.length === 0) {
-          console.log(COLORS.muted("  (none)"));
-          console.log(COLORS.muted("Connect a MCP server first"));
-        } else {
-          allTools.forEach((t) => {
-            console.log(COLORS.muted(`  ${t}`));
-          });
-        }
-        break;
-
-      case "disconnect":
-        if (server) {
-          // 断开特定服务器（未实现）
-          console.log(
-            COLORS.warning("Disconnecting specific server not implemented"),
-          );
-        } else {
-          await manager.disconnectAll();
-          console.log(COLORS.success("[OK] All MCP servers disconnected"));
-        }
-        break;
-
-      default:
-        console.log(
-          COLORS.warning("Available actions: list, init, tools, disconnect"),
-        );
-        console.log(
-          COLORS.muted("\nMCP allows connecting external tool servers"),
-        );
-        console.log(
-          COLORS.muted("Examples: filesystem, postgres, slack, custom APIs"),
-        );
-    }
-  });
-
-// Checkpoint 管理
-program
-  .command("checkpoint")
-  .description("Manage checkpoints (file snapshots, no git pollution)")
-  .argument("[action]", "list|show|restore|clean")
-  .argument("[id]", "Checkpoint ID (for show/restore)")
-  .addHelpText(
-    "after",
-    "\nExamples:\n  spica checkpoint list              # List all checkpoints\n  spica checkpoint show <id>         # Show checkpoint details\n  spica checkpoint restore <id>      # Restore files from checkpoint\n  spica checkpoint clean             # Clean old checkpoints (keep 20)",
-  )
-  .action(async (action?: string, id?: string) => {
-    const workspacePath = process.cwd();
-
-    switch (action) {
-      case "list":
-        const checkpoints = await listCheckpoints(workspacePath, 50);
-        console.log(COLORS.primary.bold("\nCheckpoints:"));
-        if (checkpoints.length === 0) {
-          console.log(COLORS.muted("  (none)"));
-        } else {
-          checkpoints.forEach((c) => {
-            const date = new Date(c.timestamp).toLocaleString();
-            console.log(`  ${COLORS.success(c.id)} - ${date}`);
-            console.log(COLORS.muted(`    ${c.promptPreview}`));
-            console.log(COLORS.muted(`    Files: ${c.filesBackedUp.length}`));
-          });
-        }
-        console.log("");
-        break;
-
-      case "show":
-        if (!id) {
-          console.log(COLORS.error("Usage: spica checkpoint show <id>"));
-          break;
-        }
-        const meta = await getCheckpoint(workspacePath, id);
-        if (!meta) {
-          console.log(COLORS.error(`Checkpoint not found: ${id}`));
-        } else {
-          console.log(COLORS.primary.bold(`\nCheckpoint: ${meta.id}`));
-          console.log(`  Timestamp: ${new Date(meta.timestamp).toLocaleString()}`);
-          console.log(`  Prompt: ${meta.promptPreview}`);
-          console.log(COLORS.primary.bold("\n  Files backed up:"));
-          meta.filesBackedUp.forEach((f) => {
-            console.log(COLORS.muted(`    - ${f}`));
-          });
-        }
-        console.log("");
-        break;
-
-      case "restore":
-        if (!id) {
-          console.log(COLORS.error("Usage: spica checkpoint restore <id>"));
-          break;
-        }
-        const result = await restoreCheckpoint(workspacePath, id);
-        if (result.success) {
-          console.log(COLORS.success(`[OK] Restored ${result.restoredFiles.length} files from ${id}`));
-          result.restoredFiles.forEach((f) => {
-            console.log(COLORS.muted(`  - ${f}`));
-          });
-        } else {
-          console.log(COLORS.error(`[ERR] ${result.error}`));
-        }
-        break;
-
-      case "clean":
-        const cleanResult = await cleanCheckpoints(workspacePath, 20);
-        console.log(COLORS.success(`[OK] Cleaned checkpoints`));
-        console.log(COLORS.muted(`  Deleted: ${cleanResult.deleted.length}`));
-        console.log(COLORS.muted(`  Kept: ${cleanResult.kept.length}`));
-        break;
-
-      default:
-        console.log(COLORS.warning("Available actions: list, show, restore, clean"));
-        console.log(COLORS.muted("\nCheckpoints are file snapshots stored in .spica/snapshots/"));
-        console.log(COLORS.muted("They do not pollute your git history."));
-    }
-  });
+// Checkpoint管理已移至内部命令 /checkpoint
 
 // 非交互模式运行函数
 async function runSimpleMode(
