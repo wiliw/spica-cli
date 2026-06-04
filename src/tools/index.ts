@@ -112,6 +112,35 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: 'file_replace',
+    description: 'Replace text in file using regex pattern. More flexible than file_edit for pattern matching. Read file first. Auto-checks syntax after edit.',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        path: { type: 'string', description: 'File path' },
+        pattern: { type: 'string', description: 'Regex pattern to match (e.g., "oldFunc\\\\(\\\\)" for oldFunc())' },
+        replacement: { type: 'string', description: 'Replacement text. Use $1, $2 for capture groups.' },
+        flags: { type: 'string', description: 'Regex flags: g (global), i (ignore case), m (multiline). Default: "g"' },
+        all: { type: 'boolean', description: 'Replace all occurrences. Default: true' },
+      },
+      required: ['path', 'pattern', 'replacement'],
+    },
+  },
+  {
+    name: 'file_insert',
+    description: 'Insert text at specific line number. Read file first. Auto-checks syntax after edit.',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        path: { type: 'string', description: 'File path' },
+        line: { type: 'number', description: 'Line number to insert at (1-based). Use 0 to append at end, -1 to prepend at beginning.' },
+        content: { type: 'string', description: 'Content to insert' },
+        after: { type: 'string', description: 'Insert after line matching this pattern (alternative to line)' },
+        before: { type: 'string', description: 'Insert before line matching this pattern (alternative to line)' },
+      },
+    },
+  },
+  {
     name: 'file_exists',
     description: 'Check if path exists.',
     parameters: {
@@ -656,6 +685,111 @@ export async function executeTool(
         };
       }
 
+      case 'file_replace': {
+        const replacePath = resolvePath(safeArgs.path);
+        const fileContent = await fs.readFile(replacePath, 'utf-8');
+
+        const pattern = String(safeArgs.pattern);
+        const replacement = String(safeArgs.replacement);
+        const flags = String(safeArgs.flags || 'g');
+        const replaceAll = safeArgs.all !== false; // default true
+
+        try {
+          const effectiveFlags = replaceAll ? flags : flags.replace('g', '');
+          const regex = new RegExp(pattern, effectiveFlags);
+          // Count matches using global flag
+          const countRegex = new RegExp(pattern, effectiveFlags.includes('g') ? effectiveFlags : effectiveFlags + 'g');
+          const matches = fileContent.match(countRegex) || [];
+
+          if (matches.length === 0) {
+            return { success: false, error: `Pattern not found: ${pattern}` };
+          }
+
+          const newContent = fileContent.replace(regex, replacement);
+          const diff = generateEditDiff(fileContent.slice(0, 500), newContent.slice(0, 500));
+
+          await fs.writeFile(replacePath, newContent, 'utf-8');
+
+          const syntaxResult = await runSyntaxCheck(replacePath);
+          const syntaxWarning = formatSyntaxResult(syntaxResult, replacePath);
+
+          return {
+            success: true,
+            output: `Replaced ${matches.length} match(es) in ${replacePath}${syntaxWarning}`,
+            diff,
+            syntaxErrors: syntaxResult.hasErrors ? syntaxResult.errors : undefined,
+          };
+        } catch (regexError: unknown) {
+          return { success: false, error: `Invalid regex: ${regexError instanceof Error ? regexError.message : String(regexError)}` };
+        }
+      }
+
+      case 'file_insert': {
+        const insertPath = resolvePath(safeArgs.path);
+        const fileContent = await fs.readFile(insertPath, 'utf-8');
+        const lines = fileContent.split('\n');
+        const insertContent = String(safeArgs.content || '');
+
+        let insertLine = -1;
+
+        // Determine insertion point
+        if (safeArgs.after !== undefined) {
+          const afterPattern = String(safeArgs.after);
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes(afterPattern)) {
+              insertLine = i + 1; // Insert after this line
+              break;
+            }
+          }
+          if (insertLine === -1) {
+            return { success: false, error: `Pattern not found for 'after': ${afterPattern}` };
+          }
+        } else if (safeArgs.before !== undefined) {
+          const beforePattern = String(safeArgs.before);
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes(beforePattern)) {
+              insertLine = i; // Insert before this line
+              break;
+            }
+          }
+          if (insertLine === -1) {
+            return { success: false, error: `Pattern not found for 'before': ${beforePattern}` };
+          }
+        } else if (safeArgs.line !== undefined) {
+          const lineNum = Number(safeArgs.line);
+          if (lineNum === 0) {
+            // Append at end
+            insertLine = lines.length;
+          } else if (lineNum === -1) {
+            // Prepend at beginning
+            insertLine = 0;
+          } else {
+            insertLine = lineNum - 1; // Convert to 0-based
+          }
+        } else {
+          return { success: false, error: 'Must specify line, after, or before' };
+        }
+
+        // Insert the content
+        const insertLines = insertContent.split('\n');
+        lines.splice(insertLine, 0, ...insertLines);
+
+        const newContent = lines.join('\n');
+        const diff = generateEditDiff(fileContent.slice(0, 500), newContent.slice(0, 500));
+
+        await fs.writeFile(insertPath, newContent, 'utf-8');
+
+        const syntaxResult = await runSyntaxCheck(insertPath);
+        const syntaxWarning = formatSyntaxResult(syntaxResult, insertPath);
+
+        return {
+          success: true,
+          output: `Inserted ${insertLines.length} line(s) at line ${insertLine + 1} in ${insertPath}${syntaxWarning}`,
+          diff,
+          syntaxErrors: syntaxResult.hasErrors ? syntaxResult.errors : undefined,
+        };
+      }
+
       case 'format': {
         const target = safeArgs.path ? resolvePath(safeArgs.path) : WORKSPACE;
         const projectType = await detectProjectType(WORKSPACE);
@@ -955,6 +1089,16 @@ Write-Output $proc.Id;
             }
           }, stuckWarningMs);
 
+          // 进度报告定时器
+          const startTime = Date.now();
+          let progressTimer: NodeJS.Timeout | null = null;
+          if (eventCallback && timeout > 10000) {
+            progressTimer = setInterval(() => {
+              const elapsed = Math.round((Date.now() - startTime) / 1000);
+              eventCallback('tool_progress', { elapsed, command: actualCommand.slice(0, 50) });
+            }, 5000); // 每5秒报告一次
+          }
+
           try {
             // 执行命令
             const bashResult = await execa(actualCommand, {
@@ -969,6 +1113,11 @@ Write-Output $proc.Id;
             if (stuckWarningTimer) {
               clearTimeout(stuckWarningTimer);
               stuckWarningTimer = null;
+            }
+            // 清除进度报告定时器
+            if (progressTimer) {
+              clearInterval(progressTimer);
+              progressTimer = null;
             }
 
             // 检查是否超时或被中断
@@ -1007,6 +1156,10 @@ Write-Output $proc.Id;
             // 清除卡住警告定时器（异常时也要清除）
             if (stuckWarningTimer) {
               clearTimeout(stuckWarningTimer);
+            }
+            // 清除进度报告定时器
+            if (progressTimer) {
+              clearInterval(progressTimer);
             }
             // 捕获超时错误
             if (bashError.message?.includes('timed out') || bashError.name === 'TimedOutError') {
@@ -1818,24 +1971,38 @@ Write-Output $proc.Id;
           return { success: false, error: `No linter configured for project type: ${projectType}` };
         }
 
-        const lintResult = await execa(lintCmd, {
-          shell: true,
-          cwd: WORKSPACE,
-          timeout: 60000,
-          reject: false,
-        });
+        // Progress reporting
+        const startTime = Date.now();
+        const progressTimer = eventCallback ? setInterval(() => {
+          const elapsed = Math.round((Date.now() - startTime) / 1000);
+          eventCallback('tool_progress', { elapsed, stage: 'linting' });
+        }, 5000) : null;
 
-        const output = lintResult.stdout + '\n' + lintResult.stderr;
-        const issues = output.split('\n').filter(l =>
-          l.includes('error') || l.includes('warning') || l.includes('Error') || l.includes('Warning')
-        );
+        try {
+          const lintResult = await execa(lintCmd, {
+            shell: true,
+            cwd: WORKSPACE,
+            timeout: 60000,
+            reject: false,
+          });
 
-        return {
-          success: lintResult.exitCode === 0,
-          output: issues.length > 0
-            ? `Found ${issues.length} issues:\n${issues.slice(0, 20).join('\n')}`
-            : 'No lint issues found',
-        };
+          if (progressTimer) clearInterval(progressTimer);
+
+          const output = lintResult.stdout + '\n' + lintResult.stderr;
+          const issues = output.split('\n').filter(l =>
+            l.includes('error') || l.includes('warning') || l.includes('Error') || l.includes('Warning')
+          );
+
+          return {
+            success: lintResult.exitCode === 0,
+            output: issues.length > 0
+              ? `Found ${issues.length} issues:\n${issues.slice(0, 20).join('\n')}`
+              : 'No lint issues found',
+          };
+        } catch (lintError: unknown) {
+          if (progressTimer) clearInterval(progressTimer);
+          return { success: false, error: lintError instanceof Error ? lintError.message : String(lintError) };
+        }
       }
 
       case 'test': {
@@ -1859,14 +2026,24 @@ Write-Output $proc.Id;
           return { success: false, error: `No test runner configured for project type: ${projectType}` };
         }
 
-        const testResult = await execa(testCmd, {
-          shell: true,
-          cwd: WORKSPACE,
-          timeout: 120000,
-          reject: false,
-        });
+        // Progress reporting
+        const startTime = Date.now();
+        const progressTimer = eventCallback ? setInterval(() => {
+          const elapsed = Math.round((Date.now() - startTime) / 1000);
+          eventCallback('tool_progress', { elapsed, stage: 'running tests' });
+        }, 5000) : null;
 
-        const output = testResult.stdout + '\n' + testResult.stderr;
+        try {
+          const testResult = await execa(testCmd, {
+            shell: true,
+            cwd: WORKSPACE,
+            timeout: 120000,
+            reject: false,
+          });
+
+          if (progressTimer) clearInterval(progressTimer);
+
+          const output = testResult.stdout + '\n' + testResult.stderr;
 
         // Parse summary
         const passedMatch = output.match(/(\d+) passed/i);
@@ -1883,6 +2060,10 @@ Write-Output $proc.Id;
           success: testResult.exitCode === 0,
           output: summary + output.slice(-500),
         };
+        } catch (testError: unknown) {
+          if (progressTimer) clearInterval(progressTimer);
+          return { success: false, error: testError instanceof Error ? testError.message : String(testError) };
+        }
       }
 
       default:

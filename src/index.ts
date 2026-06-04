@@ -1409,11 +1409,18 @@ async function runSimpleMode(
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Event data types are dynamic
+    agent.on("tool_progress", (data: any) => {
+      const elapsed = data.elapsed || 0;
+      const stage = data.stage || data.command || '';
+      process.stdout.write(COLORS.muted(`\r  [${elapsed}s] ${stage}...`));
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Event data types are dynamic
     agent.on("tool_result", (data: any) => {
       const icon = data.success
         ? COLORS.success("[OK]")
         : COLORS.error("[ERR]");
-      console.log(`${icon} ${data.name}`);
+      console.log(`\n${icon} ${data.name}`);
       if (data.error) {
         console.log(COLORS.error(`  Error: ${data.error}`));
       }

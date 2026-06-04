@@ -116,6 +116,16 @@ describe('Tool Descriptions', () => {
     expect(multiEditTool?.description).toContain('syntax');
   });
 
+  it('should mention regex for file_replace', () => {
+    const replaceTool = TOOLS_DEFINITIONS.find(t => t.name === 'file_replace');
+    expect(replaceTool?.description).toContain('regex');
+  });
+
+  it('should mention insert for file_insert', () => {
+    const insertTool = TOOLS_DEFINITIONS.find(t => t.name === 'file_insert');
+    expect(insertTool?.description).toContain('Insert');
+  });
+
   it('should mention auto-detect for lint tool', () => {
     const lintTool = TOOLS_DEFINITIONS.find(t => t.name === 'lint');
     expect(lintTool?.description).toContain('Auto-detects');
@@ -149,5 +159,20 @@ describe('Tool Parameters', () => {
   it('should have optional parameters for bash', () => {
     const bashTool = TOOLS_DEFINITIONS.find(t => t.name === 'bash');
     expect(bashTool?.parameters.required).toContain('command');
+  });
+
+  it('should have required parameters for file_replace', () => {
+    const replaceTool = TOOLS_DEFINITIONS.find(t => t.name === 'file_replace');
+    expect(replaceTool?.parameters.required).toContain('path');
+    expect(replaceTool?.parameters.required).toContain('pattern');
+    expect(replaceTool?.parameters.required).toContain('replacement');
+  });
+
+  it('should have optional parameters for file_insert', () => {
+    const insertTool = TOOLS_DEFINITIONS.find(t => t.name === 'file_insert');
+    expect(insertTool?.parameters.required).toBeUndefined();
+    expect(insertTool?.parameters.properties.line).toBeDefined();
+    expect(insertTool?.parameters.properties.after).toBeDefined();
+    expect(insertTool?.parameters.properties.before).toBeDefined();
   });
 });
