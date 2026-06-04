@@ -1,43 +1,82 @@
 # AGENTS.md
 
-## Dev environment tips
+## Project Overview
 
-- Use `npm run dev` to start the CLI in development mode (tsx watch).
-- Use `npm run build` to generate the executable `bin/spica` script.
-- Use `npx tsc --noEmit` for type checking without building.
-- Check `src/tools/index.ts` for all tool definitions before adding new tools.
-- Import with ESM syntax: `import { x } from 'y'` (no default imports from fs/path).
-- After adding dependencies, run `npm install` and restart the dev server.
-- Agent events are emitted by `SpicaAgent` (EventEmitter). UI subscribes in `src/cli/events.ts`.
-- `RuntimeState` (`src/core/RuntimeState.ts`) is the single source of truth for runtime state — use it, never raw globals.
+spica-cli is an AI coding agent CLI with interactive and single-task modes. It supports multiple LLM providers, MCP servers, and a skill system for extending capabilities.
 
-## Testing instructions
+**Entry points:**
+- `src/index.ts` - CLI entry, command parsing, interactive mode
+- `src/agent.ts` - Core agent loop, tool execution, message handling
 
-- Run `npm run test:run` to execute all tests (182 tests, 25 test files, vitest).
-- Run `npx vitest run <file-pattern>` to focus on specific test files.
-- Run `npx vitest run -t "<test name>"` to focus on one test.
-- Tests are in `src/__tests__/` and `src/**/__tests__/` directories.
-- Fix any test or type errors before committing — the whole suite must pass.
-- Add or update tests for code you change, even if nobody asked.
-- Use `npx vitest run src/__tests__/` to exclude `node_modules` test files.
+**Key directories:**
+- `src/llm/providers/` - LLM provider implementations (OpenAI-compatible)
+- `src/tools/index.ts` - All tool definitions (file, shell, git, web, etc.)
+- `src/skills/` - Skill system (loading, execution)
+- `src/cli/` - TUI, events, input handling
+- `src/core/RuntimeState.ts` - Single source of truth for runtime state
 
-## Code style
+## Build
 
-- TypeScript strict mode, ESM modules, ES2022 target.
-- No comments unless explicitly requested.
-- Tool results: `{ success, output?, error?, content? }`.
-- Use `resolvePath()` for relative path resolution.
-- Shell commands use array-based `execa` to prevent injection — never string interpolation.
+```bash
+npm install           # Install dependencies
+npm run build         # Build CLI (generates bin/spica and dist/)
+./bin/spica --version # Verify build (outputs: 1.0.0)
+npx tsc --noEmit      # Type check without building
+```
 
-## PR instructions
+## Test
 
-- Title format: `[spica] <Title>` or `[spica-cli] <Title>`.
-- Always run `npm run lint` and `npm run test:run` before committing.
-- Ensure build succeeds: `npm run build && ./bin/spica --version`.
+```bash
+npm run test:run                    # Run all tests (vitest, ~900 tests)
+npm run test:run -- src/__tests__/  # Run only src tests (exclude dist)
+npx vitest run <file-pattern>       # Run specific test file
+npx vitest run -t "<test name>"     # Run specific test by name
+npm run test:run -- --coverage      # Run with coverage
+```
 
-## Project notes
+**Test locations:** `src/__tests__/` and `src/**/__tests__/`
 
-- spica is an AI coding agent CLI. Entry: `src/index.ts`, core loop: `src/agent.ts`.
-- LLM providers in `src/llm/providers/`. Tools in `src/tools/index.ts`.
-- Large files to watch: `src/agent.ts` (many concerns), `src/index.ts` (953 lines, planned refactor to `cli/interactive.ts`).
-- spica reads its own AGENTS.md at runtime via `loadProjectConfig()` — keep it parseable.
+**Current status:** 5 tests fail in `boundaryCases.test.ts` (interrupt/compression edge cases) and 1 in `rateLimiterCleanup.test.js` (dist). These are known issues.
+
+## Lint
+
+```bash
+npm run lint         # Run ESLint (warnings allowed)
+npm run lint:fix     # Auto-fix lint issues
+npm run lint:strict  # Fail on warnings (not used in CI)
+```
+
+**Config:** `eslint.config.js` - TypeScript strict, `@typescript-eslint/no-explicit-any` is warning.
+
+## Code Style
+
+- TypeScript ES2022 target, ESM modules, strict mode
+- No comments unless explicitly requested
+- Import style: `import { x } from 'y'` (ESM named imports)
+- Tool results: `{ success, output?, error?, content? }`
+- Path resolution: Use `resolvePath()` for relative paths
+- Shell commands: Use array-based `execa` to prevent injection — never string interpolation
+- `RuntimeState` is the single source of truth — never use raw globals
+
+## PR Workflow
+
+1. Run `npm run lint` and `npm run test:run` before committing
+2. Ensure build succeeds: `npm run build && ./bin/spica --version`
+3. Title format: `[spica] <Title>` or `[spica-cli] <Title>`
+4. CI runs on: Node 18, 20, 22 on ubuntu-latest and windows-latest
+
+**CI checks:** type check → lint → test → build (see `.github/workflows/ci.yml`)
+
+## Dev Tips
+
+- Use `npm run dev` for development mode (tsx watch)
+- Agent events via `SpicaAgent` (EventEmitter), UI subscribes in `src/cli/events.ts`
+- spica reads its own AGENTS.md at runtime via `loadProjectConfig()` — keep it parseable
+- Large files needing refactor: `src/agent.ts` (many concerns), `src/index.ts` (953 lines)
+
+## Architecture Notes
+
+- **Tool conflict detection:** Tools operating on same resource are sequenced (see `detectToolConflicts` in agent.ts)
+- **Message cleaning:** Orphaned tool messages are auto-cleaned before API calls
+- **Compression:** Context compression triggers at token threshold, preserves recent messages
+- **Interrupt handling:** ESC ESC triggers graceful interrupt, preserves tool results
