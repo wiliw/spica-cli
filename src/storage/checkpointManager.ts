@@ -32,17 +32,45 @@ function generateCheckpointId(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
 }
 
+// 获取 git 追踪且有变更的文件（自动遵循 .gitignore）
+async function getTrackedChangedFiles(workspacePath: string): Promise<string[]> {
+  const git = simpleGit(workspacePath);
+
+  // 获取所有被 git 追踪的文件
+  const trackedFiles = new Set<string>();
+  try {
+    const lsResult = await git.raw(['ls-files', '--cached', '--exclude-standard']);
+    lsResult.split('\n').filter(Boolean).forEach(f => trackedFiles.add(f));
+  } catch {
+    // 非 git 仓库或出错，返回空
+    return [];
+  }
+
+  // 获取有变更的文件（包括 staged 和 unstaged）
+  const status = await git.status();
+  const changedFiles: string[] = [];
+
+  for (const file of status.files) {
+    // 只保留被 git 追踪的文件（自动排除 .gitignore 中的文件）
+    if (trackedFiles.has(file.path)) {
+      changedFiles.push(file.path);
+    }
+  }
+
+  return changedFiles;
+}
+
 // 创建 checkpoint（文件快照，不创建 git commit）
 export async function createCheckpoint(
   workspacePath: string,
   prompt: string
 ): Promise<CheckpointMeta | null> {
   try {
-    const git = simpleGit(workspacePath);
-    const status = await git.status();
+    // 只备份 git 追踪且有变更的文件（自动遵循 .gitignore）
+    const changedFiles = await getTrackedChangedFiles(workspacePath);
 
-    // 只有未提交更改时才创建 checkpoint
-    if (status.files.length === 0) {
+    // 没有变更则不创建 checkpoint
+    if (changedFiles.length === 0) {
       return null;
     }
 
@@ -53,10 +81,9 @@ export async function createCheckpoint(
     // 创建快照目录
     await fs.ensureDir(checkpointDir);
 
-    // 复制所有更改的文件到快照目录
+    // 复制所有变更的追踪文件到快照目录
     const filesBackedUp: string[] = [];
-    for (const file of status.files) {
-      const filePath = file.path;
+    for (const filePath of changedFiles) {
       const absolutePath = path.join(workspacePath, filePath);
 
       // 只备份存在的文件（删除的文件不备份）
