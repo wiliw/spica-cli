@@ -194,6 +194,9 @@ export class SpicaAgent extends EventEmitter {
   // 工具白名单（用于限制subagent工具访问）
   private toolWhitelist: string[] | null = null;
 
+  // 追踪是否收到 reasoning 内容（用于区分真正的空响应）
+  private reasoningReceived: boolean = false;
+
   constructor(providerName?: string, workspacePath?: string) {
     super();
     this._providerName = providerName;
@@ -546,8 +549,10 @@ async init() {
     this.llm.on('chunk', (chunk: string) => {
       this.emit('stream', { chunk });
     });
-    
+
+    // 追踪 reasoning 状态，用于判断真正的空响应
     this.llm.on('reasoning', (content: string) => {
+      this.reasoningReceived = true;
       this.emit('reasoning', { content });
     });
     
@@ -682,6 +687,8 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
     this.emit('message', { role: 'user', content: prompt });
 
     const toolDefinitions = getAllToolDefinitions();
+    // 重置 reasoning 状态（每次新请求前）
+    this.reasoningReceived = false;
     this.emit('waiting_for_llm');  // 通知外部启动心跳
 
     let response;
@@ -739,8 +746,30 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
           // 有内容输出，任务完成
           break;
         }
-        // 空响应：LLM没有输出任何内容或工具调用
-        // 不应该直接退出，而是警告并继续尝试
+        // 空响应处理：需要区分"真正空响应"和"只有 reasoning"
+        if (this.reasoningReceived) {
+          // 模型发送了 reasoning 但没有 content，可能是正在思考
+          // 不触发警告，直接继续调用 LLM 获取下一个响应
+          this.reasoningReceived = false;  // 重置状态
+          this.emit('waiting_for_llm');
+          try {
+            response = await this.callLLMWithRetry(
+              () => this.llm!.generate('', toolDefinitions),
+              'llm_generate_reasoning_continue'
+            );
+          } catch (retryError: unknown) {
+            const errorMsg = retryError instanceof Error ? retryError.message : String(retryError);
+            this.emit('error_suggestion', {
+              tool: 'llm_generate',
+              error: errorMsg,
+              suggestion: 'LLM continuation failed after reasoning. Check API status.'
+            });
+            break;
+          }
+          continue;
+        }
+
+        // 真正的空响应：既没有 content，也没有 reasoning，也没有 tool calls
         this.emit('empty_response_warning', {
           iteration: iterations,
           message: 'LLM returned empty response, retrying...'
