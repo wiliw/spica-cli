@@ -1,6 +1,30 @@
 // spica System Prompt - English only
 import fs from 'fs-extra';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+// ES module 中获取 __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// 内置 skills 目录 - 支持开发模式 (src/) 和编译模式 (dist/)
+function getBuiltinSkillsDir(): string {
+  // 开发模式: src/prompts/system.ts -> src/builtin-skills
+  const devPath = path.join(__dirname, '..', 'builtin-skills');
+  if (fs.existsSync(devPath)) {
+    return devPath;
+  }
+  // 编译模式: dist/prompts/system.js -> ../../src/builtin-skills
+  const distPath = path.join(__dirname, '..', '..', 'src', 'builtin-skills');
+  if (fs.existsSync(distPath)) {
+    return distPath;
+  }
+  // 回退到当前目录
+  return devPath;
+}
+
+const BUILTIN_SKILLS_DIR = getBuiltinSkillsDir();
 
 export const SYSTEM_PROMPT = `You are spica, a coding agent CLI. You edit files, run commands, and help developers.
 
@@ -12,6 +36,28 @@ Available tools: file_read/write/edit, bash, git, glob/grep, web_search/fetch, t
 Ask before: rm -rf, sudo, git push --force, git reset --hard.
 Output: plain text, file:line for refs, no trailing summaries.
 `;
+
+// 加载 using-superpowers bootstrap skill
+function loadBootstrapSkill(): string {
+  try {
+    const bootstrapPath = path.join(BUILTIN_SKILLS_DIR, 'superpowers', 'using-superpowers', 'SKILL.md');
+    if (fs.existsSync(bootstrapPath)) {
+      const content = fs.readFileSync(bootstrapPath, 'utf-8');
+      // 移除 YAML frontmatter
+      let body = content;
+      if (content.startsWith('---')) {
+        const endIdx = content.indexOf('---', 3);
+        if (endIdx !== -1) {
+          body = content.slice(endIdx + 3).trim();
+        }
+      }
+      return body;
+    }
+  } catch {
+    // Ignore errors loading bootstrap skill
+  }
+  return '';
+}
 
 // Build skills section for system prompt
 export function buildSkillsSection(skillsMetadata: string): string {
@@ -71,6 +117,12 @@ interface ProjectConfig {
 
 export function getSystemPrompt(projectConfig?: ProjectConfig, skillsMetadata?: string, workspacePath?: string): string {
   let prompt = SYSTEM_PROMPT;
+
+  // Bootstrap skill: using-superpowers (自动注入，指导 AI 如何使用 skills)
+  const bootstrapContent = loadBootstrapSkill();
+  if (bootstrapContent) {
+    prompt += '\n\n## How to Use Skills\n' + bootstrapContent;
+  }
 
   // Project context - inject full AGENTS.md content
   if (projectConfig) {
