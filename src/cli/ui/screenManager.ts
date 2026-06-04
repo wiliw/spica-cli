@@ -1,5 +1,5 @@
 import { COLORS } from './colors';
-import { isCJK } from './stringWidth';
+import { isFullWidth } from './stringWidth';
 
 const ESC = '\x1b';
 
@@ -52,7 +52,7 @@ export class ScreenManager {
   private getCharDisplayWidth(char: string): number {
     if (char === '\n') return 0;
     if (char === '\t') return 8;
-    if (isCJK(char)) return 2;
+    if (isFullWidth(char)) return 2;
     return 1;
   }
 
@@ -311,6 +311,14 @@ export class ScreenManager {
   }
 
   handleAnsi(seq: string): void {
+    // CRITICAL FIX: 确保光标在输入框区域再处理按键
+    if (this.state.cursorInScrollArea) {
+      writeStdout(`${ESC}[?25l`);
+      const inputStartRow = this.state.statusRow + 1;
+      writeStdout(`${ESC}[${inputStartRow};1H`);
+      this.state.cursorInScrollArea = false;
+    }
+
     if (seq === `${ESC}[C`) {
       if (this.state.cursorCol < this.state.inputBuffer[0].length) this.state.cursorCol++;
     } else if (seq === `${ESC}[D`) {
@@ -330,6 +338,14 @@ export class ScreenManager {
   }
 
   handleTab(): void {
+    // CRITICAL FIX: 确保光标在输入框区域
+    if (this.state.cursorInScrollArea) {
+      writeStdout(`${ESC}[?25l`);
+      const inputStartRow = this.state.statusRow + 1;
+      writeStdout(`${ESC}[${inputStartRow};1H`);
+      this.state.cursorInScrollArea = false;
+    }
+
     const line = this.state.inputBuffer[0];
     if (!line.startsWith('/') || !this.state.completer) return;
     const hits = this.state.completer(line);
@@ -346,6 +362,14 @@ export class ScreenManager {
   }
 
   handlePaste(data: string): void {
+    // CRITICAL FIX: 确保光标在输入框区域
+    if (this.state.cursorInScrollArea) {
+      writeStdout(`${ESC}[?25l`);
+      const inputStartRow = this.state.statusRow + 1;
+      writeStdout(`${ESC}[${inputStartRow};1H`);
+      this.state.cursorInScrollArea = false;
+    }
+
     const content = data.replace(/\x1b\[200~/g, '').replace(/\x1b\[201~/g, '');
     const chars = [...content];
     const line = this.state.inputBuffer[0];

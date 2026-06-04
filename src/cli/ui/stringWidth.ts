@@ -27,8 +27,8 @@ export function isCJK(char: string): boolean {
   );
 }
 
-// 判断是否是全角字符
-function isFullWidth(char: string): boolean {
+// 判断是否是全角字符（导出供其他模块使用）
+export function isFullWidth(char: string): boolean {
   const codePoint = char.codePointAt(0);
   if (!codePoint) return false;
 
