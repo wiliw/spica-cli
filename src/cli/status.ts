@@ -3,6 +3,7 @@
 import { COLORS } from './ui/colors';
 import { getInputQueue } from './ui/queue';
 import { getRuntimeState } from '../core/RuntimeState';
+import { getScreenManager } from './ui/screenManager';
 
 export function displayStatusLine(): void {
   const state = getRuntimeState();
@@ -25,4 +26,17 @@ export function displayStatusLine(): void {
 
   const statusLine = parts.join(' | ');
   console.log(COLORS.muted(statusLine));
+}
+
+// 全局状态栏更新函数（用于 TUI 模式）
+let _updateStatusBarFn: (() => void) | null = null;
+
+export function setUpdateStatusBarFn(fn: (() => void) | null): void {
+  _updateStatusBarFn = fn;
+}
+
+export function updateStatusBar(): void {
+  if (_updateStatusBarFn) {
+    _updateStatusBarFn();
+  }
 }

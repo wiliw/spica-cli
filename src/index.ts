@@ -36,7 +36,7 @@ import { getInputQueue, clearInputQueue } from "./cli/ui/queue";
 import { autoDrainQueue } from "./cli/queueDrain";
 import { TUIInputHandler } from "./cli/ui/tuiInput";
 import { setupAgentEvents, formatRunStats } from "./cli/events";
-import { displayStatusLine } from "./cli/status";
+import { displayStatusLine, updateStatusBar, setUpdateStatusBarFn } from "./cli/status";
 import { getRuntimeState, resetRuntimeState } from "./core/RuntimeState";
 
 import { getScreenManager } from "./cli/ui/screenManager";
@@ -74,6 +74,7 @@ process.on("SIGINT", () => {
   if (state.getAgent()) {
     state.getAgent()!.interrupt();
     state.setProcessing(false);
+    updateStatusBar();
     if (tuiStarted) {
       screen.appendScroll(
         COLORS.warning("\n[INTERRUPTED] Ctrl+C again to exit\n"),
@@ -206,8 +207,11 @@ program
         });
 
         // 显示状态栏（简洁版）
-        // 状态栏：模型 | 工作区（智能缩写长路径）
-        const updateStatusBar = () => {
+        // 状态栏：状态 | 模型 | 工作区（智能缩写长路径）
+        const updateStatusBarLocal = () => {
+          const isBusy = state.isProcessing();
+          const statusText = isBusy ? COLORS.warning('busy') : COLORS.success('idle');
+
           // 工作区路径显示（Windows 下缩写长路径）
           const workspace = agent.getWorkspacePath();
           const homeDir = os.homedir();
@@ -227,10 +231,11 @@ program
           }
 
           screen.setStatus(
-            `${providerConfig.model} | ${displayPath}`,
+            `${statusText} | ${providerConfig.model} | ${displayPath}`,
           );
         };
-        updateStatusBar();
+        setUpdateStatusBarFn(updateStatusBarLocal);
+        updateStatusBarLocal();
 
         // TokenCounter 用于结束统计显示
         const provider = agent.getLLM()?.getProvider();
@@ -275,6 +280,7 @@ program
               state.getAgent()!.interrupt();
               isProcessing = false;
               state.setProcessing(false);
+              updateStatusBar();
 
               screen.appendScroll(COLORS.warning("\n[INTERRUPTED]\n"));
               screen.setStreaming(false);
@@ -784,6 +790,7 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
                 );
                 isProcessing = true;
                 state.setProcessing(true);
+                updateStatusBar();
                 try {
                   await agent.runLoop(prompt);
                   screen.setStreaming(false);
@@ -801,6 +808,7 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
                 screen.refreshInput();
                 isProcessing = false;
                 state.setProcessing(false);
+                updateStatusBar();
                 saveSession(process.cwd(), agent.getMessages());
 
                 // Auto-drain queued inputs
@@ -826,6 +834,7 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
 
           isProcessing = true;
           state.setProcessing(true);
+          updateStatusBar();
 
           // 设置队列输入回调，让 agent 在迭代间隙获取队列输入
           agent.setQueueInputCallback(() => {
@@ -876,6 +885,7 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
           screen.refreshInput();
           isProcessing = false;
           state.setProcessing(false);
+          updateStatusBar();
           
           // 清理队列输入回调
           agent.setQueueInputCallback(null);

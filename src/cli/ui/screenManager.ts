@@ -254,6 +254,16 @@ export class ScreenManager {
   }
 
   handleInput(data: string): boolean {
+    // CRITICAL FIX: 如果光标在滚动区域，先移回输入框再处理按键
+    // 这防止按键处理过程中的光标操作干扰滚动区域内容
+    if (this.state.cursorInScrollArea) {
+      writeStdout(`${ESC}[?25l`);  // 先隐藏光标
+      // 移动到输入框起始位置（安全位置）
+      const inputStartRow = this.state.statusRow + 1;
+      writeStdout(`${ESC}[${inputStartRow};1H`);
+      this.state.cursorInScrollArea = false;
+    }
+
     if (data === '\r' || data === '\n') return true;
     if (data === '\x0f') {
       if (this.state.onVerboseToggle) {

@@ -165,11 +165,14 @@ interface MessageData {
 const screen = getScreenManager();
 const state = getRuntimeState();
 
-// 构建状态栏文本（模型 | 工作区）
+// 构建状态栏文本（状态 | 模型 | 工作区）
 function buildStatusText(
   agent: SpicaAgent,
   model: string | undefined
 ): string {
+  const isBusy = state.isProcessing();
+  const statusText = isBusy ? COLORS.warning('busy') : COLORS.success('idle');
+
   // 工作区路径显示（智能缩写）
   const workspace = agent.getWorkspacePath();
   const homeDir = os.homedir();
@@ -188,7 +191,7 @@ function buildStatusText(
     }
   }
 
-  return `${model || '?'} | ${displayPath}`;
+  return `${statusText} | ${model || '?'} | ${displayPath}`;
 }
 
 function formatArgs(args: Record<string, unknown>): string {
