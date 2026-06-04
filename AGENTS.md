@@ -134,3 +134,38 @@ spica skill list                   # List available skills
 ~/.spica/settings.json  # Global config (providers, mcp, skills, hooks)
 <project>/.spica/       # Project session (checkpoints, history, learnings)
 ```
+
+## Checkpoint System
+
+spica uses a file-based checkpoint system that **does not pollute git history**:
+
+**How it works:**
+- Before each AI operation, spica creates a file snapshot in `.spica/snapshots/<id>/`
+- Checkpoint metadata is stored in `.spica/checkpoints.json`
+- No git commits are created - your git history stays clean
+
+**Commands:**
+```bash
+spica checkpoint list              # List all checkpoints
+spica checkpoint show <id>         # Show checkpoint details
+spica checkpoint restore <id>      # Restore files from checkpoint
+spica checkpoint clean             # Clean old checkpoints (keep 20)
+```
+
+**Storage:**
+```
+.spica/
+├── checkpoints.json       # Checkpoint metadata list
+├── snapshots/
+│   ├── 2026-06-04T10:00/  # File snapshots by timestamp
+│   │   ├── src/index.ts
+│   │   ├── src/tools/index.ts
+│   │   └── metadata.json
+│   └── ...
+└── backups/               # Single file backups (by file tools)
+```
+
+**Recovery:**
+- Use `spica checkpoint restore <id>` to restore files from any checkpoint
+- Checkpoints are automatically created before each AI operation
+- Old checkpoints are cleaned automatically (keep last 20)

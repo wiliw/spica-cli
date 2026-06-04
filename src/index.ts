@@ -23,6 +23,12 @@ import {
   saveSkill,
   deleteSkill,
 } from "./skills";
+import {
+  listCheckpoints,
+  getCheckpoint,
+  restoreCheckpoint,
+  cleanCheckpoints,
+} from "./storage/checkpointManager";
 import os from "os";
 import { playBell } from "./utils/bell";
 
@@ -1381,6 +1387,86 @@ program
         console.log(
           COLORS.muted("Examples: filesystem, postgres, slack, custom APIs"),
         );
+    }
+  });
+
+// Checkpoint 管理
+program
+  .command("checkpoint")
+  .description("Manage checkpoints (file snapshots, no git pollution)")
+  .argument("[action]", "list|show|restore|clean")
+  .argument("[id]", "Checkpoint ID (for show/restore)")
+  .addHelpText(
+    "after",
+    "\nExamples:\n  spica checkpoint list              # List all checkpoints\n  spica checkpoint show <id>         # Show checkpoint details\n  spica checkpoint restore <id>      # Restore files from checkpoint\n  spica checkpoint clean             # Clean old checkpoints (keep 20)",
+  )
+  .action(async (action?: string, id?: string) => {
+    const workspacePath = process.cwd();
+
+    switch (action) {
+      case "list":
+        const checkpoints = await listCheckpoints(workspacePath, 50);
+        console.log(COLORS.primary.bold("\nCheckpoints:"));
+        if (checkpoints.length === 0) {
+          console.log(COLORS.muted("  (none)"));
+        } else {
+          checkpoints.forEach((c) => {
+            const date = new Date(c.timestamp).toLocaleString();
+            console.log(`  ${COLORS.success(c.id)} - ${date}`);
+            console.log(COLORS.muted(`    ${c.promptPreview}`));
+            console.log(COLORS.muted(`    Files: ${c.filesBackedUp.length}`));
+          });
+        }
+        console.log("");
+        break;
+
+      case "show":
+        if (!id) {
+          console.log(COLORS.error("Usage: spica checkpoint show <id>"));
+          break;
+        }
+        const meta = await getCheckpoint(workspacePath, id);
+        if (!meta) {
+          console.log(COLORS.error(`Checkpoint not found: ${id}`));
+        } else {
+          console.log(COLORS.primary.bold(`\nCheckpoint: ${meta.id}`));
+          console.log(`  Timestamp: ${new Date(meta.timestamp).toLocaleString()}`);
+          console.log(`  Prompt: ${meta.promptPreview}`);
+          console.log(COLORS.primary.bold("\n  Files backed up:"));
+          meta.filesBackedUp.forEach((f) => {
+            console.log(COLORS.muted(`    - ${f}`));
+          });
+        }
+        console.log("");
+        break;
+
+      case "restore":
+        if (!id) {
+          console.log(COLORS.error("Usage: spica checkpoint restore <id>"));
+          break;
+        }
+        const result = await restoreCheckpoint(workspacePath, id);
+        if (result.success) {
+          console.log(COLORS.success(`[OK] Restored ${result.restoredFiles.length} files from ${id}`));
+          result.restoredFiles.forEach((f) => {
+            console.log(COLORS.muted(`  - ${f}`));
+          });
+        } else {
+          console.log(COLORS.error(`[ERR] ${result.error}`));
+        }
+        break;
+
+      case "clean":
+        const cleanResult = await cleanCheckpoints(workspacePath, 20);
+        console.log(COLORS.success(`[OK] Cleaned checkpoints`));
+        console.log(COLORS.muted(`  Deleted: ${cleanResult.deleted.length}`));
+        console.log(COLORS.muted(`  Kept: ${cleanResult.kept.length}`));
+        break;
+
+      default:
+        console.log(COLORS.warning("Available actions: list, show, restore, clean"));
+        console.log(COLORS.muted("\nCheckpoints are file snapshots stored in .spica/snapshots/"));
+        console.log(COLORS.muted("They do not pollute your git history."));
     }
   });
 

@@ -12,6 +12,7 @@ import { loadProjectState, saveProjectState, updateProjectTodos, loadProjectCont
 import { loadSession } from './utils/session';
 import { runPreHooks, runPostHooks } from './hooks';
 import { COLORS } from './cli/ui/colors';
+import { createCheckpoint, listCheckpoints, type CheckpointMeta } from './storage/checkpointManager';
 import { EventEmitter } from 'events';
 import fs from 'fs-extra';
 import * as path from 'path';
@@ -279,81 +280,32 @@ interrupt() {
     this.toolWhitelist = allowedTools;
   }
 
-  // 创建自动checkpoint（备份未提交工作）
-  private async createAutoCheckpoint(prompt: string): Promise<string | null> {
+  // 创建自动 checkpoint（文件快照，不创建 git commit）
+  private async createAutoCheckpoint(prompt: string): Promise<CheckpointMeta | null> {
     try {
-      const git = simpleGit(this.workspacePath);
-      const status = await git.status();
-      
-      // 只有未提交更改时才创建checkpoint
-      if (status.files.length > 0) {
-        const checkpointMsg = `[SPICA-CHECKPOINT] ${new Date().toISOString()} - ${prompt.slice(0, 50)}`;
-        
-        // 1. 添加所有更改
-        await git.add('.');
-        
-        // 2. 创建checkpoint commit
-        await git.commit(checkpointMsg);
-        
-        // 3. 获取hash
-        const log = await git.log({ maxCount: 1 });
-        const hash = log.latest?.hash || '';
-        
-        // 4. 通知用户
+      const meta = await createCheckpoint(this.workspacePath, prompt);
+
+      if (meta) {
         this.emit('checkpoint_created', {
-          hash: hash.substring(0, 7),
-          message: checkpointMsg,
-          filesBackedUp: status.files.length
+          id: meta.id,
+          message: meta.message,
+          filesBackedUp: meta.filesBackedUp.length,
         });
-        
-        // 5. 记录到checkpoint日志
-        const checkpointLog = {
-          timestamp: new Date().toISOString(),
-          hash,
-          message: checkpointMsg,
-          promptPreview: prompt.slice(0, 100),
-          filesBackedUp: status.files.map(f => f.path)
-        };
-        
-        const logPath = path.join(this.workspacePath, '.spica', 'checkpoints.json');
-        const logs = fs.existsSync(logPath) ? fs.readJsonSync(logPath) : [];
-        logs.push(checkpointLog);
-        fs.writeJsonSync(logPath, logs);
-        
-        return hash;
       }
-      
-      return null; // clean状态不需要checkpoint
+
+      return meta;
     } catch (error) {
-      // checkpoint失败不影响AI工作，只记录警告
+      // checkpoint 失败不影响 AI 工作
       this.emit('checkpoint_warning', { error: 'Failed to create checkpoint' });
       return null;
     }
   }
-  
-  // 获取最近的checkpoint列表
-  async getCheckpoints(): Promise<Array<{ hash: string; message: string; timestamp: string }>> {
-    try {
-      const logPath = path.join(this.workspacePath, '.spica', 'checkpoints.json');
-      if (fs.existsSync(logPath)) {
-        return fs.readJsonSync(logPath);
-      }
-      
-      // 从git历史查找checkpoint commits
-      const git = simpleGit(this.workspacePath);
-      const log = await git.log({ maxCount: 50 });
-      return log.all
-        .filter(c => c.message.includes('[SPICA-CHECKPOINT]'))
-        .map(c => ({
-          hash: c.hash,
-          message: c.message,
-          timestamp: c.date
-        }));
-    } catch {
-      return [];
-    }
+
+  // 获取最近的 checkpoint 列表
+  async getCheckpoints(): Promise<CheckpointMeta[]> {
+    return await listCheckpoints(this.workspacePath, 50);
   }
-  
+
   // 获取git状态（辅助方法）
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- simpleGit status.files type is complex
   private async getGitStatus(): Promise<{ files: any[] }> {
@@ -688,8 +640,8 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
       throw new Error('LLM client not initialized');
     }
 
-    // 🔒 自动checkpoint：在AI工作前创建备份点
-    const checkpointHash = await this.createAutoCheckpoint(prompt);
+    // 🔒 自动checkpoint：在AI工作前创建备份点（文件快照，不污染git）
+    await this.createAutoCheckpoint(prompt);
     
     // Pre-request: 基于token数判断是否需要压缩
     const existingMessages = this.llm.getMessages();
