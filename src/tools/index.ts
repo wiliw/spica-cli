@@ -1213,15 +1213,49 @@ Write-Output $proc.Id;
             }
           }
 
-          // DuckDuckGo HTML (default, free)
+          // DuckDuckGo Instant Answer API (官方免费 API，更稳定)
+          // 参考: https://api.duckduckgo.com/api
+          try {
+            const instantApiUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(safeArgs.query)}&format=json&no_html=1&skip_disambig=1`;
+            const instantResp = await axios.get(instantApiUrl, {
+              timeout: 10000,
+              signal: abortController.signal,
+            });
+            const data = instantResp.data;
+
+            // 提取 Instant Answer
+            if (data.Abstract || data.Answer) {
+              results.push(`[Instant Answer]\n${data.Answer || data.Abstract}\nSource: ${data.AbstractURL || 'DuckDuckGo'}`);
+            }
+
+            // 提取 Related Topics
+            if (data.RelatedTopics && data.RelatedTopics.length > 0) {
+              for (const topic of data.RelatedTopics.slice(0, 8)) {
+                if (topic.Text && topic.FirstURL) {
+                  results.push(`- ${topic.Text}\n  ${topic.FirstURL}`);
+                }
+              }
+            }
+
+            if (results.length > 0) {
+              return { success: true, output: `DuckDuckGo搜索结果:\n\n${results.join('\n\n')}` };
+            }
+          } catch {
+            // Instant API 失败，继续尝试 HTML 抓取
+          }
+
+          // DuckDuckGo HTML 抓取（备用，可能被限制）
           const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(safeArgs.query)}`;
 
           const searchResp = await axios.get(searchUrl, {
             timeout: Math.min(timeoutMs, 15000),
             signal: abortController.signal,
             headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Accept': 'text/html',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.5',
+              'Accept-Encoding': 'gzip, deflate',
+              'Connection': 'keep-alive',
             },
             maxRedirects: 5,
           });
@@ -1266,7 +1300,7 @@ Write-Output $proc.Id;
 
           const output = results.length > 0
             ? `DuckDuckGo搜索结果 (${results.length}个):\n\n${results.join('\n\n')}`
-            : `搜索完成但未找到有效结果。\n提示: 设置 TAVILY_API_KEY 可获得更好的搜索体验。\n原始输出:\n${html.substring(0, 1000)}`;
+            : `搜索完成但未找到有效结果。\n\n建议:\n1. 设置 TAVILY_API_KEY 环境变量使用 Tavily API (推荐)\n2. 使用更具体的搜索词\n3. 尝试英文关键词\n\n提示: DuckDuckGo 可能检测到自动化请求，返回主页而非搜索结果。`;
 
           return { success: true, output };
         } catch (searchError: any) {
@@ -1302,15 +1336,23 @@ Write-Output $proc.Id;
         }
 
         try {
+          // 为 GitHub API 自动添加 Token（避免 rate limit）
+          const githubToken = process.env.GITHUB_TOKEN;
+          const isGitHubApi = url.includes('api.github.com') || url.includes('github.com');
+          const headers: Record<string, string> = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': isGitHubApi ? 'application/vnd.github.v3+json' : 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Cache-Control': 'no-cache',
+          };
+          if (isGitHubApi && githubToken) {
+            headers['Authorization'] = `token ${githubToken}`;
+          }
+
           const fetchResp = await axios.get(url, {
             timeout: timeoutMs,
             signal: abortController.signal,
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-              'Accept-Language': 'en-US,en;q=0.5',
-              'Cache-Control': 'no-cache',
-            },
+            headers,
             maxRedirects: 10,
             responseType: 'text',
           });
@@ -1379,11 +1421,28 @@ Write-Output $proc.Id;
           // 检查是否是不可重试的错误（404, 403, 401 等）
           const errorMsg = fetchError.message || '';
           const statusCode = fetchError.response?.status || '';
+          const isGitHubUrl = url.includes('github.com');
+
           if (statusCode === 404 || errorMsg.includes('404')) {
             return { success: false, error: `404 Not Found - URL does not exist (DO NOT RETRY this URL). Error: ${errorMsg}` };
           }
           if (statusCode === 403 || errorMsg.includes('403')) {
+            if (isGitHubUrl) {
+              return {
+                success: false,
+                error: `403 Forbidden - GitHub API rate limit exceeded.\n建议: 设置 GITHUB_TOKEN 环境变量 (可在 https://github.com/settings/tokens 创建).\n或者使用 gh CLI 工具 (gh auth login).`
+              };
+            }
             return { success: false, error: `403 Forbidden - Access denied (DO NOT RETRY). Error: ${errorMsg}` };
+          }
+          if (statusCode === 429 || errorMsg.includes('429')) {
+            if (isGitHubUrl) {
+              return {
+                success: false,
+                error: `429 Rate Limited - GitHub API rate limit exceeded.\n建议: 设置 GITHUB_TOKEN 环境变量.\n等待一段时间后重试。`
+              };
+            }
+            return { success: false, error: `429 Rate Limited - Too many requests. Wait and retry later. Error: ${errorMsg}` };
           }
           if (statusCode === 401 || errorMsg.includes('401')) {
             return { success: false, error: `401 Unauthorized - Authentication required (DO NOT RETRY). Error: ${errorMsg}` };
