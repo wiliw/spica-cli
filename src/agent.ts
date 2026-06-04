@@ -736,9 +736,49 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
       // 检查response状态
       if (!response.toolCalls || response.toolCalls.length === 0) {
         if (response.content) {
+          // 有内容输出，任务完成
           break;
         }
-        break;
+        // 空响应：LLM没有输出任何内容或工具调用
+        // 不应该直接退出，而是警告并继续尝试
+        this.emit('empty_response_warning', {
+          iteration: iterations,
+          message: 'LLM returned empty response, retrying...'
+        });
+
+        // 如果连续多次空响应，停止并报告问题
+        if (iterations >= maxIterations - 1) {
+          this.emit('error_suggestion', {
+            tool: 'llm_generate',
+            error: 'Multiple empty responses from LLM',
+            suggestion: 'LLM may be stuck. Try providing more specific instructions or check API status.'
+          });
+          break;
+        }
+
+        // 添加提示消息，让LLM继续尝试
+        this.llm!.addMessage({
+          role: 'user' as const,
+          content: '[SYSTEM] Previous response was empty. Please continue working on the task and provide a response or use tools.'
+        });
+
+        // 重新调用LLM获取新响应
+        this.emit('waiting_for_llm');
+        try {
+          response = await this.callLLMWithRetry(
+            () => this.llm!.generate('', toolDefinitions),
+            'llm_generate_empty_retry'
+          );
+        } catch (retryError: unknown) {
+          const errorMsg = retryError instanceof Error ? retryError.message : String(retryError);
+          this.emit('error_suggestion', {
+            tool: 'llm_generate',
+            error: errorMsg,
+            suggestion: 'LLM retry failed after empty response. Check API status.'
+          });
+          break;
+        }
+        continue;
       }
 
       if (response.toolCalls && response.toolCalls.length > 0) {

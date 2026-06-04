@@ -352,6 +352,10 @@ export function setupAgentEvents(
     screen.appendScroll(COLORS.warning(`\n[HINT] ${data.suggestion}\n`));
   });
 
+  on('empty_response_warning', (data: { iteration: number; message: string }) => {
+    screen.appendScroll(COLORS.warning(`\n[WARN] Empty response at iteration ${data.iteration}. Retrying...\n`));
+  });
+
   on('retry_attempt', (data: RetryAttemptData) => {
     screen.appendScroll(COLORS.muted(`\n[RETRY] ${data.operation} attempt ${data.attempt}/${data.maxRetries} in ${Math.floor(data.delay/1000)}s...\n`));
     screen.appendScroll(COLORS.muted(`  Error: ${data.error}\n`));
