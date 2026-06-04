@@ -3,7 +3,6 @@
 import { COLORS } from './ui/colors';
 import { getInputQueue } from './ui/queue';
 import { getRuntimeState } from '../core/RuntimeState';
-import { getScreenManager } from './ui/screenManager';
 
 export function displayStatusLine(): void {
   const state = getRuntimeState();

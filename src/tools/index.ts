@@ -1205,8 +1205,8 @@ Write-Output $proc.Id;
 
               const data = tavilyResp.data;
               if (data.results && data.results.length > 0) {
-                const results = data.results.map((r: any) => `- ${r.title}\n  ${r.url}\n  ${r.content?.slice(0, 100) || ''}`);
-                return { success: true, output: `Tavily搜索结果 (${results.length}个):\n\n${results.join('\n\n')}` };
+                const tavilyResults = data.results.map((r: any) => `- ${r.title}\n  ${r.url}\n  ${r.content?.slice(0, 100) || ''}`);
+                return { success: true, output: `Tavily搜索结果 (${tavilyResults.length}个):\n\n${tavilyResults.join('\n\n')}` };
               }
             } catch {
               // Tavily failed, fallback to DuckDuckGo
@@ -1215,6 +1215,7 @@ Write-Output $proc.Id;
 
           // DuckDuckGo Instant Answer API (官方免费 API，更稳定)
           // 参考: https://api.duckduckgo.com/api
+          const ddgResults: string[] = [];
           try {
             const instantApiUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(safeArgs.query)}&format=json&no_html=1&skip_disambig=1`;
             const instantResp = await axios.get(instantApiUrl, {
@@ -1225,20 +1226,20 @@ Write-Output $proc.Id;
 
             // 提取 Instant Answer
             if (data.Abstract || data.Answer) {
-              results.push(`[Instant Answer]\n${data.Answer || data.Abstract}\nSource: ${data.AbstractURL || 'DuckDuckGo'}`);
+              ddgResults.push(`[Instant Answer]\n${data.Answer || data.Abstract}\nSource: ${data.AbstractURL || 'DuckDuckGo'}`);
             }
 
             // 提取 Related Topics
             if (data.RelatedTopics && data.RelatedTopics.length > 0) {
               for (const topic of data.RelatedTopics.slice(0, 8)) {
                 if (topic.Text && topic.FirstURL) {
-                  results.push(`- ${topic.Text}\n  ${topic.FirstURL}`);
+                  ddgResults.push(`- ${topic.Text}\n  ${topic.FirstURL}`);
                 }
               }
             }
 
-            if (results.length > 0) {
-              return { success: true, output: `DuckDuckGo搜索结果:\n\n${results.join('\n\n')}` };
+            if (ddgResults.length > 0) {
+              return { success: true, output: `DuckDuckGo搜索结果:\n\n${ddgResults.join('\n\n')}` };
             }
           } catch {
             // Instant API 失败，继续尝试 HTML 抓取
@@ -1273,7 +1274,7 @@ Write-Output $proc.Id;
           }
 
           // Parse HTML to extract results
-          const results: string[] = [];
+          const htmlResults: string[] = [];
 
           // DuckDuckGo HTML format
           const titleMatches = html.matchAll(/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g);
@@ -1281,25 +1282,25 @@ Write-Output $proc.Id;
             const url = match[1];
             const title = match[2].trim();
             const actualUrl = url.includes('uddg=') ? decodeURIComponent(url.split('uddg=')[1].split('&')[0]) : url;
-            results.push(`- ${title}\n  ${actualUrl}`);
-            if (results.length >= 10) break;
+            htmlResults.push(`- ${title}\n  ${actualUrl}`);
+            if (htmlResults.length >= 10) break;
           }
 
           // Fallback parsing if no results
-          if (results.length === 0) {
+          if (htmlResults.length === 0) {
             const fallbackMatches = html.matchAll(/<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>([^<]{3,50})<\/a>/g);
             for (const match of fallbackMatches) {
               const url = match[1];
               const title = match[2].trim();
               if (!url.includes('duckduckgo.com') && title.length > 3) {
-                results.push(`- ${title}\n  ${url}`);
-                if (results.length >= 10) break;
+                htmlResults.push(`- ${title}\n  ${url}`);
+                if (htmlResults.length >= 10) break;
               }
             }
           }
 
-          const output = results.length > 0
-            ? `DuckDuckGo搜索结果 (${results.length}个):\n\n${results.join('\n\n')}`
+          const output = htmlResults.length > 0
+            ? `DuckDuckGo搜索结果 (${htmlResults.length}个):\n\n${htmlResults.join('\n\n')}`
             : `搜索完成但未找到有效结果。\n\n建议:\n1. 设置 TAVILY_API_KEY 环境变量使用 Tavily API (推荐)\n2. 使用更具体的搜索词\n3. 尝试英文关键词\n\n提示: DuckDuckGo 可能检测到自动化请求，返回主页而非搜索结果。`;
 
           return { success: true, output };

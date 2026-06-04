@@ -14,6 +14,7 @@ spica-cli is an AI coding agent CLI with interactive and single-task modes. It s
 - `src/skills/` - Skill system (loading, execution)
 - `src/cli/` - TUI, events, input handling
 - `src/core/RuntimeState.ts` - Single source of truth for runtime state
+- `src/builtin-skills/` - Built-in skills (superpowers package, 14 skills)
 
 ## Build
 
@@ -27,21 +28,21 @@ npx tsc --noEmit      # Type check without building
 ## Test
 
 ```bash
-npm run test:run                    # Run all tests (vitest, ~900 tests)
+npm run test:run                    # Run all tests (vitest, ~838 tests)
 npm run test:run -- src/__tests__/  # Run only src tests (exclude dist)
 npx vitest run <file-pattern>       # Run specific test file
 npx vitest run -t "<test name>"     # Run specific test by name
 npm run test:run -- --coverage      # Run with coverage
 ```
 
-**Test locations:** `src/__tests__/` and `src/**/__tests__/`
+**Test locations:** `src/__tests__/` and `src/**/__tests__/` (44 test files)
 
-**Current status:** 5 tests fail in `boundaryCases.test.ts` (interrupt/compression edge cases) and 1 in `rateLimiterCleanup.test.js` (dist). These are known issues.
+**Current status:** 7 tests fail in `boundaryCases.test.ts` (interrupt/compression edge cases). These are known issues.
 
 ## Lint
 
 ```bash
-npm run lint         # Run ESLint (warnings allowed)
+npm run lint         # Run ESLint (0 errors, 46 warnings allowed)
 npm run lint:fix     # Auto-fix lint issues
 npm run lint:strict  # Fail on warnings (not used in CI)
 ```
@@ -67,6 +68,36 @@ npm run lint:strict  # Fail on warnings (not used in CI)
 
 **CI checks:** type check → lint → test → build (see `.github/workflows/ci.yml`)
 
+## Skills System
+
+spica has a built-in skill system for extending AI capabilities:
+
+**Built-in skills (14 total):**
+- `brainstorming` - Use before creative work
+- `systematic-debugging` - Use for bugs/test failures
+- `test-driven-development` - Use before implementing features
+- `verification-before-completion` - Use before claiming done
+- `requesting-code-review` - Use after completing tasks
+- `receiving-code-review` - Use when receiving review feedback
+- `executing-plans` - Use when executing written plans
+- `writing-plans` - Use for multi-step tasks
+- `subagent-driven-development` - Use for parallel independent tasks
+- `dispatching-parallel-agents` - Use for 2+ independent tasks
+- `finishing-a-development-branch` - Use when implementation complete
+- `using-git-worktrees` - Use for isolated feature work
+- `writing-skills` - Use when creating/editing skills
+- `using-superpowers` - Bootstrap skill (auto-injected in system prompt)
+
+**Skill installation:**
+```bash
+spica skill install <github-url>   # Install skill from GitHub
+spica skill list                   # List available skills
+```
+
+**Skill locations:**
+- Built-in: `src/builtin-skills/` (copied to `~/.spica/skills/` on first run)
+- Project: `.spica/skills/` (project-specific skills)
+
 ## Dev Tips
 
 - Use `npm run dev` for development mode (tsx watch)
@@ -80,3 +111,4 @@ npm run lint:strict  # Fail on warnings (not used in CI)
 - **Message cleaning:** Orphaned tool messages are auto-cleaned before API calls
 - **Compression:** Context compression triggers at token threshold, preserves recent messages
 - **Interrupt handling:** ESC ESC triggers graceful interrupt, preserves tool results
+- **Bootstrap skill:** `using-superpowers` is auto-injected in system prompt to guide skill usage
