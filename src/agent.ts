@@ -410,25 +410,23 @@ interrupt() {
 
     const error = result.error || '';
 
-    // 关键错误类型：应该停止生成并让用户处理
+    // Web 工具的特殊处理优先：网络/API 错误不应该停止整个任务
+    // Agent 应该尝试其他方案或使用已有信息继续
+    if (toolName === 'web_search' || toolName === 'web_fetch') {
+      return false;  // web 工具错误永远不 critical
+    }
+
+    // 只有 AI 调用相关的错误才是 critical
     const criticalPatterns = [
-      '401', 'Unauthorized', 'invalid API key', 'authentication',
-      '403', 'Forbidden', 'permission denied',
-      'ECONNREFUSED', 'ENOTFOUND', 'network error', 'no network',
-      'aborted by user',
-      'API connection failed',
+      'invalid API key', 'authentication failed',
+      'ECONNREFUSED', 'ENOTFOUND', 'API connection failed',
+      // 注意：403/401 对于非 AI 调用不 critical（如 web 工具已在上面处理）
     ];
 
     for (const pattern of criticalPatterns) {
       if (error.toLowerCase().includes(pattern.toLowerCase())) {
         return true;
       }
-    }
-
-    // Web工具的特殊处理：如果代理/网络失败，继续尝试其他方案
-    if (toolName === 'web_search' || toolName === 'web_fetch') {
-      // 网络问题不应该停止整个任务，让agent尝试其他方案
-      return false;
     }
 
     return false;
