@@ -171,7 +171,7 @@ program
 
         // 自动加载历史
         if (!options.fresh) {
-          const session = loadSession(process.cwd());
+          const session = loadSession(agent.getWorkspacePath());
           if (session && session.messages && session.messages.length > 0) {
             agent.setMessages(session.messages);
             // 显示加载历史提示（在滚动区域）
@@ -207,7 +207,7 @@ program
           "/delete",
         ];
         const getCommands = () => {
-          const skills = listSkills(process.cwd());
+          const skills = listSkills(agent.getWorkspacePath());
           const skillCommands = skills.map((s) => `/${s.name}`);
           return [...BASE_COMMANDS, ...skillCommands];
         };
@@ -335,7 +335,7 @@ program
             screen.writeRaw(`${ESC}[?2004l`);
             tuiHandler!.end();
             const messages = agent.getMessages();
-            saveSession(process.cwd(), messages);
+            saveSession(agent.getWorkspacePath(), messages);
             await shutdownMCP();
             state.setAgent(null);
             screen.appendScroll(
@@ -449,8 +449,8 @@ program
               const { listSessions } = await import("./utils/session");
               const { getTaskStats } =
                 await import("./storage/taskPersistence");
-              const sessions = listSessions(process.cwd());
-              const taskStats = getTaskStats(process.cwd());
+              const sessions = listSessions(agent.getWorkspacePath());
+              const taskStats = getTaskStats(agent.getWorkspacePath());
               const currentMsgs = agent.getMessages().length;
 
               screen.appendScroll(COLORS.primary.bold("\nSessions:\n"));
@@ -492,9 +492,9 @@ program
               const { switchSession, loadSession } = await import("./utils/session");
 
               // 先切换 session 文件
-              if (switchSession(process.cwd(), sessionId)) {
+              if (switchSession(agent.getWorkspacePath(), sessionId)) {
                 // 重新加载 session 到 agent 内存
-                const session = loadSession(process.cwd());
+                const session = loadSession(agent.getWorkspacePath());
                 if (session && session.messages) {
                   agent.setMessages(session.messages);
                   screen.appendScroll(
@@ -527,7 +527,7 @@ program
               const newName = parts.slice(1).join(" ") || "Unnamed";
               const { renameSession } = await import("./utils/session");
 
-              if (renameSession(process.cwd(), sessionId, newName)) {
+              if (renameSession(agent.getWorkspacePath(), sessionId, newName)) {
                 screen.appendScroll(
                   COLORS.success(`\n[OK] Session renamed to: ${newName}\n`),
                 );
@@ -547,7 +547,7 @@ program
               const sessionId = cmd.slice(7).trim();
               const { deleteSession } = await import("./utils/session");
 
-              if (deleteSession(process.cwd(), sessionId)) {
+              if (deleteSession(agent.getWorkspacePath(), sessionId)) {
                 screen.appendScroll(
                   COLORS.success(`\n[OK] Session ${sessionId} deleted\n`),
                 );
@@ -565,7 +565,7 @@ program
               // 保存当前 session
               const currentMessages = agent.getMessages();
               if (currentMessages.length > 0) {
-                saveSession(process.cwd(), currentMessages);
+                saveSession(agent.getWorkspacePath(), currentMessages);
                 screen.appendScroll(
                   COLORS.muted(`\n[ARCHIVE] Saved current session (${currentMessages.length} messages)\n`),
                 );
@@ -630,7 +630,7 @@ program
               const id = parts.slice(1).join(" ");
 
               if (!action || action === "list") {
-                const checkpoints = await listCheckpoints(process.cwd(), 20);
+                const checkpoints = await listCheckpoints(agent.getWorkspacePath(), 20);
                 screen.appendScroll(COLORS.primary.bold("\nCheckpoints:\n"));
                 if (checkpoints.length === 0) {
                   screen.appendScroll(COLORS.muted("  (none)\n"));
@@ -646,7 +646,7 @@ program
                 if (!id) {
                   screen.appendScroll(COLORS.warning("\nUsage: /checkpoint show <id>\n"));
                 } else {
-                  const meta = await getCheckpoint(process.cwd(), id);
+                  const meta = await getCheckpoint(agent.getWorkspacePath(), id);
                   if (!meta) {
                     screen.appendScroll(COLORS.error(`\n[ERR] Checkpoint not found: ${id}\n`));
                   } else {
@@ -663,7 +663,7 @@ program
                 if (!id) {
                   screen.appendScroll(COLORS.warning("\nUsage: /checkpoint restore <id>\n"));
                 } else {
-                  const result = await restoreCheckpoint(process.cwd(), id);
+                  const result = await restoreCheckpoint(agent.getWorkspacePath(), id);
                   if (result.success) {
                     screen.appendScroll(COLORS.success(`\n[OK] Restored ${result.restoredFiles.length} files from ${id}\n`));
                     result.restoredFiles.forEach((f) => {
@@ -674,7 +674,7 @@ program
                   }
                 }
               } else if (action === "clean") {
-                const result = await cleanCheckpoints(process.cwd(), 20);
+                const result = await cleanCheckpoints(agent.getWorkspacePath(), 20);
                 screen.appendScroll(COLORS.success(`\n[OK] Cleaned checkpoints\n`));
                 screen.appendScroll(COLORS.muted(`  Deleted: ${result.deleted.length}, Kept: ${result.kept.length}\n`));
               } else {
@@ -691,7 +691,7 @@ program
               const action = parts[0];
 
               if (!action || action === "list") {
-                const skills = listSkills(process.cwd());
+                const skills = listSkills(agent.getWorkspacePath());
                 const packages = await listInstalledPackages();
 
                 screen.appendScroll(COLORS.primary.bold("\nSkill Packages:\n"));
@@ -766,7 +766,7 @@ program
                 if (!skillName || !promptTemplate) {
                   screen.appendScroll(COLORS.warning("\nUsage: /skill edit <name> <promptTemplate>\n"));
                 } else {
-                  const existing = getSkill(skillName, process.cwd());
+                  const existing = getSkill(skillName, agent.getWorkspacePath());
                   if (!existing) {
                     screen.appendScroll(COLORS.warning(`\n[WARN] Skill not found: ${skillName}\n`));
                   } else {
@@ -904,9 +904,9 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
             }
 
             // Skill 调用（/skill_name args）
-            const skillInput = parseSkillInput(trimmed, process.cwd());
+            const skillInput = parseSkillInput(trimmed, agent.getWorkspacePath());
             if (skillInput) {
-              const skill = getSkill(skillInput.skillName, process.cwd());
+              const skill = getSkill(skillInput.skillName, agent.getWorkspacePath());
               if (skill) {
                 const prompt = buildSkillPrompt(skill, skillInput.args);
 
@@ -934,7 +934,7 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
                 isProcessing = false;
                 state.setProcessing(false);
                 updateStatusBar();
-                saveSession(process.cwd(), agent.getMessages());
+                saveSession(agent.getWorkspacePath(), agent.getMessages());
 
                 // Auto-drain queued inputs
                 await autoDrainQueue(getInputQueue(), async (merged) => {
@@ -1015,7 +1015,7 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
           // 清理队列输入回调
           agent.setQueueInputCallback(null);
           
-          saveSession(process.cwd(), agent.getMessages());
+          saveSession(agent.getWorkspacePath(), agent.getMessages());
 
           // Auto-drain remaining queued inputs（处理未被注入的剩余队列）
           await autoDrainQueue(getInputQueue(), async (merged) => {
@@ -1379,7 +1379,7 @@ async function runSimpleMode(
 
     rl.on("close", () => {
       console.log(COLORS.muted("\n[EXIT] Goodbye!"));
-      saveSession(process.cwd(), agent.getMessages());
+      saveSession(agent.getWorkspacePath(), agent.getMessages());
       process.exit(0);
     });
   } catch (error: unknown) {
