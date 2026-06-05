@@ -96,18 +96,40 @@ const DEFAULT_HOOKS: Settings['hooks'] = {
 
 let settingsCache: Settings | null = null;
 
+// 内置 MCP 服务器（首次运行时自动配置）
+const BUILTIN_MCP_SERVERS: MCPServerConfig[] = [
+  {
+    name: 'playwright',
+    command: 'npx',
+    args: ['@playwright/mcp@latest'],
+  },
+];
+
 export async function loadGlobalSettings(): Promise<Settings> {
   await fs.ensureDir(GLOBAL_DIR);
 
   if (!await fs.pathExists(GLOBAL_SETTINGS_FILE)) {
-    // 不写入任何默认值 - 用户通过 spica set/use 命令配置
-    const defaultSettings: Settings = {};
+    // 首次运行：写入内置 MCP 配置
+    const defaultSettings: Settings = {
+      mcp: {
+        servers: BUILTIN_MCP_SERVERS,
+      },
+    };
     await fs.writeJson(GLOBAL_SETTINGS_FILE, defaultSettings, { spaces: 2 });
     settingsCache = defaultSettings;
     return settingsCache;
   }
 
   const loaded = await fs.readJson(GLOBAL_SETTINGS_FILE) as Settings;
+  
+  // 确保内置 MCP 存在（用户可能手动删除了）
+  if (!loaded.mcp?.servers?.some(s => s.name === 'playwright')) {
+    loaded.mcp = {
+      servers: [...(loaded.mcp?.servers || []), ...BUILTIN_MCP_SERVERS],
+    };
+    await fs.writeJson(GLOBAL_SETTINGS_FILE, loaded, { spaces: 2 });
+  }
+  
   settingsCache = loaded;
   return loaded;
 }
