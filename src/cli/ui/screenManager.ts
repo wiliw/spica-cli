@@ -22,6 +22,8 @@ export interface ScreenState {
   cursorInScrollArea: boolean;
   isStreaming: boolean;
   onVerboseToggle?: () => void;
+  // 缓冲的输入，用于流式输出结束后刷新
+  pendingInputRefresh: boolean;
 }
 
 export class ScreenManager {
@@ -46,19 +48,27 @@ export class ScreenManager {
       cursorInScrollArea: false,
       isStreaming: false,
       onVerboseToggle: undefined,
+      pendingInputRefresh: false,
     };
   }
 
   private getCharDisplayWidth(char: string): number {
     if (char === '\n') return 0;
     if (char === '\t') return 8;
+    const codePoint = char.codePointAt(0);
+    if (!codePoint) return 1;
+    
+    // Emoji 和其他复杂 grapheme cluster 宽度为 2
+    if (char.length > 1 || codePoint > 0xFFFF) return 2;
+    
     if (isFullWidth(char)) return 2;
     return 1;
   }
 
   private getStringDisplayWidth(str: string): number {
     let width = 0;
-    for (const char of str) {
+    const graphemes = str.match(/\P{M}\p{M}*/gu) || [];
+    for (const char of graphemes) {
       width += this.getCharDisplayWidth(char);
     }
     return width;
@@ -108,7 +118,15 @@ export class ScreenManager {
   setStreaming(streaming: boolean): void {
     this.state.isStreaming = streaming;
     if (!streaming) {
-      this.state.cursorInScrollArea = false;
+      // 流式输出结束后，如果有待刷新的输入，刷新输入框
+      if (this.state.pendingInputRefresh) {
+        this.state.pendingInputRefresh = false;
+        this.state.cursorInScrollArea = false;
+        this.refreshInput();
+        this.restoreCursor();
+      } else {
+        this.state.cursorInScrollArea = false;
+      }
     }
   }
 
@@ -125,6 +143,8 @@ export class ScreenManager {
   }
 
   appendScroll(text: string): void {
+    // 流式输出时：隐藏光标，移动到输出区域，输出内容
+    // 不恢复光标，避免干扰输出
     if (!this.state.cursorInScrollArea) {
       writeStdout(`${ESC}[?25l`);
       writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
@@ -160,13 +180,16 @@ export class ScreenManager {
     this.updateLayout();
     writeStdout(`${ESC}[?25l`);
 
-    for (let row = this.state.statusRow + 1; row <= this.state.terminalHeight; row++) {
+    const inputStartRow = this.state.statusRow + 1;
+    const inputEndRow = this.state.terminalHeight;
+    
+    // 清空输入区域
+    for (let row = inputStartRow; row <= inputEndRow; row++) {
       writeStdout(`${ESC}[${row};1H${ESC}[2K`);
     }
 
     const content = this.state.inputBuffer[0];
     const logicalLines = content.split('\n');
-    const inputStartRow = this.state.statusRow + 1;
     const width = this.state.terminalWidth;
 
     let currentRow = inputStartRow;
@@ -178,9 +201,8 @@ export class ScreenManager {
       const lineWidth = prefixWidth + this.getStringDisplayWidth(lineContent);
       const physicalLines = Math.max(1, Math.ceil(lineWidth / width));
 
-      for (let j = 0; j < physicalLines; j++) {
-        writeStdout(`${ESC}[${currentRow + j};1H${ESC}[2K`);
-      }
+      // 确保不越界
+      if (currentRow > inputEndRow) break;
 
       writeStdout(`${ESC}[${currentRow};1H`);
       writeStdout(displayContent);
@@ -194,9 +216,11 @@ export class ScreenManager {
     const cursorCharPos = this.state.cursorCol;
     const width = this.state.terminalWidth;
 
-    const chars = [...rawContent];
-    const contentBeforeCursor = chars.slice(0, cursorCharPos);
+    // 使用 grapheme cluster 正确处理复杂 Unicode 字符
+    const graphemes = rawContent.match(/\P{M}\p{M}*/gu) || [];
+    const contentBeforeCursor = graphemes.slice(0, cursorCharPos);
 
+    // 计算光标所在的逻辑行和行内位置
     let logicalLineIndex = 0;
     let charsInCurrentLine = 0;
 
@@ -212,17 +236,18 @@ export class ScreenManager {
     const logicalLines = rawContent.split('\n');
     const currentLogicalLine = logicalLines[logicalLineIndex] || '';
 
-    const cursorColInLine = charsInCurrentLine;
-
-    const charsBeforeCursorInLine = [...currentLogicalLine].slice(0, cursorColInLine);
+    // 计算光标在当前逻辑行中的显示宽度
+    const graphemesInLine = currentLogicalLine.match(/\P{M}\p{M}*/gu) || [];
+    const graphemesBeforeCursorInLine = graphemesInLine.slice(0, charsInCurrentLine);
     let displayWidthInLine = 0;
-    for (const char of charsBeforeCursorInLine) {
+    for (const char of graphemesBeforeCursorInLine) {
       displayWidthInLine += this.getCharDisplayWidth(char);
     }
 
     const prefixWidth = logicalLineIndex === 0 ? 2 : 0;
-    const totalDisplayWidth = prefixWidth + displayWidthInLine;
+    const cursorDisplayWidth = prefixWidth + displayWidthInLine;
 
+    // 计算之前逻辑行占用的物理行数
     let physicalLinesBefore = 0;
     for (let i = 0; i < logicalLineIndex; i++) {
       const line = logicalLines[i];
@@ -231,19 +256,34 @@ export class ScreenManager {
       physicalLinesBefore += Math.max(1, Math.ceil(lineWidth / width));
     }
 
-    const physicalLinesInCurrentBeforeCursor = Math.floor(totalDisplayWidth / width);
+    // 计算当前逻辑行中光标之前占用的物理行数
+    // 边界情况：当 cursorDisplayWidth 正好是 width 的倍数时，光标在行末
+    let physicalLinesInCurrentBeforeCursor: number;
+    let cursorCol: number;
+    
+    if (cursorDisplayWidth > 0 && cursorDisplayWidth % width === 0) {
+      // 光标正好在行边界，应该在当前行的末尾
+      physicalLinesInCurrentBeforeCursor = Math.floor(cursorDisplayWidth / width) - 1;
+      cursorCol = width;
+    } else {
+      physicalLinesInCurrentBeforeCursor = Math.floor(cursorDisplayWidth / width);
+      cursorCol = (cursorDisplayWidth % width) + 1;
+    }
 
     const inputStartRow = this.state.statusRow + 1;
     const cursorRow = inputStartRow + physicalLinesBefore + physicalLinesInCurrentBeforeCursor;
-    const cursorCol = (totalDisplayWidth % width) + 1;
 
-    writeStdout(`${ESC}[${cursorRow};${cursorCol}H`);
+    // 确保光标不越界
+    const maxRow = this.state.terminalHeight;
+    const clampedCursorRow = Math.min(cursorRow, maxRow);
+    const clampedCursorCol = Math.max(1, Math.min(cursorCol, width));
+
+    writeStdout(`${ESC}[${clampedCursorRow};${clampedCursorCol}H`);
     writeStdout(`${ESC}[?25h`);
     this.state.cursorInScrollArea = false;
   }
 
   refreshInputAndKeepCursor(): void {
-    // 刷新输入区，光标永远在输入框显示
     this.refreshInput();
     this.restoreCursor();
   }
@@ -254,11 +294,76 @@ export class ScreenManager {
   }
 
   handleInput(data: string): boolean {
-    // CRITICAL FIX: 如果光标在滚动区域，先移回输入框再处理按键
-    // 这防止按键处理过程中的光标操作干扰滚动区域内容
+    // 流式输出时，只更新输入缓冲区，标记需要刷新，但不实际刷新
+    // 避免干扰流式输出
+    if (this.state.isStreaming) {
+      // Ctrl+O 切换 verbose 模式
+      if (data === '\x0f') {
+        if (this.state.onVerboseToggle) {
+          this.state.onVerboseToggle();
+        }
+        return false;
+      }
+      
+      // Enter 键不处理
+      if (data === '\r' || data === '\n') return false;
+      
+      // 删除键
+      if (data === '\x7f' || data === '\b') {
+        if (this.state.cursorCol > 0) {
+          const line = this.state.inputBuffer[0];
+          const graphemes = line.match(/\P{M}\p{M}*/gu) || [];
+          this.state.inputBuffer[0] = 
+            graphemes.slice(0, this.state.cursorCol - 1).join('') + 
+            graphemes.slice(this.state.cursorCol).join('');
+          this.state.cursorCol--;
+          this.state.pendingInputRefresh = true;
+        }
+        return false;
+      }
+      
+      // Tab 键
+      if (data === '\t') {
+        return false;
+      }
+      
+      // 粘贴
+      if (data.includes(`${ESC}[200~`)) {
+        const content = data.replace(/\x1b\[200~/g, '').replace(/\x1b\[201~/g, '');
+        const graphemes = content.match(/\P{M}\p{M}*/gu) || [];
+        const line = this.state.inputBuffer[0];
+        const lineGraphemes = line.match(/\P{M}\p{M}*/gu) || [];
+        this.state.inputBuffer[0] = 
+          lineGraphemes.slice(0, this.state.cursorCol).join('') + 
+          content + 
+          lineGraphemes.slice(this.state.cursorCol).join('');
+        this.state.cursorCol += graphemes.length;
+        this.state.pendingInputRefresh = true;
+        return false;
+      }
+      
+      // 方向键等 ANSI 序列
+      if (data.startsWith(ESC)) {
+        return false;
+      }
+      
+      // 普通字符输入
+      const line = this.state.inputBuffer[0];
+      const graphemes = line.match(/\P{M}\p{M}*/gu) || [];
+      const dataGraphemes = data.match(/\P{M}\p{M}*/gu) || [];
+      this.state.inputBuffer[0] = 
+        graphemes.slice(0, this.state.cursorCol).join('') + 
+        data + 
+        graphemes.slice(this.state.cursorCol).join('');
+      this.state.cursorCol += dataGraphemes.length;
+      this.state.pendingInputRefresh = true;
+      return false;
+    }
+
+    // 非流式输出时，正常处理输入
+    // 确保光标在输入框区域
     if (this.state.cursorInScrollArea) {
-      writeStdout(`${ESC}[?25l`);  // 先隐藏光标
-      // 移动到输入框起始位置（安全位置）
+      writeStdout(`${ESC}[?25l`);
       const inputStartRow = this.state.statusRow + 1;
       writeStdout(`${ESC}[${inputStartRow};1H`);
       this.state.cursorInScrollArea = false;
@@ -274,14 +379,13 @@ export class ScreenManager {
     if (data === '\x7f' || data === '\b') {
       if (this.state.cursorCol > 0) {
         const line = this.state.inputBuffer[0];
-        this.state.inputBuffer[0] = line.slice(0, this.state.cursorCol - 1) + line.slice(this.state.cursorCol);
+        const graphemes = line.match(/\P{M}\p{M}*/gu) || [];
+        this.state.inputBuffer[0] = 
+          graphemes.slice(0, this.state.cursorCol - 1).join('') + 
+          graphemes.slice(this.state.cursorCol).join('');
         this.state.cursorCol--;
-        if (this.state.isStreaming) {
-          this.refreshInputAndKeepCursor();
-        } else {
-          this.refreshInput();
-          this.restoreCursor();
-        }
+        this.refreshInput();
+        this.restoreCursor();
       }
       return false;
     }
@@ -298,20 +402,21 @@ export class ScreenManager {
       return false;
     }
     const line = this.state.inputBuffer[0];
-    this.state.inputBuffer[0] = line.slice(0, this.state.cursorCol) + data + line.slice(this.state.cursorCol);
-    this.state.cursorCol += [...data].length;
+    const graphemes = line.match(/\P{M}\p{M}*/gu) || [];
+    const dataGraphemes = data.match(/\P{M}\p{M}*/gu) || [];
+    this.state.inputBuffer[0] = 
+      graphemes.slice(0, this.state.cursorCol).join('') + 
+      data + 
+      graphemes.slice(this.state.cursorCol).join('');
+    this.state.cursorCol += dataGraphemes.length;
     this.updateLayout();
-    if (this.state.isStreaming) {
-      this.refreshInputAndKeepCursor();
-    } else {
-      this.refreshInput();
-      this.restoreCursor();
-    }
+    this.refreshInput();
+    this.restoreCursor();
     return false;
   }
 
   handleAnsi(seq: string): void {
-    // CRITICAL FIX: 确保光标在输入框区域再处理按键
+    // 确保光标在输入框区域
     if (this.state.cursorInScrollArea) {
       writeStdout(`${ESC}[?25l`);
       const inputStartRow = this.state.statusRow + 1;
@@ -319,26 +424,26 @@ export class ScreenManager {
       this.state.cursorInScrollArea = false;
     }
 
+    const line = this.state.inputBuffer[0];
+    const graphemes = line.match(/\P{M}\p{M}*/gu) || [];
+    
     if (seq === `${ESC}[C`) {
-      if (this.state.cursorCol < this.state.inputBuffer[0].length) this.state.cursorCol++;
+      if (this.state.cursorCol < graphemes.length) this.state.cursorCol++;
     } else if (seq === `${ESC}[D`) {
       if (this.state.cursorCol > 0) this.state.cursorCol--;
     } else if (seq === `${ESC}[3~`) {
-      const line = this.state.inputBuffer[0];
-      if (this.state.cursorCol < line.length) {
-        this.state.inputBuffer[0] = line.slice(0, this.state.cursorCol) + line.slice(this.state.cursorCol + 1);
+      if (this.state.cursorCol < graphemes.length) {
+        this.state.inputBuffer[0] = 
+          graphemes.slice(0, this.state.cursorCol).join('') + 
+          graphemes.slice(this.state.cursorCol + 1).join('');
       }
     }
-    if (this.state.isStreaming) {
-      this.refreshInputAndKeepCursor();
-    } else {
-      this.refreshInput();
-      this.restoreCursor();
-    }
+    this.refreshInput();
+    this.restoreCursor();
   }
 
   handleTab(): void {
-    // CRITICAL FIX: 确保光标在输入框区域
+    // 确保光标在输入框区域
     if (this.state.cursorInScrollArea) {
       writeStdout(`${ESC}[?25l`);
       const inputStartRow = this.state.statusRow + 1;
@@ -351,7 +456,7 @@ export class ScreenManager {
     const hits = this.state.completer(line);
     if (hits.length === 1) {
       this.state.inputBuffer[0] = hits[0];
-      this.state.cursorCol = [...hits[0]].length;
+      this.state.cursorCol = (hits[0].match(/\P{M}\p{M}*/gu) || []).length;
       this.updateLayout();
       this.refreshInput();
       this.restoreCursor();
@@ -362,7 +467,7 @@ export class ScreenManager {
   }
 
   handlePaste(data: string): void {
-    // CRITICAL FIX: 确保光标在输入框区域
+    // 确保光标在输入框区域
     if (this.state.cursorInScrollArea) {
       writeStdout(`${ESC}[?25l`);
       const inputStartRow = this.state.statusRow + 1;
@@ -371,10 +476,14 @@ export class ScreenManager {
     }
 
     const content = data.replace(/\x1b\[200~/g, '').replace(/\x1b\[201~/g, '');
-    const chars = [...content];
+    const graphemes = content.match(/\P{M}\p{M}*/gu) || [];
     const line = this.state.inputBuffer[0];
-    this.state.inputBuffer[0] = line.slice(0, this.state.cursorCol) + content + line.slice(this.state.cursorCol);
-    this.state.cursorCol += chars.length;
+    const lineGraphemes = line.match(/\P{M}\p{M}*/gu) || [];
+    this.state.inputBuffer[0] = 
+      lineGraphemes.slice(0, this.state.cursorCol).join('') + 
+      content + 
+      lineGraphemes.slice(this.state.cursorCol).join('');
+    this.state.cursorCol += graphemes.length;
     this.updateLayout();
     this.refreshInput();
     this.restoreCursor();
@@ -390,6 +499,7 @@ export class ScreenManager {
     this.state.inputLines = 1;
     this.state.statusRow = this.state.terminalHeight - 2;
     this.state.scrollBottom = this.state.terminalHeight - 3;
+    this.state.pendingInputRefresh = false;
     writeStdout(`${ESC}[1;${this.state.scrollBottom}r`);
     this.drawStatus();
     this.refreshInput();
@@ -410,7 +520,6 @@ export class ScreenManager {
     this.restoreCursor();
   }
 
-  // Write raw terminal sequence without affecting cursor state
   writeRaw(text: string): void {
     process.stdout.write(text);
   }

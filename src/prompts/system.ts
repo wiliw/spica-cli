@@ -33,6 +33,20 @@ Before acting, read the project context below. It tells you how to work on this 
 Available tools: file_read/write/edit, bash, git, glob/grep, web_search/fetch, test, lint, skill.
 - skill(name): Load a skill's full instructions. Call this when a skill matches your task, then follow its guidance.
 
+## File-Scoped Commands (Preferred - Fast)
+
+**Critical**: Always prefer file-scoped commands over project-wide. Token savings: 97%.
+
+| Operation | File-Scoped (Fast) | Project-Wide (Slow) |
+|-----------|-------------------|--------------------|
+| Type check | \`npx tsc --noEmit <file>\` (3s) | \`npm run typecheck\` (2min) |
+| Lint | \`npx eslint <file>\` (1s) | \`npm run lint\` (30s) |
+| Test | \`npm run test -- <file>\` (2s) | \`npm run test\` (4min) |
+
+**Project-Wide Commands (Ask First)**:
+- \`npm run build\` - ASK BEFORE RUNNING
+- Full test suite - ASK BEFORE RUNNING
+
 Ask before: rm -rf, sudo, git push --force, git reset --hard.
 Output: plain text, file:line for refs, no trailing summaries.
 `;

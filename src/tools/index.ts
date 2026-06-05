@@ -10,6 +10,8 @@ import { getBashPath } from '../utils/platform';
 import axios from 'axios';
 import type { Todo } from '../agent';
 import type { PersistedTask } from '../storage/taskPersistence';
+import { analyzeCodeHealth, formatCodeHealthResult } from './codeHealth';
+import { analyzeTestQuality, formatTestQualityResult } from './testQuality';
 
 const isWindows = process.platform === 'win32';
 
@@ -466,6 +468,30 @@ name: 'bash',
         path: { type: 'string', description: 'File or directory to format (defaults to workspace root)' },
       },
       required: [],
+    },
+  },
+  {
+    name: 'code_health',
+    description: 'Analyze code health score (maintainability, complexity, nesting). Target: >= 9.5 for AI-friendly code. Based on Martin Fowler\'s recommendations.',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        path: { type: 'string', description: 'File or directory to analyze' },
+        threshold: { type: 'number', description: 'Minimum acceptable score (default: 9.5)' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'test_quality_check',
+    description: 'Detect test anti-patterns: over-mocking (TST-004), happy-path-only (TST-005), assertion-free (TST-008). Use after writing tests to ensure quality.',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        testFile: { type: 'string', description: 'Test file to analyze' },
+        threshold: { type: 'number', description: 'Minimum acceptable score (default: 7.0)' },
+      },
+      required: ['testFile'],
     },
   },
 ];
@@ -1080,48 +1106,101 @@ Write-Output $proc.Id;
             }
           }
 
-// 设置卡住警告定时器 - 触发自动中断和重试
+// === 卡住检测和强制终止机制 ===
+          // 关键修复：先启动进程，确保 pid 就绪，再设置 timer
           let stuckWarningSent = false;
-          let stuckWarningTimer: NodeJS.Timeout | null = setTimeout(() => {
+          let progressTimer: NodeJS.Timeout | null = null;
+          const startTime = Date.now();
+
+          // 先启动进程（detached: true 创建进程组）
+          // execa 的 pid 属性在进程启动后立即可用
+          const bashProcess = execa(actualCommand, {
+            shell: true,
+            cwd: WORKSPACE,
+            timeout: timeout,
+            reject: false,
+            cancelSignal: abortController.signal,
+            detached: true,  // 🔴 关键：创建独立进程组，允许杀死整个进程树
+          });
+
+          // 进程启动后，pid 立即可用，现在设置 timer
+          const stuckWarningTimer = setTimeout(() => {
             if (!stuckWarningSent) {
               stuckWarningSent = true;
+
+              // 立即发送事件通知用户和 agent
+              eventCallback?.('tool_stuck_warning', {
+                tool: 'bash',
+                command: actualCommand.slice(0, 50),
+                timeout: stuckWarningMs / 1000,
+                elapsedMs: stuckWarningMs,
+                message: `Command stuck after ${stuckWarningMs / 1000}s, forcing termination...`
+              });
+
               abortController.abort();
+
+              // 强制杀死进程组（detached: true 确保进程组存在）
+              if (bashProcess.pid) {
+                try {
+                  // Linux: 杀死整个进程组（负PID表示进程组）
+                  process.kill(-bashProcess.pid, 'SIGKILL');
+                } catch (e: any) {
+                  // 进程组杀死失败时，尝试杀死单个进程
+                  try { process.kill(bashProcess.pid, 'SIGKILL'); } catch {}
+                  // Windows 不支持进程组，直接杀死
+                  if (isWindows) {
+                    try { process.kill(bashProcess.pid, 'SIGKILL'); } catch {}
+                  }
+                }
+              }
             }
           }, stuckWarningMs);
 
-          // 进度报告定时器
-          const startTime = Date.now();
-          let progressTimer: NodeJS.Timeout | null = null;
-          if (eventCallback && timeout > 10000) {
+          // 进度报告定时器（降低阈值，让用户看到进度）
+          if (eventCallback) {
             progressTimer = setInterval(() => {
               const elapsed = Math.round((Date.now() - startTime) / 1000);
               eventCallback('tool_progress', { elapsed, command: actualCommand.slice(0, 50) });
-            }, 5000); // 每5秒报告一次
+            }, 5000);
           }
 
           try {
-            // 执行命令
-            const bashResult = await execa(actualCommand, {
-              shell: true,
-              cwd: WORKSPACE,
-              timeout: timeout,
-              reject: false,
-              cancelSignal: abortController.signal,
-            });
+            // 执行命令，等待结果
+            const bashResult = await bashProcess;
 
-            // 清除卡住警告定时器（无论成功或失败都要清除）
-            if (stuckWarningTimer) {
-              clearTimeout(stuckWarningTimer);
-              stuckWarningTimer = null;
-            }
-            // 清除进度报告定时器
-            if (progressTimer) {
-              clearInterval(progressTimer);
-              progressTimer = null;
-            }
+            // 清除定时器（正常完成）
+            clearTimeout(stuckWarningTimer);
+            if (progressTimer) clearInterval(progressTimer);
 
-            // 检查是否超时或被中断
+            // 检查是否超时（execa 的 timeout 触发）
             if (bashResult.timedOut || abortController.signal.aborted) {
+              // 🔴 注意：不重复发送事件（已在 timer 中发送）
+              // 自动重试：以detached模式重新运行
+              if (_autoRetry && !detached && !isWindows) {
+                
+                const sessionId = `spica_retry_${Date.now()}`;
+                const escapedCommand = actualCommand.replace(/'/g, "'\\''");
+                const retryCommand = `tmux new-session -d -s ${sessionId} '${escapedCommand}' 2>/dev/null || screen -dmS ${sessionId} ${escapedCommand} 2>/dev/null || (${escapedCommand} &)`;
+                
+                try {
+                  await execa(retryCommand, {
+                    shell: true,
+                    cwd: WORKSPACE,
+                    timeout: 5000,
+                    reject: false,
+                  });
+                  
+                  return {
+                    success: false,
+                    output: `Command timed out after ${timeout / 1000}s. Auto-restarted in detached mode (running in background).\nSession: ${sessionId}\n\nTo view:\n  tmux attach -t ${sessionId}\n  # or: screen -r ${sessionId}\n\nTo kill:\n  tmux kill-session -t ${sessionId}\n  # or: screen -S ${sessionId} -X quit\n\nNote: Command is still running in background. Check results manually.`,
+                  };
+                } catch {
+                  return {
+                    success: false,
+                    error: `Command timeout after ${timeout / 1000}s. Auto-retry failed. Try using detached=true manually.`,
+                  };
+                }
+              }
               return {
                 success: false,
                 error: `Command timeout after ${timeout / 1000}s. Try using detached=true for long-running commands.`,
@@ -1153,18 +1232,50 @@ Write-Output $proc.Id;
               error: bashResult.exitCode !== 0 ? output : undefined,
             };
           } catch (bashError: any) {
-            // 清除卡住警告定时器（异常时也要清除）
-            if (stuckWarningTimer) {
-              clearTimeout(stuckWarningTimer);
+            // 清除定时器
+            clearTimeout(stuckWarningTimer);
+            if (progressTimer) clearInterval(progressTimer);
+
+            // 检查是否是被强制杀死（卡住检测触发）
+            const wasKilled = bashError.message?.includes('SIGKILL') ||
+                              bashError.message?.includes('killed') ||
+                              bashError.isCanceled ||
+                              abortController.signal.aborted;
+
+            if (wasKilled) {
+              // 进程被强制杀死，说明卡住了
+              // 自动重试：以detached模式重新运行
+              if (_autoRetry && !detached && !isWindows) {
+                const sessionId = `spica_retry_${Date.now()}`;
+                const escapedCommand = actualCommand.replace(/'/g, "'\\''");
+                const retryCommand = `tmux new-session -d -s ${sessionId} '${escapedCommand}' 2>/dev/null || screen -dmS ${sessionId} ${escapedCommand} 2>/dev/null || (${escapedCommand} &)`;
+
+                try {
+                  await execa(retryCommand, {
+                    shell: true,
+                    cwd: WORKSPACE,
+                    timeout: 5000,
+                    reject: false,
+                  });
+
+                  return {
+                    success: false,
+                    output: `Command was stuck and killed after ${stuckWarningMs / 1000}s. Auto-restarted in detached mode.\nSession: ${sessionId}\n\nTo view: tmux attach -t ${sessionId}\nTo kill: tmux kill-session -t ${sessionId}`,
+                  };
+                } catch {
+                  return {
+                    success: false,
+                    error: `Command stuck after ${stuckWarningMs / 1000}s. Auto-retry failed. Try using detached=true manually.`,
+                  };
+                }
+              }
+              return {
+                success: false,
+                error: `Command stuck after ${stuckWarningMs / 1000}s and was killed. Try: detached=true, timeout=300, or interactive=true.`,
+              };
             }
-            // 清除进度报告定时器
-            if (progressTimer) {
-              clearInterval(progressTimer);
-            }
-            // 捕获超时错误
-            if (bashError.message?.includes('timed out') || bashError.name === 'TimedOutError') {
-              return { success: false, error: `Timeout after ${timeout / 1000}s` };
-            }
+
+            // 其他错误
             return { success: false, error: bashError.message };
           }
         } catch (outerError: any) {
@@ -2063,6 +2174,44 @@ Write-Output $proc.Id;
         } catch (testError: unknown) {
           if (progressTimer) clearInterval(progressTimer);
           return { success: false, error: testError instanceof Error ? testError.message : String(testError) };
+        }
+      }
+
+      case 'code_health': {
+        const healthPath = resolvePath(safeArgs.path);
+        const threshold = safeArgs.threshold ?? 9.5;
+        
+        try {
+          const result = await analyzeCodeHealth(healthPath, threshold);
+          const output = formatCodeHealthResult(result);
+          
+          return {
+            success: result.passed,
+            output,
+            content: JSON.stringify(result),
+          };
+        } catch (healthError: unknown) {
+          const errorMsg = healthError instanceof Error ? healthError.message : String(healthError);
+          return { success: false, error: `Code health analysis failed: ${errorMsg}` };
+        }
+      }
+
+      case 'test_quality_check': {
+        const testFilePath = resolvePath(safeArgs.testFile);
+        const threshold = safeArgs.threshold ?? 7.0;
+        
+        try {
+          const result = await analyzeTestQuality(testFilePath, threshold);
+          const output = formatTestQualityResult(result);
+          
+          return {
+            success: result.passed,
+            output,
+            content: JSON.stringify(result),
+          };
+        } catch (testError: unknown) {
+          const errorMsg = testError instanceof Error ? testError.message : String(testError);
+          return { success: false, error: `Test quality analysis failed: ${errorMsg}` };
         }
       }
 
