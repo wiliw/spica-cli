@@ -13,7 +13,7 @@ Spica is an AI-powered coding agent built with Node.js + TypeScript. It follows 
 │                                                              │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐   │
 │  │ LLMClient   │  │ Tools       │  │ Project State        │   │
-│  │             │  │ (33 tools)  │  │ (config, workspace)  │   │
+│  │             │  │ (28 tools)  │  │ (config, workspace)  │   │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘   │
 │                                                              │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐   │
@@ -44,7 +44,7 @@ The central orchestrator that:
 
 Handles communication with LLM providers:
 - **LLMClient.ts** - High-level client interface
-- **OpenAICompatibleProvider.ts** - OpenAI-compatible API implementation
+- **providers/OpenAICompatible.ts** - OpenAI-compatible API implementation
 - **TokenCounter.ts** - Token counting for context management
 - **RateLimiter.ts** - Rate limiting for API calls
 
@@ -55,15 +55,20 @@ Handles communication with LLM providers:
 
 ### Tools (src/tools/index.ts)
 
-33 built-in tools with unified interface:
+28 built-in tools with unified interface:
 
 ```typescript
 interface ToolResult {
   success: boolean;
   output?: string;
   error?: string;
-  content?: string;  // For file_read
-  diff?: string;     // For file edits
+  content?: string;      // For file_read
+  diff?: string;         // For file edits
+  syntaxErrors?: string[];  // Syntax check results
+  filesAtRisk?: string[];   // Safety check results
+  safetyMode?: 'protected' | 'normal';
+  requiresUserConfirmation?: boolean;
+  referencedSkills?: string[];
 }
 
 async function executeTool(
@@ -74,15 +79,16 @@ async function executeTool(
 ```
 
 **Tool Categories:**
-- **File Operations**: file_read, file_write, file_edit, file_multi_edit, file_exists, file_delete, file_copy, file_move, directory_create, directory_list
+- **File Operations**: file_read, file_write, file_edit, file_multi_edit, file_replace, file_insert, file_exists, file_delete, file_copy, file_move
+- **Directory**: directory_create, directory_list
 - **Search**: glob, grep
 - **Shell**: bash (with security checks)
 - **Git**: git (all common operations)
 - **GitHub**: gh (PR, issues, repos)
 - **Web**: web_search, web_fetch
-- **Task Management**: task, todo, status
-- **Code Quality**: lint, format, test, syntax_check
-- **Other**: skill, permission, question
+- **Task Management**: task, todo_write, todo_read, skill
+- **Code Quality**: lint, format, test, file_patch
+- **Other**: question, workspace
 
 ### MCP Client (src/mcp/client.ts)
 
@@ -97,6 +103,7 @@ User-defined command templates:
 - Stored in `~/.spica/skills/` as SKILL.md files
 - Can be auto-triggered by input matching
 - Support parameter templates `{param}`
+- Built-in skills in `src/builtin-skills/superpowers/`
 
 ### Hooks (src/hooks/index.ts)
 
@@ -117,13 +124,28 @@ SpicaAgent emits events for UI updates:
 'waiting_for_llm', 'agent_interrupted', 'context_compressed', 'context_warning'
 
 // Error events
-'error_suggestion', 'connection_error', 'retry_attempt'
+'error_suggestion', 'connection_error', 'retry_attempt', 'empty_response_warning'
 
-// Session events
-'message', 'skill_auto_triggered', 'permission_request', 'bypass_changed'
+// Checkpoint events
+'checkpoint_created', 'checkpoint_warning'
 
-// Sub-agent events
-'sub_agent_start', 'sub_agent_tool_call', 'sub_agent_done', 'sub_agent_error'
+// Hook events
+'hook_blocked', 'hook_warning', 'hook_log'
+
+// Tool events
+'tool_stuck_warning', 'tool_aborted', 'tool_conflict_warning', 'diff_preview'
+
+// Queue events
+'queue_injected', 'pending_input_detected'
+
+// Todo events
+'todos_set', 'todo_update'
+
+// Sub-agent events (via task tool)
+'sub_agent_start', 'sub_agent_tool_call', 'sub_agent_tool_result', 'sub_agent_done', 'sub_agent_error'
+
+// Other events
+'workspace_changed', 'agent_stopped_on_error'
 ```
 
 ## Data Flow
@@ -148,18 +170,37 @@ Context > 70% threshold → compact() → generateSummary() → [History Summary
 
 ## Storage
 
+### Global Storage (~/.spica/)
+
 ```
 ~/.spica/                    # Global config
-├── config.json              # API providers
-├── settings.json            # Skills, MCP, Hooks
+├── settings.json            # API providers, MCP, Hooks, Skills
+├── history.json             # Command history
+├── sessions/                # Archived sessions (by date)
+├── learnings/               # Global learnings
+├── backups/                 # File backups
 └── skills/                  # Skill packages
+    ├── <skill-name>/
+    │   └── SKILL.md
+    └── skills.json          # Skills registry
+```
 
+### Project Storage (<project>/.spica/)
+
+```
 <project>/.spica/            # Project-specific
-├── session.json             # Current session
+├── session.json             # Current session (messages)
 ├── sessions/                # Archived sessions
-├── state.json               # Project state
+│   └── <session-id>.json
+├── state.json               # Project state (phase, todos, decisions)
+├── context.json             # Project context
 ├── tasks.json               # Task persistence
-└── learnings/               # Project learnings
+├── checkpoints.json         # Checkpoint metadata
+├── snapshots/               # Checkpoint file backups
+├── skills/                  # Project-level skills
+├── skills.json              # Project skills config
+├── hooks.json               # Project hooks config
+└── learnings/               # Project learnings (markdown)
 ```
 
 ## Security
@@ -180,13 +221,6 @@ Dangerous operations require permission:
 - `git push --force` - Force push
 - `git reset --hard` - Hard reset
 
-### Bypass Mode
-
-`/bypass` skips:
-- Permission prompts
-- Shell injection checks
-- Hook confirmations
-
 ## Error Handling
 
 See [ERROR_HANDLING.md](ERROR_HANDLING.md) for detailed strategy.
@@ -201,9 +235,10 @@ npm run test                  # Watch mode
 
 Test categories:
 - Unit tests: `src/__tests__/`
-- Integration tests: `src/__tests__/integration/`
 - Stress tests: `src/__tests__/stress/`
 - Security tests: `src/__tests__/security/`
+- UI tests: `src/cli/ui/__tests__/`
+- Tools tests: `src/tools/__tests__/`
 
 ## Extension Points
 

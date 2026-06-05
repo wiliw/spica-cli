@@ -2,115 +2,227 @@
 
 ---
 
-## Commands
+## CLI Commands
 
-### Provider
+### Provider Management
 
 ```bash
-spica set <name> <url> <apiKey> <model>  # Add provider
-spica use <name>                         # Switch default
-spica list                               # List all
-spica show [name]                        # Show details
-spica remove <names...>                  # Remove
-spica remove --all                       # Remove all
+spica set <name> <url> <apiKey> <model>  # Add/update provider
+spica use <name>                         # Switch default provider
+spica list                               # List all providers
+spica show [name]                        # Show provider details
+spica remove <names...>                  # Remove providers
+spica remove --all                       # Remove all providers
 ```
 
 Example:
 ```bash
 spica set deepseek https://api.deepseek.com/v1 sk-xxx deepseek-chat
 spica use deepseek
+spica list
+# Output:
+# ● deepseek (default)
+# ○ openai
 ```
 
 ### Session
 
 ```bash
-spica              # Start (auto-load history)
-spica --fresh      # Fresh session
-spica run "task"   # Single task
+spica              # Start interactive session (auto-load history)
+spica --fresh      # Start fresh session (no history)
+spica --no-tui     # Run in non-interactive mode (simple output)
+spica run "task"   # Execute single task and exit
 spica -p <name>    # Use specific provider
-```
-
-### Skills
-
-```bash
-spica skills list
-spica skills install <url>
-spica skills uninstall <name>
-```
-
-### MCP
-
-```bash
-spica mcp
-spica mcp list
-spica mcp tools
 ```
 
 ---
 
-## Interactive Commands
+## Interactive Commands (TUI)
+
+### Help & Status
 
 | Command | Description |
 |---------|-------------|
-| `/help` or `/h` | Show help |
-| `/clear` or `/reset` | Clear session |
-| `/history` | Show messages |
-| `/compact` | Compress context |
-| `/bypass` | Auto-approve all permissions |
-| `/strict` | Require permission (default) |
-| `/status` | Show status |
-| `/skills` | List skills |
-| `/init` | Generate AGENTS.md |
-| `/queue` or `/q` | Input queue |
-| `/undo` | Undo queued input |
+| `/help` or `/h` | Show all commands |
+| `/status` | Show session status (messages, context usage, queue) |
 
 ### Session Management
 
 | Command | Description |
 |---------|-------------|
-| `/sessions` or `/s` | List archived sessions |
 | `/new` | Start fresh session (archives current) |
+| `/clear` or `/reset` | Clear current session |
+| `/history` | Show message history |
+| `/compact` | Compress context to reduce token usage |
+| `/sessions` or `/s` | List archived sessions |
 | `/switch <id>` | Switch to specific session |
 | `/rename <id> <name>` | Rename a session |
-| `/delete <id>` | Delete a session | |
+| `/delete <id>` | Delete a session |
+
+### Input Queue
+
+| Command | Description |
+|---------|-------------|
+| `/queue` or `/q` | Show input queue status |
+| `/undo` | Remove last queued input |
+
+### Skill Management
+
+| Command | Description |
+|---------|-------------|
+| `/skill` or `/skill list` | List available skills |
+| `/skill install <url>` | Install skill package |
+| `/skill uninstall <name>` | Uninstall skill package |
+| `/skill add <name> [template]` | Add custom skill |
+| `/skill remove <name>` | Remove skill |
+| `/skill edit <name> <template>` | Edit skill template |
+| `/<skill-name> [args]` | Execute a skill |
+
+### MCP Management
+
+| Command | Description |
+|---------|-------------|
+| `/mcp` or `/mcp status` | Show MCP server status |
+| `/mcp init` | Create example MCP config |
+| `/mcp tools` | List available MCP tools |
+| `/mcp disconnect` | Disconnect all MCP servers |
+
+### Checkpoint Management
+
+| Command | Description |
+|---------|-------------|
+| `/checkpoint` or `/checkpoint list` | List checkpoints |
+| `/checkpoint show <id>` | Show checkpoint details |
+| `/checkpoint restore <id>` | Restore files from checkpoint |
+| `/checkpoint clean` | Clean old checkpoints |
+
+### Project
+
+| Command | Description |
+|---------|-------------|
+| `/init` | Generate AGENTS.md for current project |
 
 ---
 
 ## Tools
 
-| Category | Tools |
-|----------|-------|
-| File | read, write, edit, delete, copy, move, exists |
-| Directory | create, list |
-| Search | glob, grep |
-| Shell | bash |
-| Git | status, diff, log, add, commit, branch, checkout, push, pull |
-| GitHub | gh |
-| Web | search, fetch |
-| Task | question, todo, task, workspace, lint, test |
+### File Operations (10 tools)
+
+| Tool | Description | Key Parameters |
+|------|-------------|----------------|
+| `file_read` | Read file content | path, offset, limit |
+| `file_write` | Write/create file | path, content |
+| `file_edit` | Edit by exact replacement | path, oldString, newString |
+| `file_multi_edit` | Multiple edits at once | path, edits[] |
+| `file_replace` | Regex replacement | path, pattern, replacement, flags, all |
+| `file_insert` | Insert at line or pattern | path, line, content, after, before |
+| `file_exists` | Check if exists | path |
+| `file_delete` | Delete file/directory | path |
+| `file_copy` | Copy file | source, destination |
+| `file_move` | Move/rename file | source, destination |
+
+### Directory & Search (4 tools)
+
+| Tool | Description | Key Parameters |
+|------|-------------|----------------|
+| `directory_create` | Create directory (nested) | path |
+| `directory_list` | List directory contents | path |
+| `glob` | Pattern match files | pattern, path, ignore, maxFiles |
+| `grep` | Search file contents | pattern, path, include, maxLines |
+
+### Shell & Git (3 tools)
+
+| Tool | Description | Key Parameters |
+|------|-------------|----------------|
+| `bash` | Execute shell command | command, timeout, detached, interactive, maxOutputLength |
+| `git` | Git operations | action, args |
+| `workspace` | Change working directory | path |
+
+### Web & GitHub (3 tools)
+
+| Tool | Description | Key Parameters |
+|------|-------------|----------------|
+| `web_search` | Web search | query, engine, timeout |
+| `web_fetch` | Fetch URL content | url, timeout |
+| `gh` | GitHub CLI | action, args |
+
+### Task & Quality (7 tools)
+
+| Tool | Description | Key Parameters |
+|------|-------------|----------------|
+| `todo_write` | Write todo list | todos[] |
+| `todo_read` | Read todo list | - |
+| `task` | Parallel sub-agent | tasks[] |
+| `skill` | Execute skill | name, args |
+| `lint` | Code linting | fix, files |
+| `test` | Run tests | filter, coverage |
+| `format` | Format code | path |
+
+### Other (2 tools)
+
+| Tool | Description | Key Parameters |
+|------|-------------|----------------|
+| `question` | Ask user | text |
+| `file_patch` | Apply diff patch | path, patch |
 
 ---
 
 ## Bash Tool Modes
 
 ```json
-// TTY mode
-{ "command": "npm run dev", "tty": true }
+// Normal execution
+{ "command": "ls -la" }
 
 // Detached (background)
 { "command": "npm run dev", "detached": true }
 
-// Interactive (AI input/output)
-{ "command": "npm run dev", "interactive": true, "inputs": ["hello", "exit"] }
+// Interactive (AI provides input)
+{ "command": "npm run dev", "interactive": true }
+
+// With timeout
+{ "command": "npm test", "timeout": 60000 }
 ```
+
+---
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Submit input |
+| `ESC ESC` | Interrupt current operation |
+| `Ctrl+C` (3x) | Force exit |
+| `Ctrl+O` | Toggle verbose/compact mode |
+| `Tab` | Command completion |
+| `Backspace` | Delete character |
+| `Arrow keys` | Move cursor |
 
 ---
 
 ## Config Location
 
+### Global (~/.spica/)
+
 ```
-~/.spica/settings.json     # Global (providers, mcp, skills, hooks)
-<project>/.spica/session.json  # Session history
+~/.spica/
+├── settings.json     # Providers, MCP, Hooks, Skills
+├── history.json      # Command history
+├── sessions/         # Archived sessions
+├── skills/           # Skill packages
+└── learnings/        # Global learnings
+```
+
+### Project (<project>/.spica/)
+
+```
+<project>/.spica/
+├── session.json      # Current session messages
+├── sessions/         # Archived sessions
+├── state.json        # Project state
+├── tasks.json        # Task persistence
+├── checkpoints.json  # Checkpoint metadata
+├── snapshots/        # File backups
+└── learnings/        # Project learnings
 ```
 
 ---
@@ -124,18 +236,32 @@ spica set local http://localhost:8000/v1 dummy llama
 
 # Ollama
 ollama serve
-spica set local http://localhost:11434/v1 dummy llama3
+spica set ollama http://localhost:11434/v1 dummy llama3
+
+# vLLM
+python -m vllm.entrypoints.openai.api_server --model <model>
+spica set vllm http://localhost:8000/v1 dummy <model>
 ```
 
 ---
 
-## MCP Config
+## MCP Config Example
 
 ```json
 {
   "mcp": {
     "servers": [
-      { "name": "filesystem", "command": "npx", "args": ["-y", "@anthropic-ai/mcp-server-filesystem", "/path"] }
+      {
+        "name": "filesystem",
+        "command": "npx",
+        "args": ["-y", "@anthropic-ai/mcp-server-filesystem", "/path"]
+      },
+      {
+        "name": "brave-search",
+        "command": "npx",
+        "args": ["-y", "@anthropic-ai/mcp-server-brave-search"],
+        "env": { "BRAVE_API_KEY": "your-key" }
+      }
     ]
   }
 }
@@ -143,13 +269,29 @@ spica set local http://localhost:11434/v1 dummy llama3
 
 ---
 
-## Hooks Config
+## Hooks Config Example
 
 ```json
 {
   "hooks": {
     "PreToolUse": [
-      { "matcher": { "tool": "bash", "args": { "command": "*--force*" } }, "action": "block", "message": "Blocked" }
+      {
+        "matcher": { "tool": "bash", "args": { "command": "*rm -rf*" } },
+        "action": "confirm",
+        "message": "Confirm deletion?"
+      },
+      {
+        "matcher": { "tool": "bash", "args": { "command": "*--force*" } },
+        "action": "block",
+        "message": "Force operations blocked"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": { "tool": "file_write" },
+        "action": "log",
+        "message": "File written"
+      }
     ]
   }
 }
@@ -157,15 +299,21 @@ spica set local http://localhost:11434/v1 dummy llama3
 
 ---
 
-## Skills Config
+## Skills Config Example
 
 ```json
 {
   "skills": {
     "review": {
-      "description": "Code review",
-      "promptTemplate": "Review {files}",
-      "allowedTools": ["file_read", "grep"]
+      "name": "review",
+      "description": "Code review for specified files",
+      "promptTemplate": "Review these files: {input}. Check for bugs, style, and improvements.",
+      "allowedTools": ["file_read", "grep", "glob"]
+    },
+    "debug": {
+      "name": "debug",
+      "description": "Debug an issue",
+      "promptTemplate": "Debug this issue: {input}"
     }
   }
 }
@@ -177,3 +325,4 @@ spica set local http://localhost:11434/v1 dummy llama3
 
 - [CONFIGURATION.md](CONFIGURATION.md) - Configuration guide
 - [STORAGE.md](STORAGE.md) - Storage locations
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Architecture details
