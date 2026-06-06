@@ -300,7 +300,8 @@ describe('Tool System', () => {
     beforeAll(async () => {
       // 创建测试 git 仓库
       await fs.ensureDir(path.join(TEST_DIR, 'git-test'));
-      const git = await import('simple-git').then(m => m.default(path.join(TEST_DIR, 'git-test')));
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- simple-git needs require for constructor call
+      const git = require('simple-git')(path.join(TEST_DIR, 'git-test'));
       await git.init();
       await fs.writeFile(path.join(TEST_DIR, 'git-test', 'file.txt'), 'initial');
       await git.add('.');
