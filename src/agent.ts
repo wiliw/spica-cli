@@ -836,7 +836,8 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
             this.emit(event, data);
             if (event === 'tool_stuck_warning') {
               this.abortTool(tc.name);
-              this.interruptFlag = true;
+              // 不设置interruptFlag，让工具自己处理恢复
+              // bash工具已有autoRetry机制，会返回结果继续执行
             }
           };
 
@@ -1076,24 +1077,71 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
   private generateErrorSuggestion(toolName: string, error: string, args: Record<string, unknown>): string {
     const suggestions: Record<string, (e: string, a: Record<string, unknown>) => string> = {
       file_read: (e, a) =>
-        e.includes('ENOENT') ? `File not found: ${a.path}. Check path or use glob.`
-        : e.includes('EACCES') ? `Permission denied: ${a.path}. Check file permissions.`
-        : `Read failed. Check path.`,
+        e.includes('ENOENT') ? `File not found: ${a.path}. Try: glob to find similar files, or check path spelling.`
+        : e.includes('EACCES') ? `Permission denied: ${a.path}. Try: check file permissions, or use different path.`
+        : `Read failed. Try: check path exists, or use glob to search.`,
       file_write: (e, a) =>
-        e.includes('EACCES') ? `Permission denied: ${a.path}. Check file permissions.`
-        : e.includes('ENOENT') ? `Directory not found: ${a.path}. Create directory first.`
-        : `Write failed. Check path and content.`,
+        e.includes('EACCES') ? `Permission denied: ${a.path}. Try: check file permissions, or use different path.`
+        : e.includes('ENOENT') ? `Directory not found: ${a.path}. Try: create directory first with directory_create.`
+        : `Write failed. Try: check path and content, or use file_edit for existing files.`,
+      file_edit: (e, a) =>
+        e.includes('not found') ? `Text not found in file. Try: read file first to get exact text, or use smaller snippet.`
+        : `Edit failed. Try: read file to verify content, or use file_write to overwrite.`,
       bash: (e, a) =>
-        e.includes('command not found') ? `Command not found: ${a.command}. Install required tool.`
-        : e.includes('Permission denied') ? `Permission denied: ${a.command}. Check permissions or use sudo.`
-        : `Execution failed. Check command syntax.`,
-      glob: (e, a) => `Search failed. Check pattern: ${a.pattern}`,
-      grep: (_e, _a) => `Search failed. Check pattern and path.`,
+        e.includes('command not found') ? `Command not found: ${a.command}. Try: install required tool, or use alternative command.`
+        : e.includes('Permission denied') ? `Permission denied: ${a.command}. Try: check permissions, or use sudo if safe.`
+        : e.includes('timeout') ? `Command timed out. Try: detached=true for background, shorter timeout, or break into smaller steps.`
+        : `Execution failed. Try: check command syntax, or use simpler command.`,
+      glob: (e, a) => `Search failed: ${a.pattern}. Try: simpler pattern (e.g., *.ts), or check directory exists.`,
+      grep: (e, a) => `Search failed. Try: simpler pattern, or use glob first to find files.`,
+      test: (e, _a) =>
+        e.includes('timeout') ? `Test timed out. Try: run specific test file, or use quick validation (tsc, lint).`
+        : `Test failed. Try: run single test file, or check test output for details.`,
+      lint: (e, _a) =>
+        e.includes('error') ? `Lint errors found. Try: fix errors one by one, or use format tool.`
+        : `Lint failed. Try: check file syntax, or run on smaller scope.`,
+      directory_list: (e, a) => `Directory listing failed: ${a.path}. Try: check path exists, or use glob to search.`,
+      file_delete: (e, a) => `Delete failed: ${a.path}. Try: check file exists, or check permissions.`,
+      file_copy: (e, a) => `Copy failed. Try: check source exists: ${a.source}, or check destination path.`,
+      file_move: (e, a) => `Move failed. Try: check source exists: ${a.source}, or check destination permissions.`,
     };
 
     const baseSuggestion = suggestions[toolName]?.(error, args) || `Tool ${toolName} failed. Check parameters.`;
 
     return baseSuggestion;
+  }
+
+  /**
+   * Report BLOCKED status when agent cannot proceed
+   * 
+   * Triggered when:
+   * - Multiple consecutive tool failures
+   * - Critical errors that cannot be recovered
+   * - Agent needs user guidance
+   * 
+   * @param context - Blocked context information
+   * @emits agent_blocked with full context
+   */
+  private reportBlocked(context: {
+    task: string;
+    attempted: string[];
+    failed: string[];
+    error: string;
+    suggestions: string[];
+  }): string {
+    this.emit('agent_blocked', {
+      status: 'BLOCKED',
+      ...context,
+      timestamp: new Date().toISOString(),
+    });
+
+    return `[BLOCKED] Agent needs help.\n` +
+      `Task: ${context.task}\n` +
+      `Attempted: ${context.attempted.join(', ')}\n` +
+      `Failed: ${context.failed.join(', ')}\n` +
+      `Error: ${context.error}\n` +
+      `Suggestions:\n${context.suggestions.map(s => `  - ${s}`).join('\n')}\n` +
+      `Please provide guidance or break down the task.`;
   }
 
   // 公开方法：手动压缩历史（使用 LLM 生成摘要）

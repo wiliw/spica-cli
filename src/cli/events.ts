@@ -471,6 +471,30 @@ export function setupAgentEvents(
     screen.refreshInput();
   });
 
+  // Agent blocked - needs user guidance
+  on('agent_blocked', (data: {
+    status: string;
+    task: string;
+    attempted: string[];
+    failed: string[];
+    error: string;
+    suggestions: string[];
+    timestamp: string;
+  }) => {
+    screen.appendScroll(COLORS.error(`\n[BLOCKED] Agent needs your help.\n`));
+    screen.appendScroll(COLORS.muted(`  Task: ${data.task.slice(0, 100)}\n`));
+    screen.appendScroll(COLORS.muted(`  Attempted: ${data.attempted.join(', ')}\n`));
+    screen.appendScroll(COLORS.muted(`  Failed: ${data.failed.slice(0, 3).join(', ')}\n`));
+    screen.appendScroll(COLORS.warning(`  Error: ${data.error}\n`));
+    screen.appendScroll(COLORS.primary(`  Suggestions:\n`));
+    data.suggestions.forEach(s => {
+      screen.appendScroll(COLORS.primary(`    - ${s}\n`));
+    });
+    screen.appendScroll(COLORS.muted(`\nPlease provide guidance or break down the task.\n`));
+    screen.restoreCursor();
+    screen.refreshInput();
+  });
+
   // Todo progress display
   on('todos_set', (todos: TodoUpdateData['todos']) => {
     if (todos.length > 0) {

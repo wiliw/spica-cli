@@ -3,60 +3,76 @@
 ## Problem
 When tools timeout or fail, spica aborts without trying alternative strategies or escalating properly.
 
-## Current Behavior
-```
-Tool timeout → Abort → [OK] Done → Give up
+## Current State Analysis
+
+### ✅ Already Implemented
+1. **bash autoRetry** (src/tools/index.ts:1179)
+   - Bash工具超时后会自动以detached模式重试
+   - 返回success=false但提供session信息
+
+2. **generateErrorSuggestion** (src/agent.ts)
+   - 为不同工具错误提供建议
+   - 但只是建议，不会自动尝试
+
+3. **CLI Display** (src/cli/events.ts)
+   - 显示tool_stuck_warning信息
+
+### ❌ Critical Bug
+**tool_stuck_warning处理** (src/agent.ts:812):
+```typescript
+if (event === 'tool_stuck_warning') {
+  this.abortTool(tc.name);
+  this.interruptFlag = true;  // ❌ 这会导致整个agent停止！
+}
 ```
 
-## Expected Behavior (per superpowers design)
+**问题流程**：
 ```
-Tool timeout → 
-  1. Analyze failure reason
-  2. Try alternative strategy
-  3. If still fails → Report BLOCKED with context
-  4. Provide suggestions for next steps
+bash超时 → tool_stuck_warning → interruptFlag = true → runLoop退出 → agent停止
 ```
+
+**期望流程**：
+```
+bash超时 → autoRetry(detached) → 返回结果 → agent继续执行
+```
+
+### ❌ Missing Features
+1. 没有通用的错误恢复机制（只有bash有autoRetry）
+2. 没有BLOCKED状态报告
+3. 没有替代策略尝试
 
 ## Root Cause
-- `tool_stuck_warning` only sets `interruptFlag = true`
-- No alternative strategy implementation
-- No BLOCKED status reporting
-- No error recovery mechanism
+- `interruptFlag = true` 会中断整个agent，而不是让工具自己处理
+- bash的autoRetry已经返回结果，但interruptFlag会忽略它
+- 其他工具没有错误恢复机制
 
 ## Implementation Plan
 
-### Task 1: Add Error Recovery Strategy Registry
+### Task 1: Fix Critical Bug - Remove interruptFlag in tool_stuck_warning
 **File**: `src/agent.ts`
+**Priority**: CRITICAL
 
-Add strategy registry for common failures:
+**Current Code** (line ~812):
 ```typescript
-interface RecoveryStrategy {
-  condition: (error: string, tool: string) => boolean;
-  alternatives: string[];
-  suggestion: string;
+if (event === 'tool_stuck_warning') {
+  this.abortTool(tc.name);
+  this.interruptFlag = true;  // ❌ 这会中断整个agent
 }
-
-const RECOVERY_STRATEGIES: RecoveryStrategy[] = [
-  {
-    condition: (error) => error.includes('timeout') || error.includes('stuck'),
-    alternatives: [
-      'Try with shorter timeout',
-      'Try with detached=true',
-      'Try smaller scope',
-    ],
-    suggestion: 'Consider breaking task into smaller pieces',
-  },
-  {
-    condition: (error) => error.includes('test') && error.includes('timeout'),
-    alternatives: [
-      'Run only affected tests',
-      'Run quick validation (tsc, lint)',
-      'Skip tests and document',
-    ],
-    suggestion: 'Test suite may be too large, try focused testing',
-  },
-];
 ```
+
+**Fix**:
+```typescript
+if (event === 'tool_stuck_warning') {
+  this.abortTool(tc.name);
+  // 不要设置interruptFlag，让工具自己处理恢复
+  // bash工具已经有autoRetry机制
+}
+```
+
+**Why**: 
+- bash工具的autoRetry已经返回结果（success=false + session信息）
+- interruptFlag会忽略这个结果并中断整个agent
+- 移除后，bash超时会自动重试，agent继续执行
 
 ### Task 2: Implement Error Recovery in Agent Loop
 **File**: `src/agent.ts`
