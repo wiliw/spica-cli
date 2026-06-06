@@ -5,7 +5,7 @@ import { initMCP } from './mcp/client';
 import { initSkills, listSkills } from './skills/index';
 import { getProviderConfig } from './utils/settings';
 import { getSystemPrompt, getCompactPrompt } from './prompts/system';
-import { loadProjectConfig as loadAgentsConfig, autoDetectProject, createAgentsMd } from './utils/projectConfig';
+import { loadProjectConfig as loadAgentsConfig, autoDetectProject, createAgentsMd, type ProjectConfig } from './utils/projectConfig';
 import { SkillDefinition } from './utils/settings';
 import { cleanMessages } from './utils/messageCleaner';
 import { loadProjectState, saveProjectState, updateProjectTodos, saveProjectContext, ensureProjectDir } from './storage/projectState';
@@ -84,26 +84,6 @@ export interface Todo {
   content: string;
   /** Task status: pending, in_progress, or completed */
   status: 'pending' | 'in_progress' | 'completed';
-}
-
-/**
- * Project configuration detected from workspace
- */
-export interface ProjectConfig {
-  /** Project type: e.g., 'typescript', 'python' */
-  type?: string;
-  /** Framework: e.g., 'react', 'vue' */
-  framework?: string;
-  /** Primary language */
-  language?: string;
-  /** Build/test/dev commands */
-  commands?: {
-    build?: string;
-    test?: string;
-    dev?: string;
-  };
-  /** Project-specific constraints */
-  constraints?: string[];
 }
 
 export class InterruptError extends Error {
