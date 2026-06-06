@@ -15,6 +15,8 @@ export interface ProjectConfig {
     dev?: string;
     lint?: string;
   };
+  // Project-specific constraints
+  constraints?: string[];
   // Raw AGENTS.md content — injected directly into system prompt
   rawContent?: string;
   // Parsed rule layers from AGENTS.md

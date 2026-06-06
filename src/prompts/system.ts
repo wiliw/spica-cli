@@ -3,6 +3,7 @@ import fs from 'fs-extra';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import type { ProjectConfig } from '../utils/projectConfig';
 
 // ES module 中获取 __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -86,25 +87,6 @@ function loadLearnings(workspacePath: string): string {
   } catch {
     return ''; // never break system prompt for learnings issues
   }
-}
-
-interface RuleLayers {
-  critical: string[];
-  important: string[];
-  preferences: string[];
-}
-
-interface ProjectConfig {
-  rawContent?: string;
-  type?: string;
-  language?: string;
-  framework?: string;
-  commands?: {
-    build?: string;
-    test?: string;
-  };
-  constraints?: string[];
-  ruleLayers?: RuleLayers;
 }
 
 export function getSystemPrompt(projectConfig?: ProjectConfig, skillsMetadata?: string, workspacePath?: string): string {
