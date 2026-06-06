@@ -2,7 +2,7 @@
 // AGENTS.md is prose that agents read directly, NOT a machine-parseable data format.
 // We only auto-detect project info as fallback when no AGENTS.md exists.
 
-import fs from 'fs-extra';
+import * as fs from 'fs-extra';
 import { join } from 'path';
 
 export interface ProjectConfig {
@@ -17,16 +17,62 @@ export interface ProjectConfig {
   };
   // Raw AGENTS.md content — injected directly into system prompt
   rawContent?: string;
+  // Parsed rule layers from AGENTS.md
+  ruleLayers?: RuleLayers;
+}
+
+export interface RuleLayers {
+  critical: string[];
+  important: string[];
+  preferences: string[];
+}
+
+export function parseRuleLayers(content: string): RuleLayers {
+  const result: RuleLayers = {
+    critical: [],
+    important: [],
+    preferences: [],
+  };
+
+  // Match ## [TAG] Section Title patterns
+  const sectionPattern = /##\s*\[(CRITICAL|IMPORTANT|PREF)\]\s*[^\n]*\n([\s\S]*?)(?=##\s*\[|$)/gi;
+  
+  let match;
+  while ((match = sectionPattern.exec(content)) !== null) {
+    const tag = match[1].toUpperCase();
+    const sectionContent = match[2].trim();
+    
+    // Extract bullet points (lines starting with -)
+    const bullets = sectionContent
+      .split('\n')
+      .filter(line => line.trim().startsWith('-'))
+      .map(line => line.trim().substring(1).trim());
+    
+    if (tag === 'CRITICAL') {
+      result.critical.push(...bullets);
+    } else if (tag === 'IMPORTANT') {
+      result.important.push(...bullets);
+    } else if (tag === 'PREF') {
+      result.preferences.push(...bullets);
+    }
+  }
+
+  return result;
 }
 
 const CONFIG_FILE = 'AGENTS.md';
 
 // Load AGENTS.md as raw prose content (per standard: no parsing, agents read it directly)
+// Also parse rule layers for structured injection into system prompt
 export function loadProjectConfig(workspace: string): ProjectConfig | null {
   const filepath = join(workspace, CONFIG_FILE);
   if (fs.existsSync(filepath)) {
     const content = fs.readFileSync(filepath, 'utf-8');
-    return { rawContent: content };
+    const ruleLayers = parseRuleLayers(content);
+    return { 
+      rawContent: content,
+      ruleLayers
+    };
   }
   return null;
 }
