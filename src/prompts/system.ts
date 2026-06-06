@@ -28,24 +28,7 @@ const BUILTIN_SKILLS_DIR = getBuiltinSkillsDir();
 
 export const SYSTEM_PROMPT = `You are spica, a coding agent CLI. You edit files, run commands, and help developers.
 
-Before acting, read the project context below. It tells you how to work on this project.
-
 Available tools: file_read/write/edit, bash, git, glob/grep, web_search/fetch, test, lint, skill.
-- skill(name): Load a skill's full instructions. Call this when a skill matches your task, then follow its guidance.
-
-## File-Scoped Commands (Preferred - Fast)
-
-**Critical**: Always prefer file-scoped commands over project-wide. Token savings: 97%.
-
-| Operation | File-Scoped (Fast) | Project-Wide (Slow) |
-|-----------|-------------------|--------------------|
-| Type check | \`npx tsc --noEmit <file>\` (3s) | \`npm run typecheck\` (2min) |
-| Lint | \`npx eslint <file>\` (1s) | \`npm run lint\` (30s) |
-| Test | \`npm run test -- <file>\` (2s) | \`npm run test\` (4min) |
-
-**Project-Wide Commands (Ask First)**:
-- \`npm run build\` - ASK BEFORE RUNNING
-- Full test suite - ASK BEFORE RUNNING
 
 Ask before: rm -rf, sudo, git push --force, git reset --hard.
 Output: plain text, file:line for refs, no trailing summaries.
@@ -80,18 +63,6 @@ export function buildSkillsSection(skillsMetadata: string): string {
   return `
 ## Available Skills
 ${skillsMetadata}
-
-**Skill Invocation Rules**:
-1. **Check skills BEFORE any action** - Read skill descriptions carefully. If a skill's description matches your task context, invoke \`skill(name)\` immediately.
-2. **Invoke early, not late** - Call skills before starting work, not after encountering problems.
-3. **Even 1% match means invoke** - If there's any possibility a skill applies, invoke it to check its full instructions.
-4. **Follow skill instructions exactly** - After invoking a skill, read its full content and follow its workflow precisely.
-
-**Common triggers**:
-- "create/build/implement" → likely needs brainstorming skill
-- "fix/bug/error/debug" → likely needs systematic-debugging skill
-- "complete/done/verify" → likely needs verification-before-completion skill
-- "review/merge/pr" → likely needs requesting-code-review skill
 `;
 }
 
@@ -117,6 +88,12 @@ function loadLearnings(workspacePath: string): string {
   }
 }
 
+interface RuleLayers {
+  critical: string[];
+  important: string[];
+  preferences: string[];
+}
+
 interface ProjectConfig {
   rawContent?: string;
   type?: string;
@@ -127,28 +104,22 @@ interface ProjectConfig {
     test?: string;
   };
   constraints?: string[];
+  ruleLayers?: RuleLayers;
 }
 
 export function getSystemPrompt(projectConfig?: ProjectConfig, skillsMetadata?: string, workspacePath?: string): string {
-  let prompt = SYSTEM_PROMPT;
+  let prompt = '';
 
-  // Bootstrap skill: using-superpowers (自动注入，指导 AI 如何使用 skills)
-  const bootstrapContent = loadBootstrapSkill();
-  if (bootstrapContent) {
-    prompt += '\n\n## How to Use Skills\n' + bootstrapContent;
-  }
-
-  // Project context - inject full AGENTS.md content
+  // 1. Project Guidelines - 最高优先级（用户指令）
   if (projectConfig) {
-    // Inject raw AGENTS.md content as project guidelines
     if (projectConfig.rawContent) {
-      prompt += '\n\n## Project Guidelines (from AGENTS.md)\n' + projectConfig.rawContent;
+      prompt += '## Project Guidelines (from AGENTS.md) - Highest Priority\n' + projectConfig.rawContent + '\n\n';
     } else {
       // Fallback: compact format if no raw content
       const parts = [projectConfig.type];
       if (projectConfig.language) parts.push(projectConfig.language);
       if (projectConfig.framework) parts.push(projectConfig.framework);
-      prompt += `\nProject: ${parts.join(' | ')}`;
+      prompt += `## Project Guidelines\nProject: ${parts.join(' | ')}`;
 
       if (projectConfig.commands?.build || projectConfig.commands?.test) {
         prompt += `\nCommands: build=${projectConfig.commands.build || 'N/A'}, test=${projectConfig.commands.test || 'N/A'}`;
@@ -157,15 +128,68 @@ export function getSystemPrompt(projectConfig?: ProjectConfig, skillsMetadata?: 
       if (projectConfig.constraints && projectConfig.constraints.length > 0) {
         prompt += `\nConstraints: ${projectConfig.constraints.slice(0, 3).join(', ')}`;
       }
+      prompt += '\n\n';
+    }
+    
+    // Inject rule layers if present
+    if (projectConfig.ruleLayers) {
+      const { critical, important, preferences } = projectConfig.ruleLayers;
+      if (critical.length > 0 || important.length > 0 || preferences.length > 0) {
+        prompt += '## Rule Layers (from AGENTS.md)\n\n';
+        
+        if (critical.length > 0) {
+          prompt += '### CRITICAL Rules (Must Follow)\n';
+          critical.forEach(rule => prompt += `- ${rule}\n`);
+          prompt += '\n';
+        }
+        
+        if (important.length > 0) {
+          prompt += '### IMPORTANT Rules (Should Follow)\n';
+          important.forEach(rule => prompt += `- ${rule}\n`);
+          prompt += '\n';
+        }
+        
+        if (preferences.length > 0) {
+          prompt += '### Preferences (Nice to Have)\n';
+          preferences.forEach(rule => prompt += `- ${rule}\n`);
+          prompt += '\n';
+        }
+      }
     }
   }
 
-  // Project learnings from .spica/learnings/
+  // 2. Bootstrap skill: using-superpowers - 次高优先级
+  const bootstrapContent = loadBootstrapSkill();
+  if (bootstrapContent) {
+    prompt += '## How to Use Skills\n' + bootstrapContent + '\n\n';
+  }
+
+  // 3. 基础身份 - 最低优先级
+  prompt += SYSTEM_PROMPT;
+
+  // 4. File-Scoped Commands 指导 - 最低优先级
+  prompt += `
+## File-Scoped Commands (Preferred - Fast)
+
+Always prefer file-scoped commands over project-wide. Token savings: 97%.
+
+| Operation | File-Scoped (Fast) | Project-Wide (Slow) |
+|-----------|-------------------|--------------------|
+| Type check | \`npx tsc --noEmit <file>\` (3s) | \`npm run typecheck\` (2min) |
+| Lint | \`npx eslint <file>\` (1s) | \`npm run lint\` (30s) |
+| Test | \`npm run test -- <file>\` (2s) | \`npm run test\` (4min) |
+
+**Project-Wide Commands (Ask First)**:
+- \`npm run build\` - ASK BEFORE RUNNING
+- Full test suite - ASK BEFORE RUNNING
+`;
+
+  // 5. Project learnings from .spica/learnings/
   if (workspacePath) {
     prompt += loadLearnings(workspacePath);
   }
 
-  // Skills metadata injection
+  // 6. Skills metadata - 仅列出技能名称
   if (skillsMetadata) {
     prompt += buildSkillsSection(skillsMetadata);
   }
