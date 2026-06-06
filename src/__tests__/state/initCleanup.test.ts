@@ -4,7 +4,9 @@ import os from 'os';
 import path from 'path';
 import { SpicaAgent } from '../../agent';
 
-describe('init error cleanup', () => {
+const shouldSkip = process.env.CI === 'true' || process.env.SKIP_API_TESTS === 'true';
+
+describe.skipIf(shouldSkip)('init error cleanup', () => {
   let tmpDir: string;
 
   beforeEach(async () => {

@@ -13,6 +13,7 @@ import {
 } from '../../tools/index';
 
 const TEST_DIR = join(process.cwd(), 'test-tools-temp');
+const isWindows = process.platform === 'win32';
 
 describe('Tools System Core Tests', () => {
   // 所有工具定义
@@ -307,7 +308,7 @@ describe('Tools System Core Tests', () => {
       expect(result.output).toContain('Hello');
     });
 
-    it('should execute command with working directory', async () => {
+    it.skipIf(isWindows)('should execute command with working directory', async () => {
       const result = await executeTool('bash', {
         command: 'pwd',
       });

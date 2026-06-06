@@ -3,13 +3,18 @@
  *
  * 测试目标：
  * 1. 全角字符输入和光标定位
- * 2. 箭头键移动光标
+ * 2. 箄头键移动光标
  * 3. 粘贴操作
  * 4. 输入框操作保护
+ *
+ * Note: node-pty may not work correctly on Windows CI
  */
 
 import * as pty from 'node-pty';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+
+const isWindows = process.platform === 'win32';
+const shouldSkipPty = isWindows && process.env.CI === 'true';
 
 // 键盘输入序列
 const Keys = {
@@ -136,7 +141,7 @@ function extractInputContent(output: string): string[] {
     .map(line => line.slice(2).trim());
 }
 
-describe('TUI Automated Tests with PTY', () => {
+describe.skipIf(shouldSkipPty)('TUI Automated Tests with PTY', () => {
   const scriptPath = 'src/cli/ui/__tests__/tuiStateTest.ts';
 
   describe('Basic Input Tests', () => {

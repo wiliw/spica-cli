@@ -4,6 +4,8 @@ import fs from 'fs-extra';
 import { join } from 'path';
 import os from 'os';
 
+const isWindows = process.platform === 'win32';
+
 describe('Syntax Check Feature', () => {
   let tempDir: string;
 
@@ -117,7 +119,7 @@ def add(a, b):
     });
   });
 
-  describe('Shell script syntax check', () => {
+  describe.skipIf(isWindows)('Shell script syntax check', () => {
     it('should detect shell syntax errors', async () => {
       const invalidSh = `
 #!/bin/bash
