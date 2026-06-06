@@ -18,6 +18,7 @@ import { executeTool, setWorkspace } from '../tools/index';
 import { isFullWidth, getStringWidth } from '../cli/ui/stringWidth';
 
 const _TIMEOUT = 30000;
+const shouldSkipApiTests = process.env.CI === 'true' || process.env.SKIP_API_TESTS === 'true';
 
 // 测试工作目录
 const TEST_DIR = path.join(os.tmpdir(), 'spica-test-' + Date.now());
@@ -39,12 +40,12 @@ describe('CLI Commands', () => {
     expect(result.stdout).toContain('Examples:');
   });
 
-  it('should list providers', async () => {
+  it.skipIf(shouldSkipApiTests)('should list providers', async () => {
     const result = await execa('./bin/spica', ['list']);
     expect(result.stdout).toMatch(/●|○/);  // provider marker
   });
 
-  it('should show provider details', async () => {
+  it.skipIf(shouldSkipApiTests)('should show provider details', async () => {
     const result = await execa('./bin/spica', ['show', 'aliyunglm5']);
     expect(result.stdout).toContain('name:');
     expect(result.stdout).toContain('url:');
