@@ -649,3 +649,36 @@ git commit -m "docs: update README with rule layer feature"
 - `docs/superpowers/plans/2026-05-12-tui-improvements.md` - Complex fix plan
 
 **Decision**: TUI fixes are complex (6 phases, 19 tasks) and deferred to separate implementation. Current plan focuses on spec gap fixes only.
+## ✅ Implementation Complete
+
+**Commits:**
+- Task 1: parseRuleLayers tests
+- Task 2: 7f346c9 - integrate parseRuleLayers into loadProjectConfig
+- Task 3: f8fb3c3 - inject rule layers into system prompt
+- Task 4: 8b763c3 - unify ProjectConfig interface
+- Task 5: 5a116c7 - use shared ProjectConfig in system.ts
+- Fix: 7cd796c - correct ES module imports
+
+**Integration Test Results:**
+```
+✅ Config loaded: true
+✅ Has ruleLayers: true
+  CRITICAL: 2 rules
+  IMPORTANT: 2 rules
+  PREFERENCES: 2 rules
+✅ Prompt has CRITICAL: true
+✅ Prompt has IMPORTANT: true
+✅ Prompt has Preferences: true
+```
+
+**Key Changes:**
+1. `parseRuleLayers()` - Extracts CRITICAL/IMPORTANT/PREF rules from AGENTS.md
+2. `loadProjectConfig()` - Now returns ruleLayers in ProjectConfig
+3. `getSystemPrompt()` - Injects layered rules with clear priority sections
+4. Unified `ProjectConfig` interface across codebase
+5. Fixed ES module imports for fs/fs-extra
+
+**Impact:**
+- AGENTS.md rules now automatically injected into system prompt
+- Clear priority levels help agent understand rule importance
+- Backward compatible - works with existing AGENTS.md files
