@@ -5,7 +5,8 @@
   "description": "AI coding agent CLI with three-step workflow",
   "main": "dist/index.js",
   "bin": {
-    "spica": "bin/spica"
+    "spica": "bin/spica",
+    "spica.cmd": "bin/spica.cmd"
   },
   "scripts": {
     "dev": "tsx src/index.ts",

@@ -29,24 +29,27 @@ describe('CLI Commands', () => {
     await execa('npm', ['run', 'build']);
   });
 
+  // Use npx tsx for cross-platform compatibility (Windows doesn't support ./bin/spica shebang)
+  const runCli = (args: string[]) => execa('npx', ['tsx', 'src/index.ts', ...args]);
+
   it('should show version', async () => {
-    const result = await execa('./bin/spica', ['--version']);
+    const result = await runCli(['--version']);
     expect(result.stdout).toContain('1.0.0');
   });
 
   it('should show help', async () => {
-    const result = await execa('./bin/spica', ['--help']);
+    const result = await runCli(['--help']);
     expect(result.stdout).toContain('AI coding assistant');
     expect(result.stdout).toContain('Examples:');
   });
 
   it.skipIf(shouldSkipApiTests)('should list providers', async () => {
-    const result = await execa('./bin/spica', ['list']);
+    const result = await runCli(['list']);
     expect(result.stdout).toMatch(/●|○/);  // provider marker
   });
 
   it.skipIf(shouldSkipApiTests)('should show provider details', async () => {
-    const result = await execa('./bin/spica', ['show', 'aliyunglm5']);
+    const result = await runCli(['show', 'aliyunglm5']);
     expect(result.stdout).toContain('name:');
     expect(result.stdout).toContain('url:');
     expect(result.stdout).toContain('model:');
