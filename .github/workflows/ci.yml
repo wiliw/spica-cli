@@ -30,7 +30,6 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Lint
-        if: ${{ matrix.node-version >= 20 }}
         run: npm run lint
 
       - name: Run tests

@@ -215,7 +215,7 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
 
       let fullContent = '';
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- OpenAI tool_calls structure is complex
-      let toolCalls: any[] = [];
+      const toolCalls: any[] = [];
       let hasToolCalls = false;
 
       for await (const chunk of stream) {
@@ -381,7 +381,7 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
       }, { signal });
 
       let fullContent = '';
-      let toolCalls: any[] = [];
+      const toolCalls: any[] = [];
       let hasToolCalls = false;
 
       for await (const chunk of stream) {
@@ -517,7 +517,7 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
       }, { signal });
 
       let fullContent = '';
-      let toolCalls: any[] = [];
+      const toolCalls: any[] = [];
       let hasToolCalls = false;
 
       for await (const chunk of stream) {
