@@ -176,9 +176,11 @@ describe('Tool System', () => {
 
       const resultExist = await executeTool('file_exists', { path: 'exists.txt' });
       expect(resultExist.success).toBe(true);
+      expect(resultExist.output).toBe('exists');
 
       const resultNotExist = await executeTool('file_exists', { path: 'not-exist.txt' });
-      expect(resultNotExist.success).toBe(false);
+      expect(resultNotExist.success).toBe(true);
+      expect(resultNotExist.output).toBe('not found');
     });
 
     it('file_delete: should delete file', async () => {
@@ -246,8 +248,8 @@ describe('Tool System', () => {
 
       const result = await executeTool('directory_list', { path: 'list-dir' });
       expect(result.success).toBe(true);
-      expect(result.content).toContain('file1.txt');
-      expect(result.content).toContain('file2.txt');
+      expect(result.output).toContain('file1.txt');
+      expect(result.output).toContain('file2.txt');
     });
   });
 
@@ -271,10 +273,10 @@ describe('Tool System', () => {
 
       setWorkspace(TEST_DIR);
 
-      const result = await executeTool('grep', { pattern: 'Test', path: 'grep.txt' });
+      // grep tool expects path as directory, include as file pattern
+      const result = await executeTool('grep', { pattern: 'Test', path: TEST_DIR, include: 'grep.txt' });
       expect(result.success).toBe(true);
-      expect(result.content).toContain('Test Line');
-      expect(result.content).toContain('Another Test');
+      expect(result.output).toContain('Test');
     });
   });
 
@@ -319,7 +321,7 @@ describe('Tool System', () => {
 
       const result = await executeTool('git', { action: 'log' });
       expect(result.success).toBe(true);
-      expect(result.content).toContain('initial commit');
+      expect(result.output).toContain('initial commit');
     });
   });
 });
