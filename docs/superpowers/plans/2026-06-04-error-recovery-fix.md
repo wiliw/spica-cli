@@ -171,3 +171,59 @@ agent.on('blocked', (data) => {
 ## Related
 - Superpowers: `subagent-driven-development/implementer-prompt.md`
 - Superpowers: `systematic-debugging/SKILL.md`
+## ✅ Implementation Complete
+
+**Commits:**
+- 8046417: implement error recovery mechanism
+
+**Changes:**
+
+### 1. Critical Bug Fix (src/agent.ts)
+```typescript
+// Before
+if (event === 'tool_stuck_warning') {
+  this.abortTool(tc.name);
+  this.interruptFlag = true;  // ❌ 中断整个agent
+}
+
+// After
+if (event === 'tool_stuck_warning') {
+  this.abortTool(tc.name);
+  // 不设置interruptFlag，让工具自己处理恢复
+  // bash工具已有autoRetry机制，会返回结果继续执行
+}
+```
+
+**Impact**: Bash超时后自动以detached模式重试，agent继续执行
+
+### 2. Enhanced Error Suggestions (src/agent.ts)
+新增工具错误恢复建议：
+- file_edit: 文本未找到时建议先读取文件
+- test: 测试超时时建议运行单个测试文件
+- lint: lint错误时建议逐个修复
+- directory_list/file_delete/copy/move: 操作失败时提供具体建议
+
+所有建议都包含"Try:"开头的替代方案
+
+### 3. BLOCKED Status Reporting (src/agent.ts)
+新增reportBlocked方法：
+- 发送agent_blocked事件
+- 提供完整上下文（任务、尝试、失败、错误）
+- 提供建议列表
+
+### 4. CLI Display (src/cli/events.ts)
+新增agent_blocked事件处理：
+- 显示[BLOCKED]状态
+- 显示任务信息
+- 显示尝试和失败的工具
+- 显示建议列表
+
+## Testing Results
+- ✅ TypeScript编译通过
+- ✅ Build成功
+- ✅ Agent imports正常
+
+## Next Steps
+建议在runLoop中添加BLOCKED检测逻辑：
+- 连续3次工具失败时触发BLOCKED
+- LLM连续空响应时触发BLOCKED
