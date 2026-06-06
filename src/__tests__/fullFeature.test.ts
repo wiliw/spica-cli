@@ -305,6 +305,9 @@ describe('Tool System', () => {
       await fs.ensureDir(path.join(TEST_DIR, 'git-test'));
       const git = require('simple-git')(path.join(TEST_DIR, 'git-test'));
       await git.init();
+      // CI 环境需要配置 git 用户身份
+      await git.addConfig('user.name', 'Test User', false, 'local');
+      await git.addConfig('user.email', 'test@test.com', false, 'local');
       await fs.writeFile(path.join(TEST_DIR, 'git-test', 'file.txt'), 'initial');
       await git.add('.');
       await git.commit('initial commit');
