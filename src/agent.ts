@@ -1,22 +1,18 @@
 import { LLMClient } from './llm/LLMClient';
 import { TokenCounter } from './llm/TokenCounter';
-import { executeTool, getAllToolDefinitions, setWorkspace, getWorkspace } from './tools/index';
-import { initMCP, shutdownMCP } from './mcp/client';
-import { initSkills, listSkills, getSkill, buildSkillPrompt } from './skills/index';
+import { executeTool, getAllToolDefinitions, setWorkspace } from './tools/index';
+import { initMCP } from './mcp/client';
+import { initSkills, listSkills } from './skills/index';
 import { getProviderConfig } from './utils/settings';
 import { getSystemPrompt, getCompactPrompt } from './prompts/system';
 import { loadProjectConfig as loadAgentsConfig, autoDetectProject, createAgentsMd } from './utils/projectConfig';
 import { SkillDefinition } from './utils/settings';
 import { cleanMessages } from './utils/messageCleaner';
-import { loadProjectState, saveProjectState, updateProjectTodos, loadProjectContext, saveProjectContext, ensureProjectDir } from './storage/projectState';
+import { loadProjectState, saveProjectState, updateProjectTodos, saveProjectContext, ensureProjectDir } from './storage/projectState';
 import { loadSession } from './utils/session';
 import { runPreHooks, runPostHooks } from './hooks';
-import { COLORS } from './cli/ui/colors';
 import { createCheckpoint, listCheckpoints, type CheckpointMeta } from './storage/checkpointManager';
 import { EventEmitter } from 'events';
-import fs from 'fs-extra';
-import * as path from 'path';
-import os from 'os';
 import simpleGit from 'simple-git';
 import type { ChatMessage } from './llm/providers/BaseProvider';
 
@@ -297,7 +293,7 @@ interrupt() {
       }
 
       return meta;
-    } catch (error) {
+    } catch {
       // checkpoint 失败不影响 AI 工作
       this.emit('checkpoint_warning', { error: 'Failed to create checkpoint' });
       return null;
@@ -496,7 +492,7 @@ async init() {
     // 初始化MCP服务器连接
     try {
       await initMCP();
-    } catch (error) {
+    } catch {
       console.log('MCP init skipped (no config or servers unavailable)');
     }
 
@@ -1112,10 +1108,10 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
         : e.includes('Permission denied') ? `Permission denied: ${a.command}. Check permissions or use sudo.`
         : `Execution failed. Check command syntax.`,
       glob: (e, a) => `Search failed. Check pattern: ${a.pattern}`,
-      grep: (e, a) => `Search failed. Check pattern and path.`,
+      grep: (_e, _a) => `Search failed. Check pattern and path.`,
     };
 
-    let baseSuggestion = suggestions[toolName]?.(error, args) || `Tool ${toolName} failed. Check parameters.`;
+    const baseSuggestion = suggestions[toolName]?.(error, args) || `Tool ${toolName} failed. Check parameters.`;
 
     return baseSuggestion;
   }
@@ -1174,7 +1170,7 @@ public async compact(): Promise<void> {
     keepCount = Math.max(minKeep, Math.min(keepCount, Math.max(minKeep + 2, 15), Math.floor(allMessages.length * 0.25)));
 
     const recentMessages = allMessages.slice(-keepCount);
-    const oldMessages = allMessages.slice(0, -keepCount);
+    const _oldMessages = allMessages.slice(0, -keepCount);
 
     // Adaptive truncation: 1% of context window, floor 500 chars
     const maxContentLength = Math.max(500, Math.floor(contextWindow * 0.01));
@@ -1209,7 +1205,7 @@ public async compact(): Promise<void> {
     // 用 LLM 生成摘要（如果还有旧消息）
     // Safety: if kept messages alone exceed 70% of target, reduce until they fit
     const MAX_COMPACT_ITERATIONS = 5;
-    let safetyTruncated = [...truncatedRecent];
+    const safetyTruncated = [...truncatedRecent];
     let safetyTokens = tokenCounter.estimateMessages(safetyTruncated);
     let compactIterations = 0;
 

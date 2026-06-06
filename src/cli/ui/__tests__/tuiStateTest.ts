@@ -1,3 +1,4 @@
+/* eslint-disable no-control-regex, no-useless-escape -- test file with ANSI escape codes */
 /**
  * TUI 状态测试脚本 - 简化版
  */
@@ -43,7 +44,7 @@ function parseInput(str: string): { normalChars: string; ansiSequences: string[]
 
     if (str[i] === '\x1b' || code === 27) {
       let seqEnd = i + 1;
-      while (seqEnd < str.length && str[seqEnd].match(/[A-Za-z0-9\[\;\?]/)) {
+      while (seqEnd < str.length && str[seqEnd].match(/[A-Za-z0-9[;?]/)) {
         seqEnd++;
       }
       if (seqEnd < str.length && str[seqEnd].match(/[A-Za-z]/)) {

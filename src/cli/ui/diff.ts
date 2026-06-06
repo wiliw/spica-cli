@@ -22,8 +22,6 @@ export function computeDiff(oldContent: string, newContent: string): DiffLine[] 
   const newLines = newContent === '' ? [] : newContent.split('\n');
   const diff: DiffLine[] = [];
 
-  const maxLen = Math.max(oldLines.length, newLines.length);
-
   let oldIdx = 0;
   let newIdx = 0;
 

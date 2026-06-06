@@ -1,4 +1,3 @@
-import { COLORS } from './colors';
 import { isFullWidth } from './stringWidth';
 
 const ESC = '\x1b';
@@ -329,6 +328,7 @@ export class ScreenManager {
       
       // 粘贴
       if (data.includes(`${ESC}[200~`)) {
+        // eslint-disable-next-line no-control-regex -- ANSI escape codes for bracketed paste
         const content = data.replace(/\x1b\[200~/g, '').replace(/\x1b\[201~/g, '');
         const graphemes = content.match(/\P{M}\p{M}*/gu) || [];
         const line = this.state.inputBuffer[0];
@@ -475,6 +475,7 @@ export class ScreenManager {
       this.state.cursorInScrollArea = false;
     }
 
+    // eslint-disable-next-line no-control-regex -- ANSI escape codes for bracketed paste
     const content = data.replace(/\x1b\[200~/g, '').replace(/\x1b\[201~/g, '');
     const graphemes = content.match(/\P{M}\p{M}*/gu) || [];
     const line = this.state.inputBuffer[0];

@@ -2,7 +2,6 @@
 // 使用终端标准颜色，跟随用户的终端配色设置
 
 import chalk from 'chalk';
-import readline from 'readline';
 import { padRight, getStringWidth } from './stringWidth';
 
 // 终端标准配色（跟随终端设置）
