@@ -335,7 +335,9 @@ describe('Fullwidth Character Detection', () => {
 });
 
 describe('Command Parsing', () => {
-  const commands = {
+  type CommandResult = { type: string; action?: string; id?: string; name?: string };
+
+  const commands: Record<string, CommandResult> = {
     '/help': { type: 'help' },
     '/h': { type: 'help' },
     '/status': { type: 'status' },
@@ -363,7 +365,7 @@ describe('Command Parsing', () => {
     '/delete abc': { type: 'delete', id: 'abc' },
   };
 
-  function parseCommand(input: string): { type: string; action?: string; id?: string; name?: string } {
+  function parseCommand(input: string): CommandResult {
     const trimmed = input.trim();
     if (!trimmed.startsWith('/')) {
       return { type: 'unknown' };

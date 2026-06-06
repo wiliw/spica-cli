@@ -131,7 +131,7 @@ describe('ScreenManager FullWidth Cursor', () => {
       // 5个中文字符 = 10 显示宽度，刚好一行
       screen.state.inputBuffer[0] = '你好世界吗';
 
-      const lines = screen.calcInputLines();
+      const lines = (screen as any).calcInputLines();
       // 加上 '> ' 前缀（2宽度），总共 12 宽度，需要 2 行
       expect(lines).toBeGreaterThanOrEqual(1);
     });
