@@ -2,7 +2,8 @@
 // AGENTS.md is prose that agents read directly, NOT a machine-parseable data format.
 // We only auto-detect project info as fallback when no AGENTS.md exists.
 
-import * as fs from 'fs-extra';
+import { existsSync, readFileSync } from 'fs';
+import { writeFile } from 'fs-extra';
 import { join } from 'path';
 
 export interface ProjectConfig {
@@ -68,8 +69,8 @@ const CONFIG_FILE = 'AGENTS.md';
 // Also parse rule layers for structured injection into system prompt
 export function loadProjectConfig(workspace: string): ProjectConfig | null {
   const filepath = join(workspace, CONFIG_FILE);
-  if (fs.existsSync(filepath)) {
-    const content = fs.readFileSync(filepath, 'utf-8');
+  if (existsSync(filepath)) {
+    const content = readFileSync(filepath, 'utf-8');
     const ruleLayers = parseRuleLayers(content);
     return { 
       rawContent: content,
@@ -84,9 +85,9 @@ export function autoDetectProject(workspace: string): ProjectConfig {
   const config: ProjectConfig = {};
 
   const pkgPath = join(workspace, 'package.json');
-  if (fs.existsSync(pkgPath)) {
+  if (existsSync(pkgPath)) {
     try {
-      const pkg = fs.readJsonSync(pkgPath);
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
       config.type = 'Node.js';
       config.language = pkg.devDependencies?.typescript ? 'TypeScript' : 'JavaScript';
       config.commands = {
@@ -105,17 +106,17 @@ export function autoDetectProject(workspace: string): ProjectConfig {
   }
 
   const goModPath = join(workspace, 'go.mod');
-  if (fs.existsSync(goModPath)) {
+  if (existsSync(goModPath)) {
     return { type: 'Go', language: 'Go', commands: { build: 'go build', test: 'go test ./...', dev: 'go run .' } };
   }
 
   const pyprojectPath = join(workspace, 'pyproject.toml');
-  if (fs.existsSync(pyprojectPath) || fs.existsSync(join(workspace, 'requirements.txt'))) {
+  if (existsSync(pyprojectPath) || existsSync(join(workspace, 'requirements.txt'))) {
     return { type: 'Python', language: 'Python', commands: { test: 'pytest', dev: 'python main.py' } };
   }
 
   const cargoPath = join(workspace, 'Cargo.toml');
-  if (fs.existsSync(cargoPath)) {
+  if (existsSync(cargoPath)) {
     return { type: 'Rust', language: 'Rust', commands: { build: 'cargo build', test: 'cargo test', dev: 'cargo run' } };
   }
 
@@ -153,6 +154,7 @@ export async function createAgentsMd(workspace: string): Promise<string> {
   const config = autoDetectProject(workspace);
   const content = generateAgentsMd(config);
   const filepath = join(workspace, CONFIG_FILE);
-  await fs.writeFile(filepath, content);
+  const { writeFile } = await import('fs-extra');
+  await writeFile(filepath, content);
   return filepath;
 }
