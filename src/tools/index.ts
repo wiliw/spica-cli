@@ -1144,7 +1144,7 @@ Write-Output $proc.Id;
                 try {
                   // Linux: 杀死整个进程组（负PID表示进程组）
                   process.kill(-bashProcess.pid, 'SIGKILL');
-                } catch (e: any) {
+                } catch {
                   // 进程组杀死失败时，尝试杀死单个进程
                   try { process.kill(bashProcess.pid, 'SIGKILL'); } catch {}
                   // Windows 不支持进程组，直接杀死
@@ -2306,10 +2306,11 @@ function resolvePath(path: string): string {
         try {
           realParent = fs.realpathSync(pathResolve(WORKSPACE));
           if (isOutside(realParent)) {
+            // eslint-disable-next-line preserve-caught-error -- manual validation error, not rethrowing caught error
             throw new Error(`Access denied: path "${path}" is outside workspace`);
           }
-        } catch {
-          throw new Error(`Access denied: cannot resolve path "${path}"`);
+        } catch (resolveErr) {
+          throw new Error(`Access denied: cannot resolve path "${path}"`, { cause: resolveErr });
         }
       }
 

@@ -8,7 +8,7 @@
  * 4. 核心功能（中断、压缩、Checkpoint）
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as pty from 'node-pty';
 import { execa } from 'execa';
 import fs from 'fs-extra';
@@ -17,7 +17,7 @@ import os from 'os';
 import { executeTool, setWorkspace } from '../tools/index';
 import { isFullWidth, getStringWidth } from '../cli/ui/stringWidth';
 
-const TIMEOUT = 30000;
+const _TIMEOUT = 30000;
 
 // 测试工作目录
 const TEST_DIR = path.join(os.tmpdir(), 'spica-test-' + Date.now());
@@ -300,7 +300,7 @@ describe('Tool System', () => {
     beforeAll(async () => {
       // 创建测试 git 仓库
       await fs.ensureDir(path.join(TEST_DIR, 'git-test'));
-      const git = require('simple-git')(path.join(TEST_DIR, 'git-test'));
+      const git = await import('simple-git').then(m => m.default(path.join(TEST_DIR, 'git-test')));
       await git.init();
       await fs.writeFile(path.join(TEST_DIR, 'git-test', 'file.txt'), 'initial');
       await git.add('.');
