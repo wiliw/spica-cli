@@ -95,8 +95,8 @@ on('tool_result', (data: ToolResultData) => {
   const boxWidth = Math.max(statusLabel.length + 4, 20);
   screen.appendScroll(colorFn(`└─ ${statusLabel} ${'─'.repeat(boxWidth - statusLabel.length - 4)}┘\n`));
 
-  // Diff 预览 - 两种模式都显示（文件编辑时）
-  if (data.diff && ['file_write', 'file_edit', 'file_multi_edit'].includes(data.name)) {
+  // Diff 预览 - 只在 verbose 模式显示
+  if (state.isVerboseMode() && data.diff && ['file_write', 'file_edit', 'file_multi_edit'].includes(data.name)) {
     screen.appendScroll(COLORS.muted(`${data.diff}\n`));
   }
 
