@@ -229,23 +229,22 @@ export class ScreenManager {
 
   // 流式输出期间刷新输入框
   private refreshInputDuringStreaming(): void {
-    if (this.state.pendingInputRefresh) {
-      // 保存当前光标位置状态
-      const savedCursorInScroll = this.state.cursorInScrollArea;
+    // 保存当前光标位置状态
+    const savedCursorInScroll = this.state.cursorInScrollArea;
 
-      // 切换到输入框区域刷新
-      this.state.cursorInScrollArea = false;
-      this.refreshInput();
+    // 切换到输入框区域刷新（无论是否有pendingInputRefresh）
+    this.state.cursorInScrollArea = false;
+    this.refreshInput();
 
-      // 返回scroll区域继续输出
-      this.state.cursorInScrollArea = savedCursorInScroll;
-      if (savedCursorInScroll) {
-        writeStdout(`${ESC}[?25l`);
-        writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
-      }
-
-      this.state.pendingInputRefresh = false;
+    // 返回scroll区域继续输出
+    this.state.cursorInScrollArea = savedCursorInScroll;
+    if (savedCursorInScroll) {
+      writeStdout(`${ESC}[?25l`);
+      writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
     }
+
+    // 清除pending标记
+    this.state.pendingInputRefresh = false;
   }
 
   refreshStatus(): void {

@@ -995,7 +995,8 @@ export function setupAgentEvents(
         : todo.status === 'in_progress'
           ? COLORS.primary
           : COLORS.muted;
-      screen.appendScroll(colorFn(`  ${icon} ${truncateToWidth(todo.content, 50)}\n`));
+      // 截断到80字符，显示更多内容
+      screen.appendScroll(colorFn(`  ${icon} ${truncateToWidth(todo.content, 80)}\n`));
     });
     if (todos.length > 5) {
       screen.appendScroll(COLORS.muted(`  ... (${todos.length - 5} more)\n`));
