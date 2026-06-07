@@ -500,30 +500,71 @@ function displayToolResult(record: ToolCallRecord, data: ToolResultData): void {
   const icon = data.success ? COLORS.success('✓') : COLORS.error('✗');
   const summary = formatToolSummary(data);
 
-  // 简洁显示：file_write index.tsx → 373 lines ✓ 4.8s（不显示序号）
-  screen.appendScroll(COLORS.tool(`${record.name}`));
+  if (state.isVerboseMode()) {
+    // Verbose模式：详细显示
+    screen.appendScroll(COLORS.tool(`\n${record.name}`));
 
-  // 显示文件名（完整显示，不截断）
-  const filePath = record.args.path as string;
-  if (filePath) {
-    const filename = filePath.split('/').pop() || filePath;
-    screen.appendScroll(COLORS.file(` ${filename}`));
-  }
-
-  screen.appendScroll(COLORS.muted(` → `));
-  screen.appendScroll(COLORS.primary(`${summary}`));
-  screen.appendScroll(` ${icon}`);
-  screen.appendScroll(COLORS.muted(` ${elapsed}\n`));
-
-  // Verbose模式：显示详细输出（可选）
-  if (state.isVerboseMode() && data.output && data.output.length > 100) {
-    const outputPreview = data.output.split('\n').slice(0, 5);
-    for (const line of outputPreview) {
-      screen.appendScroll(COLORS.muted(`  ${line.slice(0, 100)}\n`));
+    // 显示文件名（完整路径）
+    const filePath = record.args.path as string;
+    if (filePath) {
+      screen.appendScroll(COLORS.file(` ${filePath}`));
     }
-    if (data.output.split('\n').length > 5) {
-      screen.appendScroll(COLORS.muted(`  ... (${data.output.split('\n').length - 5} more)\n`));
+
+    // 显示命令（如果是bash）
+    if (record.name === 'bash') {
+      const cmd = record.args.command as string;
+      if (cmd) {
+        screen.appendScroll(COLORS.muted(`\n  cmd: ${cmd.slice(0, 200)}\n`));
+      }
     }
+
+    screen.appendScroll(COLORS.muted(` → `));
+    screen.appendScroll(COLORS.primary(`${summary}`));
+    screen.appendScroll(` ${icon}`);
+    screen.appendScroll(COLORS.muted(` ${elapsed}\n`));
+
+    // 显示完整输出（不限行数）
+    const output = data.output || data.error || '';
+    if (output) {
+      screen.appendScroll(COLORS.muted(`\n  Output:\n`));
+      const outputLines = output.split('\n').slice(0, 20);
+      for (const line of outputLines) {
+        screen.appendScroll(COLORS.muted(`  ${line}\n`));
+      }
+      if (output.split('\n').length > 20) {
+        screen.appendScroll(COLORS.muted(`  ... (${output.split('\n').length - 20} more lines)\n`));
+      }
+    }
+
+    // 显示diff（如果有）
+    if (data.diff) {
+      screen.appendScroll(COLORS.muted(`\n  Diff:\n`));
+      const diffLines = data.diff.split('\n').slice(0, 15);
+      for (const line of diffLines) {
+        if (line.startsWith('+')) {
+          screen.appendScroll(COLORS.diffAdd(`  ${line}\n`));
+        } else if (line.startsWith('-')) {
+          screen.appendScroll(COLORS.diffRemove(`  ${line}\n`));
+        } else {
+          screen.appendScroll(COLORS.muted(`  ${line}\n`));
+        }
+      }
+    }
+  } else {
+    // Compact模式：简洁显示
+    screen.appendScroll(COLORS.tool(`${record.name}`));
+
+    // 显示文件名（只显示basename）
+    const filePath = record.args.path as string;
+    if (filePath) {
+      const filename = filePath.split('/').pop() || filePath;
+      screen.appendScroll(COLORS.file(` ${filename}`));
+    }
+
+    screen.appendScroll(COLORS.muted(` → `));
+    screen.appendScroll(COLORS.primary(`${summary}`));
+    screen.appendScroll(` ${icon}`);
+    screen.appendScroll(COLORS.muted(` ${elapsed}\n`));
   }
 }
 
@@ -660,19 +701,19 @@ export function setupAgentEvents(
     if (!reasoningStarted) {
       reasoningStarted = true;
       justSwitchedFromReasoning = false;
-      // 启动thinking动画
-      screen.startThinkingAnimation();
+      // compact模式：启动thinking动画
+      if (!state.isVerboseMode()) {
+        screen.startThinkingAnimation();
+      }
       if (!state.isStreamingOutput()) {
         state.setStreamingOutput(true);
         screen.setStreaming(true);
       }
     }
 
-    // verbose 模式下显示完整 reasoning
+    // verbose 模式下显示完整 reasoning（使用行缓冲）
     if (state.isVerboseMode()) {
-      // 停止动画，显示详细内容
-      screen.clearThinkingAnimation();
-      screen.appendScroll(COLORS.reasoning(data.content));
+      screen.appendStreamChunk(COLORS.reasoning(data.content));
     }
   });
 
