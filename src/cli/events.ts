@@ -213,6 +213,114 @@ function formatArgs(args: Record<string, unknown>): string {
   return `(${parts.join(', ')})`;
 }
 
+// 工具摘要辅助函数
+function countDiffLines(text: string, prefix: '+' | '-'): number {
+  return text.split('\n').filter(l => l.startsWith(prefix) && !l.startsWith(prefix + prefix)).length;
+}
+
+function countMatches(output: string): number {
+  const match = output.match(/(\d+)\s+matches/i) || output.match(/Found\s+(\d+)/i);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+function countFiles(output: string): number {
+  const lines = output.split('\n').filter(l => l.trim() && !l.includes('found'));
+  return lines.length;
+}
+
+function countTestPassed(output: string): number {
+  const match = output.match(/(\d+)\s+passed/i) || output.match(/✓\s+(\d+)/);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+function countTestFailed(output: string): number {
+  const match = output.match(/(\d+)\s+failed/i) || output.match(/✗\s+(\d+)/);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+function countLintErrors(output: string): number {
+  const match = output.match(/(\d+)\s+errors/i) || output.match(/(\d+)\s+problems/i);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+function countAgents(output: string): number {
+  const match = output.match(/(\d+)\s+agents/i) || output.match(/(\d+)\s+tasks/i);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+function formatToolSummary(data: { name: string; success: boolean; output?: string; error?: string; content?: string }): string {
+  if (!data.success) {
+    const errorMsg = data.error ? data.error.slice(0, 50) : '';
+    return errorMsg ? ` (${errorMsg})` : '';
+  }
+
+  const name = data.name;
+  const output = data.output || '';
+
+  switch (name) {
+    case 'file_read': {
+      const lines = output.split('\n').length;
+      return ` (${lines} lines)`;
+    }
+    case 'file_write':
+    case 'file_edit':
+    case 'file_multi_edit': {
+      const added = countDiffLines(output, '+');
+      const removed = countDiffLines(output, '-');
+      if (added > 0 && removed > 0) {
+        return ` (+${added}/-${removed} lines)`;
+      } else if (added > 0) {
+        return ` (+${added} lines)`;
+      } else if (removed > 0) {
+        return ` (-${removed} lines)`;
+      }
+      return '';
+    }
+    case 'bash': {
+      const bashLines = output.split('\n').filter(l => l.trim()).length;
+      const timeMatch = output.match(/\((\d+\.?\d*)s\)/);
+      const time = timeMatch ? timeMatch[1] : '';
+      return time ? ` (${bashLines} lines, ${time}s)` : ` (${bashLines} lines)`;
+    }
+    case 'grep': {
+      const matchCount = countMatches(output);
+      return matchCount > 0 ? ` → ${matchCount} matches` : '';
+    }
+    case 'glob': {
+      const fileCount = countFiles(output);
+      return fileCount > 0 ? ` → ${fileCount} files` : '';
+    }
+    case 'test': {
+      const passed = countTestPassed(output);
+      const failed = countTestFailed(output);
+      if (failed > 0) {
+        return ` (${passed} passed, ${failed} failed)`;
+      }
+      return passed > 0 ? ` (${passed} passed)` : '';
+    }
+    case 'lint': {
+      const errors = countLintErrors(output);
+      return errors > 0 ? ` (${errors} errors)` : ' (0 errors)';
+    }
+    case 'git':
+      return '';
+    case 'monitor': {
+      const taskId = data.content || '';
+      return taskId ? ` (${taskId.slice(0, 20)})` : '';
+    }
+    case 'task_stop':
+      return '';
+    case 'skill':
+      return '';
+    case 'task': {
+      const agentCount = countAgents(output);
+      return agentCount > 0 ? ` (${agentCount} agents)` : '';
+    }
+    default:
+      return '';
+  }
+}
+
 export function setupAgentEvents(
   agent: SpicaAgent,
   _interactive: boolean = false,
