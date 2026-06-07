@@ -501,20 +501,20 @@ function displayToolResult(record: ToolCallRecord, data: ToolResultData): void {
   const summary = formatToolSummary(data);
 
   if (state.isVerboseMode()) {
-    // Verbose模式：详细显示
+    // Verbose模式：完整显示所有内容
     screen.appendScroll(COLORS.tool(`\n${record.name}`));
 
-    // 显示文件名（完整路径）
+    // 显示完整路径
     const filePath = record.args.path as string;
     if (filePath) {
       screen.appendScroll(COLORS.file(` ${filePath}`));
     }
 
-    // 显示命令（如果是bash）
+    // 显示完整命令（如果是bash）
     if (record.name === 'bash') {
       const cmd = record.args.command as string;
       if (cmd) {
-        screen.appendScroll(COLORS.muted(`\n  cmd: ${cmd.slice(0, 200)}\n`));
+        screen.appendScroll(COLORS.muted(`\n  cmd: ${cmd}\n`));
       }
     }
 
@@ -523,24 +523,19 @@ function displayToolResult(record: ToolCallRecord, data: ToolResultData): void {
     screen.appendScroll(` ${icon}`);
     screen.appendScroll(COLORS.muted(` ${elapsed}\n`));
 
-    // 显示完整输出（不限行数）
+    // 显示完整输出（不截断）
     const output = data.output || data.error || '';
     if (output) {
       screen.appendScroll(COLORS.muted(`\n  Output:\n`));
-      const outputLines = output.split('\n').slice(0, 20);
-      for (const line of outputLines) {
+      for (const line of output.split('\n')) {
         screen.appendScroll(COLORS.muted(`  ${line}\n`));
-      }
-      if (output.split('\n').length > 20) {
-        screen.appendScroll(COLORS.muted(`  ... (${output.split('\n').length - 20} more lines)\n`));
       }
     }
 
-    // 显示diff（如果有）
+    // 显示完整diff（如果有）
     if (data.diff) {
       screen.appendScroll(COLORS.muted(`\n  Diff:\n`));
-      const diffLines = data.diff.split('\n').slice(0, 15);
-      for (const line of diffLines) {
+      for (const line of data.diff.split('\n')) {
         if (line.startsWith('+')) {
           screen.appendScroll(COLORS.diffAdd(`  ${line}\n`));
         } else if (line.startsWith('-')) {
