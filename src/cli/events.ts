@@ -495,13 +495,12 @@ function formatElapsed(ms: number): string {
 // ============================================
 
 // 简洁的工具结果显示（统一格式）
-function displayToolResult(seq: number, record: ToolCallRecord, data: ToolResultData): void {
+function displayToolResult(record: ToolCallRecord, data: ToolResultData): void {
   const elapsed = formatElapsed(calcElapsedMs(record.startTime));
   const icon = data.success ? COLORS.success('✓') : COLORS.error('✗');
   const summary = formatToolSummary(data);
 
-  // 简洁显示：[1] file_write → 373 lines ✓ 4.8s
-  screen.appendScroll(COLORS.muted(`[${seq}] `));
+  // 简洁显示：file_write index.tsx → 373 lines ✓ 4.8s（不显示序号）
   screen.appendScroll(COLORS.tool(`${record.name}`));
 
   // 显示文件名（完整显示，不截断）
@@ -658,7 +657,8 @@ export function setupAgentEvents(
     if (!reasoningStarted) {
       reasoningStarted = true;
       justSwitchedFromReasoning = false;
-      screen.appendScroll(COLORS.muted('\n[thinking]'));
+      // 启动thinking动画
+      screen.startThinkingAnimation();
       if (!state.isStreamingOutput()) {
         state.setStreamingOutput(true);
         screen.setStreaming(true);
@@ -667,6 +667,8 @@ export function setupAgentEvents(
 
     // verbose 模式下显示完整 reasoning
     if (state.isVerboseMode()) {
+      // 停止动画，显示详细内容
+      screen.clearThinkingAnimation();
       screen.appendScroll(COLORS.reasoning(data.content));
     }
   });
@@ -679,6 +681,8 @@ export function setupAgentEvents(
     if (reasoningStarted) {
       screen.appendScroll('\n');
       reasoningStarted = false;
+      // 清除thinking动画
+      screen.clearThinkingAnimation();
     }
 
     // 注册工具调用
@@ -689,8 +693,8 @@ export function setupAgentEvents(
       screen.appendScroll(COLORS.muted(`\n[tools] ${batchToolCount} parallel calls...\n`));
     }
 
-    // 简洁显示：只显示序号和工具名（不显示参数，避免截断）
-    screen.appendScroll(COLORS.muted(`\n[${seq}] ${data.name}`));
+    // 简洁显示：只显示工具名（不显示序号）
+    screen.appendScroll(COLORS.tool(`\n${data.name}`));
     screen.flushOutput();
   });
 
@@ -703,8 +707,8 @@ export function setupAgentEvents(
     const record = matchToolResult(data);
 
     if (record) {
-      // 显示简洁的结果行
-      displayToolResult(record.seq, record, data);
+      // 显示简洁的结果行（不显示序号）
+      displayToolResult(record, data);
     } else {
       // 未找到匹配，显示简单格式
       const icon = data.success ? COLORS.success('✓') : COLORS.error('✗');

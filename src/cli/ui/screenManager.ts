@@ -33,6 +33,10 @@ export class ScreenManager {
   state: ScreenState;
   // 输出缓冲（用于行缓冲输出）
   private outputBuffer: string = '';
+  // Thinking动画状态
+  private thinkingAnimationFrame: number = 0;
+  private thinkingAnimationTimer: NodeJS.Timeout | null = null;
+  private thinkingAnimationFrames: string[] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
   constructor() {
     const height = process.stdout.rows || 24;
@@ -283,6 +287,40 @@ export class ScreenManager {
     this.restoreCursor();
     // 光标留在输入框，不返回scroll区域
     this.state.pendingInputRefresh = false;
+  }
+
+  // Thinking动画相关方法
+  startThinkingAnimation(): void {
+    if (this.thinkingAnimationTimer) return; // 已经在运行
+
+    // 显示初始帧
+    this.showThinkingFrame();
+
+    // 定时更新动画帧
+    this.thinkingAnimationTimer = setInterval(() => {
+      this.thinkingAnimationFrame = (this.thinkingAnimationFrame + 1) % this.thinkingAnimationFrames.length;
+      this.showThinkingFrame();
+    }, 100);
+  }
+
+  private showThinkingFrame(): void {
+    const frame = this.thinkingAnimationFrames[this.thinkingAnimationFrame];
+    // 在scroll区域显示动画
+    writeStdout(`${ESC}[?25l`);
+    writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
+    writeStdout(`${ESC}[2K`); // 清除当前行
+    writeStdout(COLORS.muted(frame + ' thinking'));
+  }
+
+  clearThinkingAnimation(): void {
+    if (this.thinkingAnimationTimer) {
+      clearInterval(this.thinkingAnimationTimer);
+      this.thinkingAnimationTimer = null;
+    }
+    // 清除thinking显示
+    writeStdout(`${ESC}[?25l`);
+    writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
+    writeStdout(`${ESC}[2K`);
   }
 
   refreshStatus(): void {
