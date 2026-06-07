@@ -130,11 +130,13 @@ spica -p <name>    # Use specific provider
 | `glob` | Pattern match files | pattern, path, ignore, maxFiles |
 | `grep` | Search file contents | pattern, path, include, maxLines |
 
-### Shell & Git (3 tools)
+### Shell & Git (5 tools)
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
 | `bash` | Execute shell command | command, timeout, detached, interactive, maxOutputLength |
+| `monitor` | Background monitor task | command, description, timeout, persistent |
+| `task_stop` | Stop background task | task_id |
 | `git` | Git operations | action, args |
 | `workspace` | Change working directory | path |
 
@@ -182,6 +184,32 @@ spica -p <name>    # Use specific provider
 // With timeout
 { "command": "npm test", "timeout": 60000 }
 ```
+
+---
+
+## Monitor Tool
+
+Background task monitoring - streams stdout as events.
+
+```json
+// Start monitoring a log file
+{ "command": "tail -f /var/log/app.log", "description": "Watch app logs" }
+
+// Monitor with custom timeout (default 300s, max 3600s)
+{ "command": "npm run dev", "description": "Dev server", "timeout": 600 }
+
+// Persistent mode (no timeout, runs until stopped)
+{ "command": "npm run dev", "description": "Dev server", "persistent": true }
+
+// Stop a running monitor
+{ "task_id": "monitor_1234567890_abc123" }
+```
+
+Monitor events are streamed via `monitor_event`:
+- `task_id` - Monitor task identifier
+- `description` - Task description
+- `line` - Output line
+- `timestamp` - Event timestamp
 
 ---
 

@@ -729,8 +729,10 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
           this.reasoningReceived = false;  // 重置状态
           this.emit('waiting_for_llm');
           try {
+            // 关键修复：使用 generateFromHistory 而不是 generate('', ...)
+            // generate('', ...) 会添加空 user 消息，破坏对话历史，导致 LLM 混乱
             response = await this.callLLMWithRetry(
-              () => this.llm!.generate('', toolDefinitions),
+              () => this.llm!.generateFromHistory(toolDefinitions),
               'llm_generate_reasoning_continue'
             );
           } catch (retryError: unknown) {
@@ -770,8 +772,10 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
         // 重新调用LLM获取新响应
         this.emit('waiting_for_llm');
         try {
+          // 关键修复：使用 generateFromHistory 而不是 generate('', ...)
+          // 因为上面已经添加了提示消息，不需要再添加空的 user 消息
           response = await this.callLLMWithRetry(
-            () => this.llm!.generate('', toolDefinitions),
+            () => this.llm!.generateFromHistory(toolDefinitions),
             'llm_generate_empty_retry'
           );
         } catch (retryError: unknown) {

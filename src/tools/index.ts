@@ -18,6 +18,9 @@ const isWindows = process.platform === 'win32';
 // WORKSPACE 可以通过 setWorkspace 函数更新
 let WORKSPACE = process.cwd();
 
+// 活动监控任务存储（用于 task_stop）
+let activeMonitors: Map<string, { process: any; command: string; description: string; startTime: number }> | null = null;
+
 // 设置工作目录
 export function setWorkspace(path: string): void {
   WORKSPACE = path;
@@ -251,6 +254,31 @@ name: 'bash',
         autoRetry: { type: 'boolean', description: 'Auto-retry with detached if stuck (default true)' },
       },
       required: ['command'],
+    },
+  },
+  {
+    name: 'monitor',
+    description: 'Start a background monitor that streams events from a long-running script. Each stdout line becomes a notification. Use for watching logs, processes, or polling for changes. Exit ends the watch.',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        command: { type: 'string', description: 'Shell command to run. Each stdout line is an event.' },
+        description: { type: 'string', description: 'Short description shown in notifications' },
+        timeout: { type: 'number', description: 'Timeout in seconds (default 300, max 3600)' },
+        persistent: { type: 'boolean', description: 'Run for session lifetime (no timeout). Stop with task_stop.' },
+      },
+      required: ['command', 'description'],
+    },
+  },
+  {
+    name: 'task_stop',
+    description: 'Stop a running background task (monitor or detached bash).',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        task_id: { type: 'string', description: 'Task ID from monitor or bash (detached mode)' },
+      },
+      required: ['task_id'],
     },
   },
   {
@@ -1281,6 +1309,117 @@ Write-Output $proc.Id;
         } catch (outerError: any) {
           return { success: false, error: outerError.message };
         }
+      }
+
+      case 'monitor': {
+        const command = safeArgs.command as string;
+        const description = safeArgs.description as string || 'Monitoring';
+        const timeoutMs = safeArgs.persistent ? 3600000 : Math.min((safeArgs.timeout || 300) * 1000, 3600000);
+        const persistent = safeArgs.persistent === true;
+
+        // 生成任务 ID
+        const taskId = `monitor_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+        // 使用 spawn 运行命令，持续监控输出
+        const { spawn } = await import('child_process');
+        const monitorProcess = spawn(command, [], {
+          shell: true,
+          cwd: WORKSPACE,
+          detached: false,
+        });
+
+        // 存储活动监控任务（用于 task_stop）
+        if (!activeMonitors) activeMonitors = new Map();
+        activeMonitors.set(taskId, {
+          process: monitorProcess,
+          command,
+          description,
+          startTime: Date.now(),
+        });
+
+        let outputLines: string[] = [];
+        let resolved = false;
+
+        // 处理 stdout - 每行作为事件发送
+        monitorProcess.stdout?.on('data', (data: Buffer) => {
+          const lines = data.toString('utf-8').split('\n').filter(l => l.trim());
+          for (const line of lines) {
+            outputLines.push(line);
+            // 发送监控事件
+            eventCallback?.('monitor_event', {
+              task_id: taskId,
+              description,
+              line,
+              timestamp: Date.now(),
+            });
+          }
+        });
+
+        // 处理 stderr
+        monitorProcess.stderr?.on('data', (data: Buffer) => {
+          const lines = data.toString('utf-8').split('\n').filter(l => l.trim());
+          for (const line of lines) {
+            outputLines.push(`[stderr] ${line}`);
+          }
+        });
+
+        // 设置超时
+        const timeoutId = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            monitorProcess.kill();
+            activeMonitors?.delete(taskId);
+          }
+        }, timeoutMs);
+
+        // 进程结束
+        monitorProcess.on('close', (code) => {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeoutId);
+            activeMonitors?.delete(taskId);
+          }
+        });
+
+        // 进程错误
+        monitorProcess.on('error', (err) => {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeoutId);
+            activeMonitors?.delete(taskId);
+            eventCallback?.('monitor_error', {
+              task_id: taskId,
+              error: err.message,
+            });
+          }
+        });
+
+        // 立即返回任务 ID（监控在后台继续）
+        return {
+          success: true,
+          output: `Monitor started (task_id: ${taskId})\nDescription: ${description}\nCommand: ${command}\nTimeout: ${timeoutMs / 1000}s\nPersistent: ${persistent}\n\nTo stop: task_stop({ task_id: "${taskId}" })`,
+          content: taskId,  // 返回 task_id 方便后续操作
+        };
+      }
+
+      case 'task_stop': {
+        const taskId = safeArgs.task_id as string;
+
+        if (!activeMonitors || !activeMonitors.has(taskId)) {
+          return {
+            success: false,
+            error: `Task not found: ${taskId}. Active tasks: ${activeMonitors ? Array.from(activeMonitors.keys()).join(', ') || 'none' : 'none'}`,
+          };
+        }
+
+        const monitorInfo = activeMonitors.get(taskId)!;
+        monitorInfo.process.kill();
+        activeMonitors.delete(taskId);
+
+        return {
+          success: true,
+          output: `Task stopped: ${taskId}\nDescription: ${monitorInfo.description}\nRan for: ${Math.round((Date.now() - monitorInfo.startTime) / 1000)}s`,
+        };
       }
 
       case 'git': {

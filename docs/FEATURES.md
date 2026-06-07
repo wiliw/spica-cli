@@ -1,6 +1,6 @@
 # Spica CLI 功能清单
 
-## 一、工具系统（28个内置工具）
+## 一、工具系统（30个内置工具）
 
 ### 文件操作（10个）
 | 工具 | 功能 | 关键参数 |
@@ -28,10 +28,12 @@
 | `glob` | 文件模式匹配 | pattern, ignore, maxFiles |
 | `grep` | 内容搜索 | pattern, path, include, **maxLines** |
 
-### Shell 操作（3个）
+### Shell 操作（5个）
 | 工具 | 功能 | 关键参数 |
 |------|------|---------|
 | `bash` | 执行命令 | command, timeout, detached, **interactive**, **maxOutputLength** |
+| `monitor` | 后台监控任务 | command, description, timeout, persistent |
+| `task_stop` | 停止后台任务 | task_id |
 | `git` | Git 操作 | action, args |
 | `workspace` | 工作区管理 | path |
 
@@ -58,11 +60,12 @@
 | `format` | 格式化代码 | path |
 | `file_patch` | 应用补丁 | path, patch |
 
-### 其他（2个）
+### 其他（3个）
 | 工具 | 功能 | 关键参数 |
 |------|------|---------|
 | `question` | 询问用户 | text |
-| `file_patch` | 应用diff补丁 | path, patch |
+| `code_health` | 代码健康度分析 | path, threshold |
+| `test_quality_check` | 测试质量检查 | testFile, threshold |
 
 ---
 
@@ -224,6 +227,8 @@
 - `queue_injected` - 队列输入注入
 - `todos_set` - Todo 设置
 - `sub_agent_start/done/error` - 子agent 事件
+- `monitor_event` - 监控任务输出事件（每行 stdout）
+- `monitor_error` - 监控任务错误事件
 
 ---
 
