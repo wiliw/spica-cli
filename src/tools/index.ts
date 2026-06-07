@@ -430,19 +430,20 @@ name: 'bash',
   },
   {
     name: 'task',
-    description: 'Run parallel subagents (max 3).',
+    description: 'Run parallel subagents (max 3). Each subagent works independently. IMPORTANT: If a subagent fails (returns ✗), you should: 1) Analyze the error message, 2) Retry with a modified prompt or different approach, 3) Or handle the failed task yourself in main agent. Do NOT ignore failed subagents - investigate and resolve them.',
     parameters: {
       type: 'object' as const,
       properties: {
         tasks: {
           type: 'array',
-          description: 'Tasks',
+          description: 'Tasks to run in parallel. Each task should be independent and self-contained.',
           maxItems: 3,
           items: {
             type: 'object',
             properties: {
-              description: { type: 'string', description: 'Short desc' },
-              prompt: { type: 'string', description: 'Full prompt' },
+              description: { type: 'string', description: 'Short desc for display' },
+              prompt: { type: 'string', description: 'Full prompt with clear instructions, context, and expected output format' },
+              type: { type: 'string', enum: ['explore', 'review', 'fix', 'build'], description: 'Subagent type: explore(read-only), review(+lint), fix(+edit), build(full)' },
             },
             required: ['description', 'prompt'],
           },
@@ -2196,6 +2197,26 @@ Write-Output $proc.Id;
             return `✗ ${task.description || task.prompt.slice(0, 30)}: ${err.message}`;
           }
         }));
+
+        // 分析结果，检测失败
+        const failedTasks = results.filter(r => r.startsWith('✗'));
+        const succeededTasks = results.filter(r => r.startsWith('✓'));
+
+        if (failedTasks.length > 0) {
+          // 有失败任务：返回部分成功状态，提示 LLM 处理失败
+          const output = results.join('\n') +
+            `\n\n[WARNING] ${failedTasks.length}/${results.length} subagent(s) failed. ` +
+            `Please analyze the errors above and either:\n` +
+            `1. Retry failed tasks with modified prompts\n` +
+            `2. Try different approaches\n` +
+            `3. Handle failed tasks directly in main agent`;
+
+          return {
+            success: succeededTasks.length > 0, // 有成功则为 true（部分成功）
+            output,
+            error: failedTasks.length > 0 ? `${failedTasks.length} subagent(s) failed` : undefined
+          };
+        }
 
         return { success: true, output: results.join('\n') };
       }

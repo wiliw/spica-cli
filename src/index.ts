@@ -287,8 +287,9 @@ program
           if (result.isInterrupt) {
             if (state.getAgent()) {
               state.getAgent()!.interrupt();
-              isProcessing = false;
-              state.setProcessing(false);
+              // 不要在这里设置 isProcessing = false！
+              // 让 handleInput 自己在 runLoop 结束后设置
+              // 防止竞态：用户中断后立即输入新内容导致两个 runLoop 同时运行
               updateStatusBar();
 
               screen.appendScroll(COLORS.warning("\n[INTERRUPTED]\n"));
