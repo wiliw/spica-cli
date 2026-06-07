@@ -1,5 +1,6 @@
 import { isFullWidth } from './stringWidth';
 import { COLORS } from './colors';
+import { getScrollbackBuffer, ScrollbackBuffer } from './scrollbackBuffer';
 
 const ESC = '\x1b';
 
@@ -24,10 +25,14 @@ export interface ScreenState {
   onVerboseToggle?: () => void;
   // 缓冲的输入，用于流式输出结束后刷新
   pendingInputRefresh: boolean;
+  // 历史缓冲区（用于resize后重绘）
+  scrollbackBuffer: ScrollbackBuffer;
 }
 
 export class ScreenManager {
   state: ScreenState;
+  // 输出缓冲（用于行缓冲输出）
+  private outputBuffer: string = '';
 
   constructor() {
     const height = process.stdout.rows || 24;
@@ -49,6 +54,7 @@ export class ScreenManager {
       isStreaming: false,
       onVerboseToggle: undefined,
       pendingInputRefresh: false,
+      scrollbackBuffer: getScrollbackBuffer(500),
     };
 
     // 监听终端 resize
@@ -66,18 +72,30 @@ export class ScreenManager {
     this.state.terminalWidth = newWidth;
 
     // 重新计算布局
-    this.updateLayout();
+    this.state.inputLines = this.calcInputLines();
+    this.state.statusRow = this.state.terminalHeight - this.state.inputLines - 1;
+    this.state.scrollBottom = this.state.statusRow - 1;
 
     // 清屏
     writeStdout(`${ESC}[2J${ESC}[H`);
 
+    // 设置滚动区域
+    writeStdout(`${ESC}[1;${this.state.scrollBottom}r`);
+
+    // 重绘历史内容（适配新的终端高度）
+    const visibleLines = this.state.scrollBottom;
+    const historyLines = this.state.scrollbackBuffer.getLastNLines(visibleLines);
+
+    for (const line of historyLines) {
+      writeStdout(line + '\n');
+    }
+
     // 显示 resize 提示
-    writeStdout(COLORS.muted('[resize] screen refreshed\n'));
+    writeStdout(COLORS.muted('[resize] history preserved\n'));
 
-    // 刷新输入框
+    // 刷新输入框和状态栏
+    this.drawStatus();
     this.refreshInput();
-
-    // 恢复光标
     this.restoreCursor();
   }
 
@@ -147,6 +165,12 @@ export class ScreenManager {
   setStreaming(streaming: boolean): void {
     this.state.isStreaming = streaming;
     if (!streaming) {
+      // 流式结束，输出剩余的缓冲内容
+      if (this.outputBuffer) {
+        this.writeLine(this.outputBuffer);
+        this.outputBuffer = '';
+      }
+
       // 流式输出结束后，如果有待刷新的输入，刷新输入框
       if (this.state.pendingInputRefresh) {
         this.state.pendingInputRefresh = false;
@@ -172,14 +196,56 @@ export class ScreenManager {
   }
 
   appendScroll(text: string): void {
-    // 流式输出时：隐藏光标，移动到输出区域，输出内容
-    // 不恢复光标，避免干扰输出
+    // 保存到历史缓冲区
+    this.state.scrollbackBuffer.append(text);
+
+    // 添加到输出缓冲
+    this.outputBuffer += text;
+
+    // 检查是否有完整行（包含换行符）
+    if (this.outputBuffer.includes('\n')) {
+      const lines = this.outputBuffer.split('\n');
+      // 输出所有完整行
+      for (let i = 0; i < lines.length - 1; i++) {
+        this.writeLine(lines[i] + '\n');
+      }
+      // 保留最后一个不完整行在缓冲中
+      this.outputBuffer = lines[lines.length - 1] || '';
+
+      // 每行输出后，刷新输入框（如果有pending input）
+      this.refreshInputDuringStreaming();
+    }
+  }
+
+  // 写入一行到stdout
+  private writeLine(line: string): void {
     if (!this.state.cursorInScrollArea) {
       writeStdout(`${ESC}[?25l`);
       writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
       this.state.cursorInScrollArea = true;
     }
-    writeStdout(text);
+    writeStdout(line);
+  }
+
+  // 流式输出期间刷新输入框
+  private refreshInputDuringStreaming(): void {
+    if (this.state.pendingInputRefresh) {
+      // 保存当前光标位置状态
+      const savedCursorInScroll = this.state.cursorInScrollArea;
+
+      // 切换到输入框区域刷新
+      this.state.cursorInScrollArea = false;
+      this.refreshInput();
+
+      // 返回scroll区域继续输出
+      this.state.cursorInScrollArea = savedCursorInScroll;
+      if (savedCursorInScroll) {
+        writeStdout(`${ESC}[?25l`);
+        writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
+      }
+
+      this.state.pendingInputRefresh = false;
+    }
   }
 
   refreshStatus(): void {
