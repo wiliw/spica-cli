@@ -388,8 +388,7 @@ export class ScreenManager {
   }
 
   handleInput(data: string): boolean {
-    // 流式输出时，只更新输入缓冲区，标记需要刷新，但不实际刷新
-    // 避免干扰流式输出
+    // 流式输出时，直接刷新输入框（不再缓冲）
     if (this.state.isStreaming) {
       // Ctrl+O 切换 verbose 模式
       if (data === '\x0f') {
@@ -398,29 +397,30 @@ export class ScreenManager {
         }
         return false;
       }
-      
+
       // Enter 键不处理
       if (data === '\r' || data === '\n') return false;
-      
+
       // 删除键
       if (data === '\x7f' || data === '\b') {
         if (this.state.cursorCol > 0) {
           const line = this.state.inputBuffer[0];
           const graphemes = line.match(/\P{M}\p{M}*/gu) || [];
-          this.state.inputBuffer[0] = 
-            graphemes.slice(0, this.state.cursorCol - 1).join('') + 
+          this.state.inputBuffer[0] =
+            graphemes.slice(0, this.state.cursorCol - 1).join('') +
             graphemes.slice(this.state.cursorCol).join('');
           this.state.cursorCol--;
-          this.state.pendingInputRefresh = true;
+          // 直接刷新输入框
+          this.refreshInputDuringStreaming();
         }
         return false;
       }
-      
+
       // Tab 键
       if (data === '\t') {
         return false;
       }
-      
+
       // 粘贴
       if (data.includes(`${ESC}[200~`)) {
         // eslint-disable-next-line no-control-regex -- ANSI escape codes for bracketed paste
@@ -428,30 +428,32 @@ export class ScreenManager {
         const graphemes = content.match(/\P{M}\p{M}*/gu) || [];
         const line = this.state.inputBuffer[0];
         const lineGraphemes = line.match(/\P{M}\p{M}*/gu) || [];
-        this.state.inputBuffer[0] = 
-          lineGraphemes.slice(0, this.state.cursorCol).join('') + 
-          content + 
+        this.state.inputBuffer[0] =
+          lineGraphemes.slice(0, this.state.cursorCol).join('') +
+          content +
           lineGraphemes.slice(this.state.cursorCol).join('');
         this.state.cursorCol += graphemes.length;
-        this.state.pendingInputRefresh = true;
+        // 直接刷新输入框
+        this.refreshInputDuringStreaming();
         return false;
       }
-      
+
       // 方向键等 ANSI 序列
       if (data.startsWith(ESC)) {
         return false;
       }
-      
+
       // 普通字符输入
       const line = this.state.inputBuffer[0];
       const graphemes = line.match(/\P{M}\p{M}*/gu) || [];
       const dataGraphemes = data.match(/\P{M}\p{M}*/gu) || [];
-      this.state.inputBuffer[0] = 
-        graphemes.slice(0, this.state.cursorCol).join('') + 
-        data + 
+      this.state.inputBuffer[0] =
+        graphemes.slice(0, this.state.cursorCol).join('') +
+        data +
         graphemes.slice(this.state.cursorCol).join('');
       this.state.cursorCol += dataGraphemes.length;
-      this.state.pendingInputRefresh = true;
+      // 直接刷新输入框
+      this.refreshInputDuringStreaming();
       return false;
     }
 
