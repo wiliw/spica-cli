@@ -418,7 +418,7 @@ export function setupAgentEvents(
     const icon = data.success ? '✓' : '✗';
     const colorFn = data.success ? COLORS.success : COLORS.error;
 
-    // 显示语法错误（如果有）
+    // 显示语法错误（如果有）- 两种模式都显示
     if (data.syntaxErrors && data.syntaxErrors.length > 0) {
       screen.appendScroll(COLORS.error(`  ⚠ Syntax errors:\n`));
       data.syntaxErrors.forEach((err: string) => {
@@ -426,21 +426,29 @@ export function setupAgentEvents(
       });
     }
 
-    // 显示输出内容（不折叠）
-    const output = data.output || data.error || '';
-    if (output && !data.diff) {
-      output.split('\n').forEach((line: string) => {
-        screen.appendScroll(COLORS.muted(`  │ ${line}\n`));
-      });
+    // Verbose 模式：显示完整输出
+    // Compact 模式：跳过输出内容
+    if (state.isVerboseMode()) {
+      const output = data.output || data.error || '';
+      if (output && !data.diff) {
+        output.split('\n').forEach((line: string) => {
+          screen.appendScroll(COLORS.muted(`  │ ${line}\n`));
+        });
+      }
     }
 
-    // 显示工具区块结束边框
-    const statusLabel = `${icon} ${data.name}`;
+    // 结束边框 - compact 模式添加摘要
+    let statusLabel: string;
+    if (state.isVerboseMode()) {
+      statusLabel = `${icon} ${data.name}`;
+    } else {
+      statusLabel = `${icon} ${data.name}${formatToolSummary(data)}`;
+    }
     const boxWidth = Math.max(statusLabel.length + 4, 20);
     screen.appendScroll(colorFn(`└─ ${statusLabel} ${'─'.repeat(boxWidth - statusLabel.length - 4)}┘\n`));
 
-    // Diff 预览单独显示（不在区块内）
-    if (data.diff && !['file_write', 'file_edit', 'file_multi_edit'].includes(data.name)) {
+    // Diff 预览 - 只在 verbose 模式显示
+    if (state.isVerboseMode() && data.diff && !['file_write', 'file_edit', 'file_multi_edit'].includes(data.name)) {
       screen.appendScroll(COLORS.muted(`${data.diff}\n`));
     }
 
