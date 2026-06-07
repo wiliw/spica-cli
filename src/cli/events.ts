@@ -650,7 +650,8 @@ export function setupAgentEvents(
       state.setStreamingOutput(true);
       screen.setStreaming(true);
     }
-    screen.appendScroll(COLORS.primary(data.chunk));
+    // AI流式输出使用行缓冲
+    screen.appendStreamChunk(COLORS.primary(data.chunk));
   });
 
   on('reasoning', (data: ReasoningData) => {

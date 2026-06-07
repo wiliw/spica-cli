@@ -165,11 +165,8 @@ export class ScreenManager {
   setStreaming(streaming: boolean): void {
     this.state.isStreaming = streaming;
     if (!streaming) {
-      // 流式结束，输出剩余的缓冲内容
-      if (this.outputBuffer) {
-        this.writeLine(this.outputBuffer);
-        this.outputBuffer = '';
-      }
+      // 流式结束，刷新剩余的流式缓冲
+      this.flushStreamBuffer();
 
       // 流式输出结束后，如果有待刷新的输入，刷新输入框
       if (this.state.pendingInputRefresh) {
@@ -195,45 +192,72 @@ export class ScreenManager {
     writeStdout(`${ESC}[r${ESC}[2J${ESC}[1;1H`);
   }
 
+  // 直接输出（用于工具调用、thinking等非流式内容）
   appendScroll(text: string): void {
     // 保存到历史缓冲区
     this.state.scrollbackBuffer.append(text);
 
-    // 添加到输出缓冲
-    this.outputBuffer += text;
-
-    // 检查是否有完整行（包含换行符）
-    if (this.outputBuffer.includes('\n')) {
-      const lines = this.outputBuffer.split('\n');
-      // 输出所有完整行
-      for (let i = 0; i < lines.length - 1; i++) {
-        this.writeLine(lines[i] + '\n');
-      }
-      // 保留最后一个不完整行在缓冲中
-      this.outputBuffer = lines[lines.length - 1] || '';
-
-      // 每行输出后，刷新输入框
-      this.refreshInputDuringStreaming();
-    }
-  }
-
-  // 强制刷新输出缓冲（用于工具调用等需要立即显示的内容）
-  flushOutput(): void {
-    if (this.outputBuffer) {
-      this.writeLine(this.outputBuffer);
-      this.outputBuffer = '';
-      this.refreshInputDuringStreaming();
-    }
-  }
-
-  // 写入一行到stdout
-  private writeLine(line: string): void {
+    // 直接输出
     if (!this.state.cursorInScrollArea) {
       writeStdout(`${ESC}[?25l`);
       writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
       this.state.cursorInScrollArea = true;
     }
-    writeStdout(line);
+    writeStdout(text);
+
+    // 如果有换行符，刷新输入框
+    if (text.includes('\n')) {
+      this.refreshInputDuringStreaming();
+    }
+  }
+
+  // 行缓冲输出（用于AI流式输出）
+  private streamBuffer: string = '';
+
+  appendStreamChunk(text: string): void {
+    // 保存到历史缓冲区
+    this.state.scrollbackBuffer.append(text);
+
+    // 添加到流式缓冲
+    this.streamBuffer += text;
+
+    // 检查是否有完整行
+    if (this.streamBuffer.includes('\n')) {
+      const lines = this.streamBuffer.split('\n');
+      // 输出所有完整行
+      for (let i = 0; i < lines.length - 1; i++) {
+        if (!this.state.cursorInScrollArea) {
+          writeStdout(`${ESC}[?25l`);
+          writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
+          this.state.cursorInScrollArea = true;
+        }
+        writeStdout(lines[i] + '\n');
+      }
+      // 保留最后一行在缓冲中
+      this.streamBuffer = lines[lines.length - 1] || '';
+
+      // 每行输出后刷新输入框
+      this.refreshInputDuringStreaming();
+    }
+  }
+
+  // 刷新流式缓冲（流式结束时调用）
+  flushStreamBuffer(): void {
+    if (this.streamBuffer) {
+      if (!this.state.cursorInScrollArea) {
+        writeStdout(`${ESC}[?25l`);
+        writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
+        this.state.cursorInScrollArea = true;
+      }
+      writeStdout(this.streamBuffer);
+      this.streamBuffer = '';
+      this.refreshInputDuringStreaming();
+    }
+  }
+
+  // 强制刷新（用于工具调用结束等）
+  flushOutput(): void {
+    this.refreshInputDuringStreaming();
   }
 
   // 流式输出期间刷新输入框
