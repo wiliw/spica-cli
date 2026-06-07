@@ -260,23 +260,28 @@ export class ScreenManager {
     this.refreshInputDuringStreaming();
   }
 
-  // 流式输出期间刷新输入框
+  // 流式输出期间刷新输入框（AI输出调用，刷新后返回scroll区域）
   private refreshInputDuringStreaming(): void {
-    // 保存当前光标位置状态
-    const savedCursorInScroll = this.state.cursorInScrollArea;
-
-    // 切换到输入框区域刷新（无论是否有pendingInputRefresh）
+    // 切换到输入框区域刷新
     this.state.cursorInScrollArea = false;
     this.refreshInput();
+    this.restoreCursor();
 
     // 返回scroll区域继续输出
-    this.state.cursorInScrollArea = savedCursorInScroll;
-    if (savedCursorInScroll) {
-      writeStdout(`${ESC}[?25l`);
-      writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
-    }
+    this.state.cursorInScrollArea = true;
+    writeStdout(`${ESC}[?25l`);
+    writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
 
     // 清除pending标记
+    this.state.pendingInputRefresh = false;
+  }
+
+  // 用户输入时刷新输入框（光标留在输入框）
+  private refreshInputForUserTyping(): void {
+    this.state.cursorInScrollArea = false;
+    this.refreshInput();
+    this.restoreCursor();
+    // 光标留在输入框，不返回scroll区域
     this.state.pendingInputRefresh = false;
   }
 
@@ -421,7 +426,7 @@ export class ScreenManager {
   }
 
   handleInput(data: string): boolean {
-    // 流式输出时，直接刷新输入框（不再缓冲）
+    // 流式输出时，刷新输入框但光标留在输入框
     if (this.state.isStreaming) {
       // Ctrl+O 切换 verbose 模式
       if (data === '\x0f') {
@@ -443,8 +448,8 @@ export class ScreenManager {
             graphemes.slice(0, this.state.cursorCol - 1).join('') +
             graphemes.slice(this.state.cursorCol).join('');
           this.state.cursorCol--;
-          // 直接刷新输入框
-          this.refreshInputDuringStreaming();
+          // 用户输入刷新，光标留在输入框
+          this.refreshInputForUserTyping();
         }
         return false;
       }
@@ -466,8 +471,8 @@ export class ScreenManager {
           content +
           lineGraphemes.slice(this.state.cursorCol).join('');
         this.state.cursorCol += graphemes.length;
-        // 直接刷新输入框
-        this.refreshInputDuringStreaming();
+        // 用户输入刷新，光标留在输入框
+        this.refreshInputForUserTyping();
         return false;
       }
 
@@ -485,8 +490,8 @@ export class ScreenManager {
         data +
         graphemes.slice(this.state.cursorCol).join('');
       this.state.cursorCol += dataGraphemes.length;
-      // 直接刷新输入框
-      this.refreshInputDuringStreaming();
+      // 用户输入刷新，光标留在输入框
+      this.refreshInputForUserTyping();
       return false;
     }
 
