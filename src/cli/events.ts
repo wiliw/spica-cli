@@ -426,7 +426,8 @@ function formatToolSummary(data: { name: string; success: boolean; output?: stri
     }
     case 'file_write':
     case 'file_edit':
-    case 'file_multi_edit': {
+    case 'file_multi_edit':
+    case 'file_patch': {
       const added = countDiffLines(output, '+');
       const removed = countDiffLines(output, '-');
       if (added > 0 && removed > 0) {
@@ -437,6 +438,25 @@ function formatToolSummary(data: { name: string; success: boolean; output?: stri
         return `-${removed}`;
       }
       return 'done';
+    }
+    case 'file_replace':
+    case 'file_insert': {
+      return output.includes('replaced') || output.includes('inserted') ? output : 'done';
+    }
+    case 'file_exists': {
+      return output || 'exists';
+    }
+    case 'file_delete':
+      return 'deleted';
+    case 'file_copy':
+    case 'file_move': {
+      return output ? output.slice(0, 30) : 'done';
+    }
+    case 'directory_create':
+      return 'created';
+    case 'directory_list': {
+      const items = output.split('\n').filter(l => l.trim()).length;
+      return `${items} items`;
     }
     case 'bash': {
       const bashLines = output.split('\n').filter(l => l.trim()).length;
@@ -478,6 +498,38 @@ function formatToolSummary(data: { name: string; success: boolean; output?: stri
       const agentCount = countAgents(output);
       return agentCount > 0 ? `${agentCount} agents` : 'done';
     }
+    case 'web_search': {
+      const results = output.split('\n').filter(l => l.includes('http')).length;
+      return results > 0 ? `${results} results` : 'done';
+    }
+    case 'web_fetch': {
+      const len = output.length;
+      return len > 1000 ? `${Math.floor(len/1000)}kb` : `${len} chars`;
+    }
+    case 'gh': {
+      // gh命令结果
+      if (output.includes('created')) return 'created';
+      if (output.includes('merged')) return 'merged';
+      if (output.includes('closed')) return 'closed';
+      return 'done';
+    }
+    case 'todo_write':
+      return 'saved';
+    case 'todo_read': {
+      const todos = output.split('\n').filter(l => l.trim()).length;
+      return `${todos} items`;
+    }
+    case 'workspace':
+      return output.slice(0, 30) || 'done';
+    case 'question':
+      return 'asked';
+    case 'format':
+      return 'formatted';
+    case 'code_health':
+    case 'test_quality_check': {
+      const issues = output.split('\n').filter(l => l.includes('✗') || l.includes('warning')).length;
+      return issues > 0 ? `${issues} issues` : 'clean';
+    }
     default:
       return 'done';
   }
@@ -504,18 +556,76 @@ function displayToolResult(record: ToolCallRecord, data: ToolResultData): void {
     // Verbose模式：完整显示所有内容
     screen.appendScroll(COLORS.tool(`\n${record.name}`));
 
-    // 显示完整路径
-    const filePath = record.args.path as string;
-    if (filePath) {
-      screen.appendScroll(COLORS.file(` ${filePath}`));
-    }
-
-    // 显示完整命令（如果是bash）
-    if (record.name === 'bash') {
-      const cmd = record.args.command as string;
-      if (cmd) {
-        screen.appendScroll(COLORS.muted(`\n  cmd: ${cmd}\n`));
+    // 根据工具类型显示关键参数
+    switch (record.name) {
+      case 'file_read':
+      case 'file_write':
+      case 'file_edit':
+      case 'file_multi_edit':
+      case 'file_patch':
+      case 'file_replace':
+      case 'file_insert':
+      case 'file_delete':
+      case 'file_copy':
+      case 'file_move':
+      case 'file_exists': {
+        const path = record.args.path as string;
+        if (path) screen.appendScroll(COLORS.file(` ${path}`));
+        break;
       }
+      case 'bash': {
+        const cmd = record.args.command as string;
+        if (cmd) screen.appendScroll(COLORS.muted(`\n  cmd: ${cmd}\n`));
+        break;
+      }
+      case 'grep': {
+        const pattern = record.args.pattern as string;
+        const path = record.args.path as string;
+        if (pattern) screen.appendScroll(COLORS.muted(` pattern: ${pattern}`));
+        if (path) screen.appendScroll(COLORS.file(` ${path}`));
+        break;
+      }
+      case 'glob': {
+        const pattern = record.args.pattern as string;
+        if (pattern) screen.appendScroll(COLORS.muted(` ${pattern}`));
+        break;
+      }
+      case 'web_search':
+      case 'web_fetch': {
+        const query = record.args.query || record.args.url as string;
+        if (query) screen.appendScroll(COLORS.muted(` ${query.slice(0, 50)}`));
+        break;
+      }
+      case 'git': {
+        const action = record.args.action as string;
+        if (action) screen.appendScroll(COLORS.muted(` ${action}`));
+        break;
+      }
+      case 'test':
+      case 'lint': {
+        const path = record.args.path as string;
+        if (path) screen.appendScroll(COLORS.file(` ${path}`));
+        break;
+      }
+      case 'directory_list':
+      case 'directory_create': {
+        const path = record.args.path as string;
+        if (path) screen.appendScroll(COLORS.file(` ${path}`));
+        break;
+      }
+      case 'todo_write':
+      case 'todo_read': {
+        screen.appendScroll(COLORS.muted(` todos`));
+        break;
+      }
+      case 'workspace': {
+        const path = record.args.path as string;
+        if (path) screen.appendScroll(COLORS.file(` ${path}`));
+        break;
+      }
+      default:
+        // 其他工具不显示特殊参数
+        break;
     }
 
     screen.appendScroll(COLORS.muted(` → `));
@@ -554,6 +664,18 @@ function displayToolResult(record: ToolCallRecord, data: ToolResultData): void {
     if (filePath) {
       const filename = filePath.split('/').pop() || filePath;
       screen.appendScroll(COLORS.file(` ${filename}`));
+    }
+
+    // grep显示pattern
+    if (record.name === 'grep') {
+      const pattern = record.args.pattern as string;
+      if (pattern) screen.appendScroll(COLORS.muted(` ${pattern.slice(0, 20)}`));
+    }
+
+    // glob显示pattern
+    if (record.name === 'glob') {
+      const pattern = record.args.pattern as string;
+      if (pattern) screen.appendScroll(COLORS.muted(` ${pattern}`));
     }
 
     screen.appendScroll(COLORS.muted(` → `));
