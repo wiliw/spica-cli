@@ -291,7 +291,10 @@ export class ScreenManager {
 
   // Thinking动画相关方法
   startThinkingAnimation(): void {
-    if (this.thinkingAnimationTimer) return; // 已经在运行
+    // 如果已经在运行，先清除再重新启动（防止重复）
+    if (this.thinkingAnimationTimer) {
+      this.clearThinkingAnimation();
+    }
 
     // 显示初始帧
     this.showThinkingFrame();
@@ -305,11 +308,12 @@ export class ScreenManager {
 
   private showThinkingFrame(): void {
     const frame = this.thinkingAnimationFrames[this.thinkingAnimationFrame];
-    // 在scroll区域显示动画
+    // 在scroll区域最后一行显示动画
     writeStdout(`${ESC}[?25l`);
     writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
     writeStdout(`${ESC}[2K`); // 清除当前行
     writeStdout(COLORS.muted(frame + ' thinking'));
+    this.state.cursorInScrollArea = true;
   }
 
   clearThinkingAnimation(): void {
@@ -317,10 +321,12 @@ export class ScreenManager {
       clearInterval(this.thinkingAnimationTimer);
       this.thinkingAnimationTimer = null;
     }
-    // 清除thinking显示
-    writeStdout(`${ESC}[?25l`);
-    writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
-    writeStdout(`${ESC}[2K`);
+    // 清除thinking显示行
+    if (this.state.cursorInScrollArea) {
+      writeStdout(`${ESC}[?25l`);
+      writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
+      writeStdout(`${ESC}[2K`);
+    }
   }
 
   refreshStatus(): void {

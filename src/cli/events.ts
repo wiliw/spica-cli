@@ -627,6 +627,8 @@ export function setupAgentEvents(
     resetToolTracking();
     activeSubAgents.clear();
     subAgentSeq = 0;
+    // 清除thinking动画
+    screen.clearThinkingAnimation();
   });
 
   on('connection_error', (data: ConnectionErrorData) => {
