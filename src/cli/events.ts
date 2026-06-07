@@ -3,7 +3,7 @@ import { getScreenManager } from './ui/screenManager';
 import { COLORS } from './ui/colors';
 import { TokenCounter } from '../llm/TokenCounter';
 import { getRuntimeState } from '../core/RuntimeState';
-import os from 'os';
+import * as os from 'os';
 
 // 事件数据类型定义
 interface ConnectionErrorData {
@@ -16,7 +16,6 @@ interface StreamData {
   chunk: string;
 }
 
-// Note: Some interfaces are kept for future use or documentation purposes
 interface ReasoningData {
   content: string;
 }
@@ -24,6 +23,7 @@ interface ReasoningData {
 interface ToolCallData {
   name: string;
   arguments: Record<string, unknown>;
+  id?: string;  // 工具调用 ID（用于匹配结果）
 }
 
 interface ToolResultData {
@@ -33,9 +33,9 @@ interface ToolResultData {
   error?: string;
   diff?: string;
   syntaxErrors?: string[];
+  id?: string;  // 工具调用 ID（用于匹配）
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
 interface ContextWarningData {
   level: string;
   usage: number;
@@ -155,7 +155,6 @@ interface AgentStoppedOnErrorData {
   suggestion: string;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for documentation
 interface MessageData {
   role: string;
   content: string;
@@ -164,6 +163,157 @@ interface MessageData {
 
 const screen = getScreenManager();
 const state = getRuntimeState();
+
+// ============================================
+// 工具调用追踪系统（解决并行调用结果匹配问题）
+// ============================================
+
+interface ToolCallRecord {
+  seq: number;           // 序号（用于显示）
+  name: string;          // 工具名称
+  args: Record<string, unknown>;  // 参数
+  startTime: number;     // 开始时间（用于计算耗时）
+  id?: string;           // 工具调用 ID
+  outputLines: string[]; // 输出缓冲（verbose 模式）
+}
+
+// 当前活跃的工具调用（按序号索引）
+const activeToolCalls: Map<number, ToolCallRecord> = new Map();
+// ID 到序号的映射（用于匹配结果）
+const idToSeq: Map<string, number> = new Map();
+// 下一个序号
+let nextToolSeq = 1;
+// 当前批次的工具调用数量（用于显示并行状态）
+let batchToolCount = 0;
+
+// 重置工具追踪状态（每次新对话开始时）
+function resetToolTracking(): void {
+  activeToolCalls.clear();
+  idToSeq.clear();
+  nextToolSeq = 1;
+  batchToolCount = 0;
+}
+
+// 注册工具调用
+function registerToolCall(data: ToolCallData): number {
+  const seq = nextToolSeq++;
+  const record: ToolCallRecord = {
+    seq,
+    name: data.name,
+    args: data.arguments || {},
+    startTime: Date.now(),
+    id: data.id,
+    outputLines: [],
+  };
+  activeToolCalls.set(seq, record);
+  if (data.id) {
+    idToSeq.set(data.id, seq);
+  }
+  batchToolCount++;
+  return seq;
+}
+
+// 匹配工具结果（通过 ID 或名称）
+function matchToolResult(data: ToolResultData): ToolCallRecord | null {
+  // 优先通过 ID 匹配
+  if (data.id && idToSeq.has(data.id)) {
+    const seq = idToSeq.get(data.id)!;
+    const record = activeToolCalls.get(seq);
+    if (record) {
+      idToSeq.delete(data.id);
+      activeToolCalls.delete(seq);
+      return record;
+    }
+  }
+  
+  // 备用：通过名称匹配最近的未完成调用
+  // 注意：并行调用同名工具时可能匹配错误，但这是 fallback
+  for (const [seq, record] of activeToolCalls) {
+    if (record.name === data.name) {
+      activeToolCalls.delete(seq);
+      if (record.id) idToSeq.delete(record.id);
+      return record;
+    }
+  }
+  
+  return null;
+}
+
+// 计算耗时
+function calcElapsedMs(startTime: number): number {
+  return Date.now() - startTime;
+}
+
+// ============================================
+// 终端宽度自适应
+// ============================================
+
+function getTerminalWidth(): number {
+  return screen.state.terminalWidth || process.stdout.columns || 80;
+}
+
+// 截断字符串到指定宽度（考虑中文字符宽度）
+function truncateToWidth(str: string, maxWidth: number): string {
+  const width = getStringDisplayWidth(str);
+  if (width <= maxWidth) return str;
+  
+  // 从末尾截断
+  let result = '';
+  let currentWidth = 0;
+  const graphemes = Array.from(str);
+  
+  for (const char of graphemes) {
+    const charWidth = getCharDisplayWidth(char);
+    if (currentWidth + charWidth > maxWidth - 3) {
+      return result + '...';
+    }
+    result += char;
+    currentWidth += charWidth;
+  }
+  return result;
+}
+
+function getCharDisplayWidth(char: string): number {
+  if (char === '\n') return 0;
+  if (char === '\t') return 2;
+  const codePoint = char.codePointAt(0);
+  if (!codePoint) return 1;
+  // Emoji 和其他复杂 grapheme cluster 宽度为 2
+  if (char.length > 1 || codePoint > 0xFFFF) return 2;
+  // 全角字符宽度为 2
+  if (isFullWidth(char)) return 2;
+  return 1;
+}
+
+function getStringDisplayWidth(str: string): number {
+  let width = 0;
+  const graphemes = Array.from(str);
+  for (const char of graphemes) {
+    width += getCharDisplayWidth(char);
+  }
+  return width;
+}
+
+function isFullWidth(char: string): boolean {
+  const codePoint = char.codePointAt(0) || 0;
+  // CJK 统一汉字范围
+  if (codePoint >= 0x4E00 && codePoint <= 0x9FFF) return true;
+  // CJK 扩展 A
+  if (codePoint >= 0x3400 && codePoint <= 0x4DBF) return true;
+  // CJK 扩展 B-F
+  if (codePoint >= 0x20000 && codePoint <= 0x2CEAF) return true;
+  // 日文平假名、片假名
+  if (codePoint >= 0x3040 && codePoint <= 0x30FF) return true;
+  // 韩文
+  if (codePoint >= 0xAC00 && codePoint <= 0xD7AF) return true;
+  // 全角符号
+  if (codePoint >= 0xFF00 && codePoint <= 0xFFEF) return true;
+  return false;
+}
+
+// ============================================
+// 格式化函数
+// ============================================
 
 // 构建状态栏文本（状态 | 模型 | 工作区）
 function buildStatusText(
@@ -194,23 +344,34 @@ function buildStatusText(
   return `${statusText} | ${model || '?'} | ${displayPath}`;
 }
 
-function formatArgs(args: Record<string, unknown>): string {
+// 格式化参数（简洁版）
+function formatArgsCompact(args: Record<string, unknown>, maxWidth: number): string {
   if (!args || Object.keys(args).length === 0) return '';
-  const keys = Object.keys(args);
-  const parts = keys.map(k => {
+  
+  // 过滤掉内部参数
+  const filteredKeys = Object.keys(args).filter(k => !k.startsWith('_'));
+  if (filteredKeys.length === 0) return '';
+  
+  const parts = filteredKeys.slice(0, 3).map(k => {
     const v = args[k];
     if (typeof v === 'string') {
+      // 路径只显示文件名
       if (k === 'path' || k === 'source' || k === 'destination') {
-        return `${k}=${v.split('/').pop() || v}`;
+        const filename = v.split('/').pop() || v.split('\\').pop() || v;
+        return filename.length > 20 ? filename.slice(0, 17) + '...' : filename;
       }
-      return `${k}=${v}`;
+      // 其他字符串截断
+      if (v.length > 15) return v.slice(0, 12) + '...';
+      return v;
     }
     if (typeof v === 'number' || typeof v === 'boolean') {
-      return `${k}=${v}`;
+      return String(v);
     }
     return k;
   });
-  return `(${parts.join(', ')})`;
+  
+  const result = parts.join(' ');
+  return truncateToWidth(result, maxWidth);
 }
 
 // 工具摘要辅助函数
@@ -248,10 +409,11 @@ function countAgents(output: string): number {
   return match ? parseInt(match[1], 10) : 0;
 }
 
+// 格式化工具结果摘要
 function formatToolSummary(data: { name: string; success: boolean; output?: string; error?: string; content?: string }): string {
   if (!data.success) {
-    const errorMsg = data.error ? data.error.slice(0, 50) : '';
-    return errorMsg ? ` (${errorMsg})` : '';
+    const errorMsg = data.error ? data.error.slice(0, 40) : '';
+    return errorMsg ? `err: ${errorMsg}` : 'failed';
   }
 
   const name = data.name;
@@ -260,7 +422,7 @@ function formatToolSummary(data: { name: string; success: boolean; output?: stri
   switch (name) {
     case 'file_read': {
       const lines = output.split('\n').length;
-      return ` (${lines} lines)`;
+      return `${lines} lines`;
     }
     case 'file_write':
     case 'file_edit':
@@ -268,58 +430,237 @@ function formatToolSummary(data: { name: string; success: boolean; output?: stri
       const added = countDiffLines(output, '+');
       const removed = countDiffLines(output, '-');
       if (added > 0 && removed > 0) {
-        return ` (+${added}/-${removed} lines)`;
+        return `+${added}/-${removed}`;
       } else if (added > 0) {
-        return ` (+${added} lines)`;
+        return `+${added}`;
       } else if (removed > 0) {
-        return ` (-${removed} lines)`;
+        return `-${removed}`;
       }
-      return '';
+      return 'done';
     }
     case 'bash': {
       const bashLines = output.split('\n').filter(l => l.trim()).length;
       const timeMatch = output.match(/\((\d+\.?\d*)s\)/);
       const time = timeMatch ? timeMatch[1] : '';
-      return time ? ` (${bashLines} lines, ${time}s)` : ` (${bashLines} lines)`;
+      return time ? `${bashLines} lines, ${time}s` : `${bashLines} lines`;
     }
     case 'grep': {
       const matchCount = countMatches(output);
-      return matchCount > 0 ? ` → ${matchCount} matches` : '';
+      return matchCount > 0 ? `${matchCount} matches` : '0 matches';
     }
     case 'glob': {
       const fileCount = countFiles(output);
-      return fileCount > 0 ? ` → ${fileCount} files` : '';
+      return fileCount > 0 ? `${fileCount} files` : '0 files';
     }
     case 'test': {
       const passed = countTestPassed(output);
       const failed = countTestFailed(output);
       if (failed > 0) {
-        return ` (${passed} passed, ${failed} failed)`;
+        return `${passed}✓ ${failed}✗`;
       }
-      return passed > 0 ? ` (${passed} passed)` : '';
+      return passed > 0 ? `${passed}✓` : 'done';
     }
     case 'lint': {
       const errors = countLintErrors(output);
-      return errors > 0 ? ` (${errors} errors)` : ' (0 errors)';
+      return errors > 0 ? `${errors} errors` : 'clean';
     }
     case 'git':
-      return '';
+      return 'done';
     case 'monitor': {
       const taskId = data.content || '';
-      return taskId ? ` (${taskId.slice(0, 20)})` : '';
+      return taskId ? taskId.slice(0, 15) : 'started';
     }
     case 'task_stop':
-      return '';
+      return 'stopped';
     case 'skill':
-      return '';
+      return 'loaded';
     case 'task': {
       const agentCount = countAgents(output);
-      return agentCount > 0 ? ` (${agentCount} agents)` : '';
+      return agentCount > 0 ? `${agentCount} agents` : 'done';
     }
     default:
-      return '';
+      return 'done';
   }
 }
+
+// 格式化耗时
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 10000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 1000)}s`;
+}
+
+// ============================================
+// 新的工具显示格式
+// ============================================
+
+// Compact 模式：单行显示
+// 格式：[序号] 工具名 参数 → 结果 ✓ 耗时
+function displayToolCompact(seq: number, record: ToolCallRecord, data: ToolResultData): void {
+  const termWidth = getTerminalWidth();
+  const elapsed = formatElapsed(calcElapsedMs(record.startTime));
+  const icon = data.success ? COLORS.success('✓') : COLORS.error('✗');
+  const summary = formatToolSummary(data);
+  
+  // 计算各部分宽度
+  const seqPart = `[${seq}]`;
+  const namePart = record.name;
+  const argsPart = formatArgsCompact(record.args, 20);
+  const resultPart = data.success ? summary : (data.error?.slice(0, 30) || 'failed');
+  const timePart = elapsed;
+  
+  // 构建显示行
+  // [1] file_read events.ts → 150 lines ✓ 0.3s
+  const line = `${COLORS.muted(seqPart)} ${COLORS.tool(namePart)} ${COLORS.muted(argsPart)} → ${COLORS.primary(resultPart)} ${icon} ${COLORS.muted(timePart)}`;
+  
+  // 检查是否超宽，截断
+  const fullLine = line;
+  // 去掉 ANSI 码计算宽度
+  const ansiRegex = new RegExp('\\x1b\\[[0-9;]*m', 'g');
+  const lineWidth = getStringDisplayWidth(fullLine.replace(ansiRegex, ''));
+  
+  if (lineWidth > termWidth - 2) {
+    // 截断参数部分
+    const truncatedArgs = formatArgsCompact(record.args, Math.max(10, termWidth - 30));
+    const truncatedLine = `${COLORS.muted(seqPart)} ${COLORS.tool(namePart)} ${COLORS.muted(truncatedArgs)} → ${COLORS.primary(resultPart)} ${icon} ${COLORS.muted(timePart)}`;
+    screen.appendScroll(truncatedLine + '\n');
+  } else {
+    screen.appendScroll(fullLine + '\n');
+  }
+}
+
+// Verbose 模式：带边框的详细显示
+function displayToolVerbose(seq: number, record: ToolCallRecord, data: ToolResultData): void {
+  const termWidth = getTerminalWidth();
+  const elapsed = formatElapsed(calcElapsedMs(record.startTime));
+  const icon = data.success ? '✓' : '✗';
+  const colorFn = data.success ? COLORS.success : COLORS.error;
+  
+  // 计算边框宽度（自适应终端）
+  const maxBoxWidth = Math.min(termWidth - 4, 100);
+  const minBoxWidth = 30;
+  
+  // 标题行：[序号] 工具名 参数 (耗时)
+  const argsStr = formatArgsCompact(record.args, maxBoxWidth - 20);
+  const titleContent = `[${seq}] ${record.name}${argsStr ? ` ${argsStr}` : ''}`;
+  const titleWithTime = `${titleContent} (${elapsed})`;
+  const titleWidth = getStringDisplayWidth(titleWithTime);
+  const boxWidth = Math.max(Math.min(titleWidth + 4, maxBoxWidth), minBoxWidth);
+  
+  // 开始边框
+  const topBorder = `┌${'─'.repeat(boxWidth - 2)}┐`;
+  screen.appendScroll(COLORS.tool(`\n${topBorder}\n`));
+  
+  // 标题行
+  const titlePad = boxWidth - 2 - titleWidth;
+  screen.appendScroll(COLORS.tool(`│ ${COLORS.muted(`[${seq}]`)} ${record.name} ${COLORS.muted(argsStr)} ${COLORS.muted(`(${elapsed})`)}${' '.repeat(Math.max(0, titlePad))}│\n`));
+  
+  // 输出内容（如果有）
+  const output = data.output || data.error || '';
+  if (output && !data.diff) {
+    // 分隔线
+    screen.appendScroll(COLORS.tool(`│${'─'.repeat(boxWidth - 2)}│\n`));
+    
+    // 输出行（截断超长行）
+    const maxContentWidth = boxWidth - 4;
+    const outputLines = output.split('\n').slice(0, 10); // 最多显示 10 行
+    for (const line of outputLines) {
+      const truncated = truncateToWidth(line, maxContentWidth);
+      screen.appendScroll(COLORS.muted(`│ ${truncated}${' '.repeat(Math.max(0, maxContentWidth - getStringDisplayWidth(truncated)))} │\n`));
+    }
+    
+    if (output.split('\n').length > 10) {
+      screen.appendScroll(COLORS.muted(`│ ... (${output.split('\n').length - 10} more lines)${' '.repeat(Math.max(0, maxContentWidth - 25))} │\n`));
+    }
+  }
+  
+  // 语法错误（如果有）
+  if (data.syntaxErrors && data.syntaxErrors.length > 0) {
+    screen.appendScroll(COLORS.tool(`│${'─'.repeat(boxWidth - 2)}│\n`));
+    screen.appendScroll(COLORS.error(`│ ⚠ Syntax errors:${' '.repeat(Math.max(0, maxBoxWidth - 16))}│\n`));
+    for (const err of data.syntaxErrors.slice(0, 3)) {
+      const truncated = truncateToWidth(err, maxBoxWidth - 4);
+      screen.appendScroll(COLORS.error(`│ ${truncated}${' '.repeat(Math.max(0, maxBoxWidth - 4 - getStringDisplayWidth(truncated)))}│\n`));
+    }
+  }
+  
+  // 结束边框：状态图标 + 结果摘要
+  const summary = formatToolSummary(data);
+  const statusLine = `${icon} ${summary}`;
+  const statusWidth = getStringDisplayWidth(statusLine);
+  const bottomPad = boxWidth - 2 - statusWidth;
+  
+  screen.appendScroll(colorFn(`└─ ${statusLine}${' '.repeat(Math.max(0, bottomPad))} ┘\n`));
+  
+  // Diff 预览（如果有）
+  if (data.diff && !['file_write', 'file_edit', 'file_multi_edit'].includes(record.name)) {
+    const diffLines = data.diff.split('\n').slice(0, 5);
+    for (const line of diffLines) {
+      if (line.startsWith('+')) {
+        screen.appendScroll(COLORS.diffAdd(`  ${line}\n`));
+      } else if (line.startsWith('-')) {
+        screen.appendScroll(COLORS.diffRemove(`  ${line}\n`));
+      } else {
+        screen.appendScroll(COLORS.muted(`  ${line}\n`));
+      }
+    }
+  }
+}
+
+// ============================================
+// Subagent 状态面板
+// ============================================
+
+interface SubAgentRecord {
+  id: string;
+  type: string;
+  description: string;
+  status: 'running' | 'done' | 'error';
+  startTime: number;
+  summary?: string;
+  error?: string;
+}
+
+const activeSubAgents: Map<string, SubAgentRecord> = new Map();
+let subAgentSeq = 0;
+
+function displaySubAgentPanel(): void {
+  const termWidth = getTerminalWidth();
+  const agents = Array.from(activeSubAgents.values());
+  
+  if (agents.length === 0) return;
+  
+  // 面板标题
+  const running = agents.filter(a => a.status === 'running').length;
+  const done = agents.filter(a => a.status === 'done').length;
+  const error = agents.filter(a => a.status === 'error').length;
+  
+  const title = `Subagents (${running} running, ${done} done, ${error} error)`;
+  const boxWidth = Math.min(termWidth - 4, Math.max(getStringDisplayWidth(title) + 4, 40));
+  
+  screen.appendScroll(COLORS.secondary(`\n┌${'─'.repeat(boxWidth - 2)}┐\n`));
+  screen.appendScroll(COLORS.secondary(`│ ${title}${' '.repeat(Math.max(0, boxWidth - 2 - getStringDisplayWidth(title)))}│\n`));
+  
+  // 每个 subagent 的状态
+  for (const agent of agents.slice(0, 3)) { // 最多显示 3 个
+    const elapsed = formatElapsed(Date.now() - agent.startTime);
+    const statusIcon = agent.status === 'running' ? '⏳' : agent.status === 'done' ? '✓' : '✗';
+    const statusColor = agent.status === 'running' ? COLORS.warning : agent.status === 'done' ? COLORS.success : COLORS.error;
+    
+    const line = `${statusIcon} [${agent.type}] ${truncateToWidth(agent.description, 20)} (${elapsed})`;
+    screen.appendScroll(statusColor(`│ ${line}${' '.repeat(Math.max(0, boxWidth - 2 - getStringDisplayWidth(line)))}│\n`));
+  }
+  
+  if (agents.length > 3) {
+    screen.appendScroll(COLORS.muted(`│ ... (${agents.length - 3} more)${' '.repeat(Math.max(0, boxWidth - 15))}│\n`));
+  }
+  
+  screen.appendScroll(COLORS.secondary(`└${'─'.repeat(boxWidth - 2)}┘\n`));
+}
+
+// ============================================
+// 主事件处理
+// ============================================
 
 export function setupAgentEvents(
   agent: SpicaAgent,
@@ -328,7 +669,6 @@ export function setupAgentEvents(
   _tokenCounter?: TokenCounter
 ): () => void {
   // 收集所有注册的监听器，用于 cleanup
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- EventEmitter requires any[] for handler compatibility
   type EventHandler = (...args: any[]) => void;
   const listeners: Array<{ event: string; handler: EventHandler }> = [];
   const on = (event: string, handler: EventHandler) => {
@@ -340,10 +680,13 @@ export function setupAgentEvents(
   let reasoningStarted = false;
   let justSwitchedFromReasoning = false;
 
-  // 每次新对话开始时重置 reasoning 状态
+  // 每次新对话开始时重置状态
   on('waiting_for_llm', () => {
     reasoningStarted = false;
     justSwitchedFromReasoning = false;
+    resetToolTracking();
+    activeSubAgents.clear();
+    subAgentSeq = 0;
   });
 
   on('connection_error', (data: ConnectionErrorData) => {
@@ -355,18 +698,13 @@ export function setupAgentEvents(
   });
 
   on('stream', (data: StreamData) => {
-
     // 从 reasoning 切换到 stream 时，加分隔线
     if (reasoningStarted && !justSwitchedFromReasoning) {
       justSwitchedFromReasoning = true;
-      if (state.isVerboseMode()) {
-        screen.appendScroll('\n' + COLORS.muted('---\n'));
-      } else {
-        screen.appendScroll('\n');
-      }
+      screen.appendScroll('\n');
     }
 
-    // 设置流式状态（防止输入刷新干扰输出）
+    // 设置流式状态
     if (!state.isStreamingOutput()) {
       state.setStreamingOutput(true);
       screen.setStreaming(true);
@@ -375,219 +713,241 @@ export function setupAgentEvents(
   });
 
   on('reasoning', (data: ReasoningData) => {
-    // 只在第一次显示 thinking 提示
     if (!reasoningStarted) {
       reasoningStarted = true;
       justSwitchedFromReasoning = false;
-      if (state.isVerboseMode()) {
-        screen.appendScroll('\n' + COLORS.reasoning('[THINKING]\n'));
-        if (!state.isStreamingOutput()) {
-          state.setStreamingOutput(true);
-          screen.setStreaming(true);
-        }
-      } else {
-        screen.appendScroll(COLORS.muted('[thinking]'));
+      screen.appendScroll(COLORS.muted('\n[thinking]'));
+      if (!state.isStreamingOutput()) {
+        state.setStreamingOutput(true);
+        screen.setStreaming(true);
       }
     }
 
-    // verbose 模式下显示完整 reasoning content
+    // verbose 模式下显示完整 reasoning
     if (state.isVerboseMode()) {
       screen.appendScroll(COLORS.reasoning(data.content));
     }
   });
 
+  // 工具调用开始
   on('tool_call', (data: ToolCallData) => {
     state.setStreamingOutput(false);
     screen.setStreaming(false);
-    // 从reasoning切换到tool_call时，需要换行
+    
     if (reasoningStarted) {
       screen.appendScroll('\n');
-      reasoningStarted = false;  // 重置reasoning状态
+      reasoningStarted = false;
     }
-    const argsStr = formatArgs(data.arguments);
-    // 显示工具调用区块开始
-    const toolLabel = `${data.name}${argsStr ? ` ${argsStr}` : ''}`;
-    const boxWidth = Math.max(toolLabel.length + 4, 20);
-    screen.appendScroll(COLORS.tool(`\n┌─ ${toolLabel} ${'─'.repeat(boxWidth - toolLabel.length - 4)}┐\n`));
-
+    
+    // 注册工具调用
+    const seq = registerToolCall(data);
+    
+    // 显示并行状态（如果有多个工具同时调用）
+    if (batchToolCount > 1 && seq === 1) {
+      screen.appendScroll(COLORS.muted(`\n[tools] ${batchToolCount} parallel calls...\n`));
+    }
+    
+    // Compact 模式：只显示开始标记
+    if (!state.isVerboseMode()) {
+      screen.appendScroll(COLORS.muted(`[${seq}] ${data.name} `));
+    } else {
+      // Verbose 模式：显示开始边框
+      const termWidth = getTerminalWidth();
+      const maxBoxWidth = Math.min(termWidth - 4, 100);
+      const argsStr = formatArgsCompact(data.arguments || {}, maxBoxWidth - 20);
+      const title = `[${seq}] ${data.name}${argsStr ? ` ${argsStr}` : ''}`;
+      const boxWidth = Math.max(Math.min(getStringDisplayWidth(title) + 4, maxBoxWidth), 30);
+      
+      screen.appendScroll(COLORS.tool(`\n┌${'─'.repeat(boxWidth - 2)}┐\n`));
+      screen.appendScroll(COLORS.tool(`│ ${COLORS.muted(`[${seq}]`)} ${data.name} ${COLORS.muted(argsStr)}${' '.repeat(Math.max(0, boxWidth - 2 - getStringDisplayWidth(title)))}│\n`));
+      screen.appendScroll(COLORS.tool(`│${'─'.repeat(boxWidth - 2)}│\n`));
+      screen.appendScroll(COLORS.muted(`│ running...${' '.repeat(Math.max(0, boxWidth - 13))}│\n`));
+    }
   });
 
+  // 工具调用结果
   on('tool_result', (data: ToolResultData) => {
     state.setStreamingOutput(false);
     screen.setStreaming(false);
-    const icon = data.success ? '✓' : '✗';
-    const colorFn = data.success ? COLORS.success : COLORS.error;
-
-    // 显示语法错误（如果有）- 两种模式都显示
-    if (data.syntaxErrors && data.syntaxErrors.length > 0) {
-      screen.appendScroll(COLORS.error(`  ⚠ Syntax errors:\n`));
-      data.syntaxErrors.forEach((err: string) => {
-        screen.appendScroll(COLORS.error(`    ${err}\n`));
-      });
-    }
-
-    // Verbose 模式：显示完整输出
-    // Compact 模式：跳过输出内容
-    if (state.isVerboseMode()) {
-      const output = data.output || data.error || '';
-      if (output && !data.diff) {
-        output.split('\n').forEach((line: string) => {
-          screen.appendScroll(COLORS.muted(`  │ ${line}\n`));
-        });
+    
+    // 匹配工具调用
+    const record = matchToolResult(data);
+    
+    if (record) {
+      // 找到匹配的调用，显示完整结果
+      if (state.isVerboseMode()) {
+        displayToolVerbose(record.seq, record, data);
+      } else {
+        displayToolCompact(record.seq, record, data);
       }
-    }
-
-    // 结束边框 - compact 模式添加摘要
-    let statusLabel: string;
-    if (state.isVerboseMode()) {
-      statusLabel = `${icon} ${data.name}`;
     } else {
-      statusLabel = `${icon} ${data.name}${formatToolSummary(data)}`;
+      // 未找到匹配（可能是孤立的 result），显示简单格式
+      const icon = data.success ? COLORS.success('✓') : COLORS.error('✗');
+      const summary = formatToolSummary(data);
+      screen.appendScroll(`${icon} ${data.name} → ${summary}\n`);
     }
-    const boxWidth = Math.max(statusLabel.length + 4, 20);
-    screen.appendScroll(colorFn(`└─ ${statusLabel} ${'─'.repeat(boxWidth - statusLabel.length - 4)}┘\n`));
-
-    // Diff 预览 - 只在 verbose 模式显示
-    if (state.isVerboseMode() && data.diff && !['file_write', 'file_edit', 'file_multi_edit'].includes(data.name)) {
-      screen.appendScroll(COLORS.muted(`${data.diff}\n`));
+    
+    // 更新状态栏
+    if (model) {
+      screen.setStatus(buildStatusText(agent, model));
     }
-
-    // 输出完成，恢复光标到输入框并刷新显示
+    
     screen.restoreCursor();
     screen.refreshInput();
   });
 
-  // Diff预览（文件编辑时显示详细diff）
+  // Diff 预览
   on('diff_preview', (data: DiffPreviewData) => {
-    screen.appendScroll(COLORS.file(`\n[DIFF] ${data.filePath}\n`));
-    screen.appendScroll(data.diff + '\n');
+    screen.appendScroll(COLORS.file(`\n[diff] ${data.filePath}\n`));
+    const lines = data.diff.split('\n').slice(0, 10);
+    for (const line of lines) {
+      if (line.startsWith('+')) {
+        screen.appendScroll(COLORS.diffAdd(`  ${line}\n`));
+      } else if (line.startsWith('-')) {
+        screen.appendScroll(COLORS.diffRemove(`  ${line}\n`));
+      } else {
+        screen.appendScroll(COLORS.muted(`  ${line}\n`));
+      }
+    }
     screen.restoreCursor();
   });
 
   on('error_suggestion', (data: ErrorSuggestionData) => {
-    screen.appendScroll(COLORS.warning(`\n[HINT] ${data.suggestion}\n`));
+    screen.appendScroll(COLORS.warning(`\n[hint] ${data.suggestion}\n`));
   });
 
   on('empty_response_warning', (data: { iteration: number; message: string }) => {
-    screen.appendScroll(COLORS.warning(`\n[WARN] Empty response at iteration ${data.iteration}. Retrying...\n`));
+    screen.appendScroll(COLORS.warning(`\n[warn] Empty response, retrying...\n`));
   });
 
   on('retry_attempt', (data: RetryAttemptData) => {
-    screen.appendScroll(COLORS.muted(`\n[RETRY] ${data.operation} attempt ${data.attempt}/${data.maxRetries} in ${Math.floor(data.delay/1000)}s...\n`));
-    screen.appendScroll(COLORS.muted(`  Error: ${data.error}\n`));
+    screen.appendScroll(COLORS.muted(`\n[retry] ${data.operation} #${data.attempt}/${data.maxRetries} in ${Math.floor(data.delay/1000)}s\n`));
     screen.restoreCursor();
   });
 
   on('workspace_changed', (data: WorkspaceChangedData) => {
-    screen.appendScroll(COLORS.file(`\n[DIR] Workspace: ${data.path}\n`));
+    screen.appendScroll(COLORS.file(`\n[dir] ${data.path}\n`));
   });
 
-  // 工具执行完成后刷新状态栏（更新工作区等）
-  on('tool_result', () => {
-    if (model) {
-      screen.setStatus(buildStatusText(agent, model));
-    }
-  });
-
+  // Subagent 事件
   on('sub_agent_start', (data: SubAgentStartData) => {
-    screen.appendScroll(COLORS.subAgent(`\n  [${data.type || 'sub'}] ${data.description}\n`));
+    subAgentSeq++;
+    activeSubAgents.set(data.id, {
+      id: data.id,
+      type: data.type || 'sub',
+      description: truncateToWidth(data.description || data.prompt.slice(0, 50), 30),
+      status: 'running',
+      startTime: Date.now(),
+    });
+    
+    // 显示状态面板
+    displaySubAgentPanel();
   });
 
   on('sub_agent_tool_call', (data: SubAgentToolCallData) => {
-    screen.appendScroll(COLORS.subAgent(`    -> [sub] ${data.name}\n`));
+    // Subagent 内部的工具调用（缩进显示）
+    screen.appendScroll(COLORS.subAgent(`    → ${data.name}\n`));
   });
 
   on('sub_agent_tool_result', (data: SubAgentToolResultData) => {
-    const icon = data.success ? COLORS.success('[OK]') : COLORS.error('[ERR]');
-    screen.appendScroll(COLORS.subAgent(`    ${icon} [sub] ${data.name}\n`));
+    const icon = data.success ? '✓' : '✗';
+    const colorFn = data.success ? COLORS.success : COLORS.error;
+    screen.appendScroll(colorFn(`    ${icon} ${data.name}\n`));
   });
 
   on('sub_agent_done', (data: SubAgentDoneData) => {
-    screen.appendScroll(COLORS.success(`\n  [OK] [sub] Done: ${data.summary}\n`));
+    const record = activeSubAgents.get(data.id);
+    if (record) {
+      record.status = 'done';
+      record.summary = truncateToWidth(data.summary || 'done', 30);
+    }
+    
+    // 更新状态面板
+    displaySubAgentPanel();
   });
 
   on('sub_agent_error', (data: SubAgentErrorData) => {
-    screen.appendScroll(COLORS.error(`\n  [ERR] [sub] Error: ${data.error}\n`));
+    const record = activeSubAgents.get(data.id);
+    if (record) {
+      record.status = 'error';
+      record.error = truncateToWidth(data.error, 30);
+    }
+    
+    // 更新状态面板
+    displaySubAgentPanel();
   });
 
   on('hook_blocked', (data: HookBlockedData) => {
-    screen.appendScroll(COLORS.error(`\n[BLOCKED] ${data.tool} - ${data.reason}\n`));
+    screen.appendScroll(COLORS.error(`\n[block] ${data.tool}: ${data.reason}\n`));
   });
 
   on('queue_injected', (data: QueueInjectedData) => {
-    screen.appendScroll(COLORS.primary(`\n[QUEUE] Injected: ${data.input}...\n`));
+    screen.appendScroll(COLORS.primary(`\n[queue] ${data.input}...\n`));
   });
 
   on('hook_warning', (data: HookWarningData) => {
-    screen.appendScroll(COLORS.warning(`\n[WARN] ${data.message}\n`));
+    screen.appendScroll(COLORS.warning(`\n[warn] ${data.message}\n`));
   });
 
   on('hook_log', (data: HookLogData) => {
-    screen.appendScroll(COLORS.muted(`\n[LOG] ${data.message}\n`));
+    screen.appendScroll(COLORS.muted(`\n[log] ${data.message}\n`));
   });
 
   on('pending_input_detected', (data: PendingInputDetectedData) => {
-    screen.appendScroll(COLORS.warning(`\n[NEW INPUT] Detected during tool execution\n`));
-    screen.appendScroll(COLORS.muted(`  ${data.input}\n`));
+    screen.appendScroll(COLORS.warning(`\n[input] ${data.input?.slice(0, 30)}...\n`));
     screen.restoreCursor();
     screen.refreshInput();
   });
 
   on('tool_stuck_warning', (data: ToolStuckWarningData) => {
     const elapsedSec = (data.elapsedMs ?? data.timeout) / 1000;
-    screen.appendScroll(COLORS.warning(`\n[STUCK] ${data.tool}: stalled ${elapsedSec}s. Auto-aborting and retrying with alternative strategy...\n`));
+    screen.appendScroll(COLORS.warning(`\n[stuck] ${data.tool} ${elapsedSec}s, aborting...\n`));
   });
 
   on('tool_aborted', (data: ToolAbortedData) => {
-    screen.appendScroll(COLORS.warning(`\n[ABORT] ${data.tool} 已中断\n`));
+    screen.appendScroll(COLORS.warning(`\n[abort] ${data.tool}\n`));
     screen.restoreCursor();
     screen.refreshInput();
   });
 
   on('tool_conflict_warning', (data: { conflicts: Array<{ path: string; tools: string[] }>; message: string }) => {
-    screen.appendScroll(COLORS.warning(`\n[CONFLICT] ${data.message}\n`));
+    screen.appendScroll(COLORS.warning(`\n[conflict] ${data.message}\n`));
     for (const conflict of data.conflicts) {
-      screen.appendScroll(COLORS.muted(`  ${conflict.path}: ${conflict.tools.join(', ')} (sequential)\n`));
+      screen.appendScroll(COLORS.muted(`  ${conflict.path}: ${conflict.tools.join(', ')}\n`));
     }
   });
 
-  // 上下文警告（添加遗漏的处理）
-  on('context_warning', (data: { level: string; usage: number; message: string; suggestion?: string }) => {
+  on('context_warning', (data: ContextWarningData) => {
     const color = data.level === 'warning' ? COLORS.warning : COLORS.muted;
-    screen.appendScroll(color(`\n[CONTEXT] ${data.message}\n`));
+    screen.appendScroll(color(`\n[ctx] ${data.message}\n`));
     if (data.suggestion) {
-      screen.appendScroll(COLORS.muted(`  Suggestion: ${data.suggestion}\n`));
+      screen.appendScroll(COLORS.muted(`  → ${data.suggestion}\n`));
     }
   });
 
-  // Checkpoint 创建（添加遗漏的处理）
   on('checkpoint_created', (data: { hash: string; message: string }) => {
-    screen.appendScroll(COLORS.muted(`\n[CHECKPOINT] ${data.message} (${data.hash.slice(0, 7)})\n`));
+    screen.appendScroll(COLORS.muted(`\n[ckpt] ${data.message.slice(0, 30)}\n`));
   });
 
   on('agent_interrupted', (data: AgentInterruptedData) => {
-    // 重置流式状态
     state.setStreamingOutput(false);
     screen.setStreaming(false);
-
-    screen.appendScroll(COLORS.warning(`\n[INTERRUPTED] Agent stopped. Press Enter to continue.\n`));
+    
+    screen.appendScroll(COLORS.warning(`\n[interrupt] stopped\n`));
     if (data.toolResults && data.toolResults.length > 0) {
-      screen.appendScroll(COLORS.muted(`  Interrupted tools: ${data.toolResults.map(t => t.name).join(', ')}\n`));
+      screen.appendScroll(COLORS.muted(`  tools: ${data.toolResults.map(t => t.name).join(', ')}\n`));
     }
     screen.restoreCursor();
     screen.refreshInput();
   });
 
   on('agent_stopped_on_error', (data: AgentStoppedOnErrorData) => {
-    screen.appendScroll(COLORS.error(`\n[STOPPED] Agent stopped due to critical error.\n`));
-    screen.appendScroll(COLORS.muted(`  Error: ${data.error || 'Unknown'}\n`));
-    screen.appendScroll(COLORS.muted(`  Tool: ${data.tool || 'Unknown'}\n`));
-    screen.appendScroll(COLORS.warning(`  Suggestion: ${data.suggestion || 'Check the error and retry.'}\n`));
+    screen.appendScroll(COLORS.error(`\n[stop] ${data.tool}: ${data.error?.slice(0, 50)}\n`));
+    screen.appendScroll(COLORS.warning(`  → ${data.suggestion}\n`));
     screen.restoreCursor();
     screen.refreshInput();
   });
 
-  // Agent blocked - needs user guidance
   on('agent_blocked', (data: {
     status: string;
     task: string;
@@ -597,21 +957,17 @@ export function setupAgentEvents(
     suggestions: string[];
     timestamp: string;
   }) => {
-    screen.appendScroll(COLORS.error(`\n[BLOCKED] Agent needs your help.\n`));
-    screen.appendScroll(COLORS.muted(`  Task: ${data.task.slice(0, 100)}\n`));
-    screen.appendScroll(COLORS.muted(`  Attempted: ${data.attempted.join(', ')}\n`));
-    screen.appendScroll(COLORS.muted(`  Failed: ${data.failed.slice(0, 3).join(', ')}\n`));
-    screen.appendScroll(COLORS.warning(`  Error: ${data.error}\n`));
-    screen.appendScroll(COLORS.primary(`  Suggestions:\n`));
-    data.suggestions.forEach(s => {
-      screen.appendScroll(COLORS.primary(`    - ${s}\n`));
+    screen.appendScroll(COLORS.error(`\n[block] need help\n`));
+    screen.appendScroll(COLORS.muted(`  task: ${data.task.slice(0, 50)}\n`));
+    screen.appendScroll(COLORS.warning(`  error: ${data.error.slice(0, 50)}\n`));
+    data.suggestions.slice(0, 2).forEach(s => {
+      screen.appendScroll(COLORS.primary(`  → ${s.slice(0, 50)}\n`));
     });
-    screen.appendScroll(COLORS.muted(`\nPlease provide guidance or break down the task.\n`));
     screen.restoreCursor();
     screen.refreshInput();
   });
 
-  // Todo progress display
+  // Todo progress
   on('todos_set', (todos: TodoUpdateData['todos']) => {
     if (todos.length > 0) {
       displayTodoProgress(todos);
@@ -631,19 +987,19 @@ export function setupAgentEvents(
       'pending': '◻',
     };
 
-    const lines: string[] = [];
-    todos.forEach((todo, _i) => {
+    screen.appendScroll(COLORS.secondary('\n[tasks]\n'));
+    todos.slice(0, 5).forEach((todo) => {
       const icon = statusIcons[todo.status] || '◻';
       const colorFn = todo.status === 'completed'
         ? COLORS.success
         : todo.status === 'in_progress'
           ? COLORS.primary
           : COLORS.muted;
-      lines.push(colorFn(`  ${icon} ${todo.content}`));
+      screen.appendScroll(colorFn(`  ${icon} ${truncateToWidth(todo.content, 50)}\n`));
     });
-
-    screen.appendScroll(COLORS.secondary('\n[TASKS]\n'));
-    lines.forEach(line => screen.appendScroll(line + '\n'));
+    if (todos.length > 5) {
+      screen.appendScroll(COLORS.muted(`  ... (${todos.length - 5} more)\n`));
+    }
     screen.restoreCursor();
     screen.refreshInput();
   }
@@ -651,13 +1007,13 @@ export function setupAgentEvents(
   on('context_compressed', (data: ContextCompressedData) => {
     const formatTokens = (t: number) => t >= 1000 ? `${Math.floor(t/1000)}k` : `${t}`;
     const tokensInfo = data.tokensBefore && data.tokensAfter
-      ? ` (${formatTokens(data.tokensBefore)} -> ${formatTokens(data.tokensAfter)} tokens)`
+      ? ` (${formatTokens(data.tokensBefore)}→${formatTokens(data.tokensAfter)})`
       : '';
-    screen.appendScroll(COLORS.secondary(`\n[COMPRESS] ${data.message || `${data.before} -> ${data.after} messages`}${tokensInfo}\n`));
+    screen.appendScroll(COLORS.secondary(`\n[compress] ${data.before}→${data.after}${tokensInfo}\n`));
     screen.restoreCursor();
   });
 
-  // 返回 cleanup 函数：移除所有注册的监听器
+  // 返回 cleanup 函数
   return () => {
     for (const { event, handler } of listeners) {
       agent.off(event, handler);
@@ -666,7 +1022,7 @@ export function setupAgentEvents(
   };
 }
 
-// 格式化运行统计（耗时 + token 用量）
+// 格式化运行统计
 export function formatRunStats(
   elapsedMs: number,
   agent: SpicaAgent,
@@ -676,20 +1032,16 @@ export function formatRunStats(
   const usedTokens = tokenCounter.estimateMessages(messages);
   const contextWindow = tokenCounter.getContextWindow();
 
-  // 估算本次响应的 output tokens（最后一条 assistant 消息）
   const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
   const outputTokens = lastAssistant ? tokenCounter.estimateMessage(lastAssistant) : 0;
   const inputTokens = Math.max(0, usedTokens - outputTokens);
 
-  // 估算本次 tool 调用数
   const toolCallCount = messages.filter(m => m.role === 'tool').length;
 
-  // 格式化耗时
   const elapsed = elapsedMs < 1000
     ? `${elapsedMs}ms`
     : `${(elapsedMs / 1000).toFixed(1)}s`;
 
-  // 格式化 token 数
   const fmt = (t: number) => t >= 1000 ? `${(t / 1000).toFixed(1)}k` : String(t);
 
   return `${elapsed} | ${fmt(inputTokens)} in | ${fmt(outputTokens)} out | ${toolCallCount} tools | ${fmt(usedTokens)}/${fmt(contextWindow)} ctx`;
