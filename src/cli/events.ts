@@ -638,9 +638,10 @@ export function setupAgentEvents(
   });
 
   on('stream', (data: StreamData) => {
-    // 从 reasoning 切换到 stream 时，加分隔线
+    // 从 reasoning 切换到 stream 时，清除thinking动画
     if (reasoningStarted && !justSwitchedFromReasoning) {
       justSwitchedFromReasoning = true;
+      screen.clearThinkingAnimation();
       screen.appendScroll('\n');
     }
 
