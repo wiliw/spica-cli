@@ -500,27 +500,27 @@ function displayToolResult(seq: number, record: ToolCallRecord, data: ToolResult
   const icon = data.success ? COLORS.success('✓') : COLORS.error('✗');
   const summary = formatToolSummary(data);
 
-  // 第一行：结果摘要
-  // [1] file_write components.tsx → 373 lines ✓ 7.5s
+  // 简洁显示：[1] file_write → 373 lines ✓ 4.8s
   screen.appendScroll(COLORS.muted(`[${seq}] `));
-  screen.appendScroll(COLORS.tool(`${record.name} `));
+  screen.appendScroll(COLORS.tool(`${record.name}`));
 
-  // 显示主要参数（文件路径等）
-  const mainArg = getMainArg(record.name, record.args);
-  if (mainArg) {
-    screen.appendScroll(COLORS.file(`${mainArg} `));
+  // 显示文件名（完整显示，不截断）
+  const filePath = record.args.path as string;
+  if (filePath) {
+    const filename = filePath.split('/').pop() || filePath;
+    screen.appendScroll(COLORS.file(` ${filename}`));
   }
 
-  screen.appendScroll(COLORS.muted(`→ `));
-  screen.appendScroll(COLORS.primary(`${summary} `));
-  screen.appendScroll(icon);
+  screen.appendScroll(COLORS.muted(` → `));
+  screen.appendScroll(COLORS.primary(`${summary}`));
+  screen.appendScroll(` ${icon}`);
   screen.appendScroll(COLORS.muted(` ${elapsed}\n`));
 
   // Verbose模式：显示详细输出（可选）
   if (state.isVerboseMode() && data.output && data.output.length > 100) {
     const outputPreview = data.output.split('\n').slice(0, 5);
     for (const line of outputPreview) {
-      screen.appendScroll(COLORS.muted(`  ${line.slice(0, 80)}\n`));
+      screen.appendScroll(COLORS.muted(`  ${line.slice(0, 100)}\n`));
     }
     if (data.output.split('\n').length > 5) {
       screen.appendScroll(COLORS.muted(`  ... (${data.output.split('\n').length - 5} more)\n`));
@@ -689,10 +689,8 @@ export function setupAgentEvents(
       screen.appendScroll(COLORS.muted(`\n[tools] ${batchToolCount} parallel calls...\n`));
     }
 
-    // 显示开始标记
-    const argsPreview = formatArgsCompact(data.arguments || {}, 30);
-    screen.appendScroll(COLORS.muted(`\n[${seq}] ${data.name} ${argsPreview} ... `));
-    // 强制刷新（工具调用需要立即显示）
+    // 简洁显示：只显示序号和工具名（不显示参数，避免截断）
+    screen.appendScroll(COLORS.muted(`\n[${seq}] ${data.name}`));
     screen.flushOutput();
   });
 
