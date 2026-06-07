@@ -494,116 +494,57 @@ function formatElapsed(ms: number): string {
 // 新的工具显示格式
 // ============================================
 
-// Compact 模式：单行显示
-// 格式：[序号] 工具名 参数 → 结果 ✓ 耗时
-function displayToolCompact(seq: number, record: ToolCallRecord, data: ToolResultData): void {
-  const termWidth = getTerminalWidth();
+// 简洁的工具结果显示（统一格式）
+function displayToolResult(seq: number, record: ToolCallRecord, data: ToolResultData): void {
   const elapsed = formatElapsed(calcElapsedMs(record.startTime));
   const icon = data.success ? COLORS.success('✓') : COLORS.error('✗');
   const summary = formatToolSummary(data);
-  
-  // 计算各部分宽度
-  const seqPart = `[${seq}]`;
-  const namePart = record.name;
-  const argsPart = formatArgsCompact(record.args, 20);
-  const resultPart = data.success ? summary : (data.error?.slice(0, 30) || 'failed');
-  const timePart = elapsed;
-  
-  // 构建显示行
-  // [1] file_read events.ts → 150 lines ✓ 0.3s
-  const line = `${COLORS.muted(seqPart)} ${COLORS.tool(namePart)} ${COLORS.muted(argsPart)} → ${COLORS.primary(resultPart)} ${icon} ${COLORS.muted(timePart)}`;
-  
-  // 检查是否超宽，截断
-  const fullLine = line;
-  // 去掉 ANSI 码计算宽度
-  const ansiRegex = new RegExp('\\x1b\\[[0-9;]*m', 'g');
-  const lineWidth = getStringDisplayWidth(fullLine.replace(ansiRegex, ''));
-  
-  if (lineWidth > termWidth - 2) {
-    // 截断参数部分
-    const truncatedArgs = formatArgsCompact(record.args, Math.max(10, termWidth - 30));
-    const truncatedLine = `${COLORS.muted(seqPart)} ${COLORS.tool(namePart)} ${COLORS.muted(truncatedArgs)} → ${COLORS.primary(resultPart)} ${icon} ${COLORS.muted(timePart)}`;
-    screen.appendScroll(truncatedLine + '\n');
-  } else {
-    screen.appendScroll(fullLine + '\n');
+
+  // 第一行：结果摘要
+  // [1] file_write components.tsx → 373 lines ✓ 7.5s
+  screen.appendScroll(COLORS.muted(`[${seq}] `));
+  screen.appendScroll(COLORS.tool(`${record.name} `));
+
+  // 显示主要参数（文件路径等）
+  const mainArg = getMainArg(record.name, record.args);
+  if (mainArg) {
+    screen.appendScroll(COLORS.file(`${mainArg} `));
+  }
+
+  screen.appendScroll(COLORS.muted(`→ `));
+  screen.appendScroll(COLORS.primary(`${summary} `));
+  screen.appendScroll(icon);
+  screen.appendScroll(COLORS.muted(` ${elapsed}\n`));
+
+  // Verbose模式：显示详细输出（可选）
+  if (state.isVerboseMode() && data.output && data.output.length > 100) {
+    const outputPreview = data.output.split('\n').slice(0, 5);
+    for (const line of outputPreview) {
+      screen.appendScroll(COLORS.muted(`  ${line.slice(0, 80)}\n`));
+    }
+    if (data.output.split('\n').length > 5) {
+      screen.appendScroll(COLORS.muted(`  ... (${data.output.split('\n').length - 5} more)\n`));
+    }
   }
 }
 
-// Verbose 模式：带边框的详细显示
-function displayToolVerbose(seq: number, record: ToolCallRecord, data: ToolResultData): void {
-  const termWidth = getTerminalWidth();
-  const elapsed = formatElapsed(calcElapsedMs(record.startTime));
-  const icon = data.success ? '✓' : '✗';
-  const colorFn = data.success ? COLORS.success : COLORS.error;
-  
-  // 计算边框宽度（自适应终端）
-  const maxBoxWidth = Math.min(termWidth - 4, 100);
-  const minBoxWidth = 30;
-  
-  // 标题行：[序号] 工具名 参数 (耗时)
-  const argsStr = formatArgsCompact(record.args, maxBoxWidth - 20);
-  const titleContent = `[${seq}] ${record.name}${argsStr ? ` ${argsStr}` : ''}`;
-  const titleWithTime = `${titleContent} (${elapsed})`;
-  const titleWidth = getStringDisplayWidth(titleWithTime);
-  const boxWidth = Math.max(Math.min(titleWidth + 4, maxBoxWidth), minBoxWidth);
-  
-  // 开始边框
-  const topBorder = `┌${'─'.repeat(boxWidth - 2)}┐`;
-  screen.appendScroll(COLORS.tool(`\n${topBorder}\n`));
-  
-  // 标题行
-  const titlePad = boxWidth - 2 - titleWidth;
-  screen.appendScroll(COLORS.tool(`│ ${COLORS.muted(`[${seq}]`)} ${record.name} ${COLORS.muted(argsStr)} ${COLORS.muted(`(${elapsed})`)}${' '.repeat(Math.max(0, titlePad))}│\n`));
-  
-  // 输出内容（如果有）
-  const output = data.output || data.error || '';
-  if (output && !data.diff) {
-    // 分隔线
-    screen.appendScroll(COLORS.tool(`│${'─'.repeat(boxWidth - 2)}│\n`));
-    
-    // 输出行（截断超长行）
-    const maxContentWidth = boxWidth - 4;
-    const outputLines = output.split('\n').slice(0, 10); // 最多显示 10 行
-    for (const line of outputLines) {
-      const truncated = truncateToWidth(line, maxContentWidth);
-      screen.appendScroll(COLORS.muted(`│ ${truncated}${' '.repeat(Math.max(0, maxContentWidth - getStringDisplayWidth(truncated)))} │\n`));
-    }
-    
-    if (output.split('\n').length > 10) {
-      screen.appendScroll(COLORS.muted(`│ ... (${output.split('\n').length - 10} more lines)${' '.repeat(Math.max(0, maxContentWidth - 25))} │\n`));
-    }
-  }
-  
-  // 语法错误（如果有）
-  if (data.syntaxErrors && data.syntaxErrors.length > 0) {
-    screen.appendScroll(COLORS.tool(`│${'─'.repeat(boxWidth - 2)}│\n`));
-    screen.appendScroll(COLORS.error(`│ ⚠ Syntax errors:${' '.repeat(Math.max(0, maxBoxWidth - 16))}│\n`));
-    for (const err of data.syntaxErrors.slice(0, 3)) {
-      const truncated = truncateToWidth(err, maxBoxWidth - 4);
-      screen.appendScroll(COLORS.error(`│ ${truncated}${' '.repeat(Math.max(0, maxBoxWidth - 4 - getStringDisplayWidth(truncated)))}│\n`));
-    }
-  }
-  
-  // 结束边框：状态图标 + 结果摘要
-  const summary = formatToolSummary(data);
-  const statusLine = `${icon} ${summary}`;
-  const statusWidth = getStringDisplayWidth(statusLine);
-  const bottomPad = boxWidth - 2 - statusWidth;
-  
-  screen.appendScroll(colorFn(`└─ ${statusLine}${' '.repeat(Math.max(0, bottomPad))} ┘\n`));
-  
-  // Diff 预览（如果有）
-  if (data.diff && !['file_write', 'file_edit', 'file_multi_edit'].includes(record.name)) {
-    const diffLines = data.diff.split('\n').slice(0, 5);
-    for (const line of diffLines) {
-      if (line.startsWith('+')) {
-        screen.appendScroll(COLORS.diffAdd(`  ${line}\n`));
-      } else if (line.startsWith('-')) {
-        screen.appendScroll(COLORS.diffRemove(`  ${line}\n`));
-      } else {
-        screen.appendScroll(COLORS.muted(`  ${line}\n`));
-      }
-    }
+// 获取工具的主要参数（用于显示）
+function getMainArg(name: string, args: Record<string, unknown>): string | null {
+  switch (name) {
+    case 'file_read':
+    case 'file_write':
+    case 'file_edit':
+    case 'file_multi_edit':
+      return (args.path as string)?.split('/').pop() || null;
+    case 'bash':
+      const cmd = (args.command as string) || '';
+      return cmd.slice(0, 30) + (cmd.length > 30 ? '...' : '');
+    case 'grep':
+      return (args.pattern as string) || null;
+    case 'glob':
+      return (args.pattern as string) || null;
+    default:
+      return null;
   }
 }
 
@@ -733,65 +674,48 @@ export function setupAgentEvents(
   on('tool_call', (data: ToolCallData) => {
     state.setStreamingOutput(false);
     screen.setStreaming(false);
-    
+
     if (reasoningStarted) {
       screen.appendScroll('\n');
       reasoningStarted = false;
     }
-    
+
     // 注册工具调用
     const seq = registerToolCall(data);
-    
+
     // 显示并行状态（如果有多个工具同时调用）
     if (batchToolCount > 1 && seq === 1) {
       screen.appendScroll(COLORS.muted(`\n[tools] ${batchToolCount} parallel calls...\n`));
     }
-    
-    // Compact 模式：只显示开始标记
-    if (!state.isVerboseMode()) {
-      screen.appendScroll(COLORS.muted(`[${seq}] ${data.name} `));
-    } else {
-      // Verbose 模式：显示开始边框
-      const termWidth = getTerminalWidth();
-      const maxBoxWidth = Math.min(termWidth - 4, 100);
-      const argsStr = formatArgsCompact(data.arguments || {}, maxBoxWidth - 20);
-      const title = `[${seq}] ${data.name}${argsStr ? ` ${argsStr}` : ''}`;
-      const boxWidth = Math.max(Math.min(getStringDisplayWidth(title) + 4, maxBoxWidth), 30);
-      
-      screen.appendScroll(COLORS.tool(`\n┌${'─'.repeat(boxWidth - 2)}┐\n`));
-      screen.appendScroll(COLORS.tool(`│ ${COLORS.muted(`[${seq}]`)} ${data.name} ${COLORS.muted(argsStr)}${' '.repeat(Math.max(0, boxWidth - 2 - getStringDisplayWidth(title)))}│\n`));
-      screen.appendScroll(COLORS.tool(`│${'─'.repeat(boxWidth - 2)}│\n`));
-      screen.appendScroll(COLORS.muted(`│ running...${' '.repeat(Math.max(0, boxWidth - 13))}│\n`));
-    }
+
+    // 只显示开始标记（compact和verbose统一格式）
+    const argsPreview = formatArgsCompact(data.arguments || {}, 30);
+    screen.appendScroll(COLORS.muted(`\n[${seq}] ${data.name} ${argsPreview} ...`));
   });
 
   // 工具调用结果
   on('tool_result', (data: ToolResultData) => {
     state.setStreamingOutput(false);
     screen.setStreaming(false);
-    
+
     // 匹配工具调用
     const record = matchToolResult(data);
-    
+
     if (record) {
-      // 找到匹配的调用，显示完整结果
-      if (state.isVerboseMode()) {
-        displayToolVerbose(record.seq, record, data);
-      } else {
-        displayToolCompact(record.seq, record, data);
-      }
+      // 显示简洁的结果行
+      displayToolResult(record.seq, record, data);
     } else {
-      // 未找到匹配（可能是孤立的 result），显示简单格式
+      // 未找到匹配，显示简单格式
       const icon = data.success ? COLORS.success('✓') : COLORS.error('✗');
       const summary = formatToolSummary(data);
       screen.appendScroll(`${icon} ${data.name} → ${summary}\n`);
     }
-    
+
     // 更新状态栏
     if (model) {
       screen.setStatus(buildStatusText(agent, model));
     }
-    
+
     screen.restoreCursor();
     screen.refreshInput();
   });
@@ -988,15 +912,15 @@ export function setupAgentEvents(
     };
 
     screen.appendScroll(COLORS.secondary('\n[tasks]\n'));
-    todos.slice(0, 5).forEach((todo) => {
+    todos.forEach((todo) => {
       const icon = statusIcons[todo.status] || '◻';
       const colorFn = todo.status === 'completed'
         ? COLORS.success
         : todo.status === 'in_progress'
           ? COLORS.primary
           : COLORS.muted;
-      // 截断到80字符，显示更多内容
-      screen.appendScroll(colorFn(`  ${icon} ${truncateToWidth(todo.content, 80)}\n`));
+      // 不截断，完整显示todo内容
+      screen.appendScroll(colorFn(`  ${icon} ${todo.content}\n`));
     });
     if (todos.length > 5) {
       screen.appendScroll(COLORS.muted(`  ... (${todos.length - 5} more)\n`));
