@@ -242,7 +242,7 @@ export const TOOLS_DEFINITIONS: ToolDefinition[] = [
   },
   {
 name: 'bash',
-    description: 'Run shell command. Auto-retries with detached=true if timeout/stuck.',
+    description: 'Run shell command. Timeout returns error - AI should decide retry strategy.',
     parameters: {
       type: 'object' as const,
       properties: {
@@ -251,7 +251,6 @@ name: 'bash',
         detached: { type: 'boolean', description: 'Run in background (tmux/screen)' },
         interactive: { type: 'boolean', description: 'Enable PTY interaction' },
         maxOutputLength: { type: 'number', description: 'Max output chars (default 50000)' },
-        autoRetry: { type: 'boolean', description: 'Auto-retry with detached if stuck (default true)' },
       },
       required: ['command'],
     },
@@ -1006,7 +1005,6 @@ export async function executeTool(
         const timeout = safeArgs.timeout ? safeArgs.timeout * 1000 : 120000;
         const detached = safeArgs.detached === true;
         const interactive = safeArgs.interactive === true;
-        const _autoRetry = safeArgs.autoRetry !== false;
         const maxOutputLength = (safeArgs.maxOutputLength as number) || 50000;
         let inputs = (safeArgs.inputs as string[]) || [];
         const inputFile = safeArgs.inputFile as string;
@@ -1201,38 +1199,18 @@ Write-Output $proc.Id;
             clearTimeout(stuckWarningTimer);
             if (progressTimer) clearInterval(progressTimer);
 
-            // 检查是否超时（execa 的 timeout 触发）
+            // 检查是否超时或被中断
             if (bashResult.timedOut || abortController.signal.aborted) {
-              // 🔴 注意：不重复发送事件（已在 timer 中发送）
-              // 自动重试：以detached模式重新运行
-              if (_autoRetry && !detached && !isWindows) {
-                
-                const sessionId = `spica_retry_${Date.now()}`;
-                const escapedCommand = actualCommand.replace(/'/g, "'\\''");
-                const retryCommand = `tmux new-session -d -s ${sessionId} '${escapedCommand}' 2>/dev/null || screen -dmS ${sessionId} ${escapedCommand} 2>/dev/null || (${escapedCommand} &)`;
-                
-                try {
-                  await execa(retryCommand, {
-                    shell: true,
-                    cwd: WORKSPACE,
-                    timeout: 5000,
-                    reject: false,
-                  });
-                  
-                  return {
-                    success: false,
-                    output: `Command timed out after ${timeout / 1000}s. Auto-restarted in detached mode (running in background).\nSession: ${sessionId}\n\nTo view:\n  tmux attach -t ${sessionId}\n  # or: screen -r ${sessionId}\n\nTo kill:\n  tmux kill-session -t ${sessionId}\n  # or: screen -S ${sessionId} -X quit\n\nNote: Command is still running in background. Check results manually.`,
-                  };
-                } catch {
-                  return {
-                    success: false,
-                    error: `Command timeout after ${timeout / 1000}s. Auto-retry failed. Try using detached=true manually.`,
-                  };
-                }
+              // 返回错误给AI，让AI决定下一步
+              if (abortController.signal.aborted && !bashResult.timedOut) {
+                return {
+                  success: false,
+                  error: 'Command aborted by user (ESC ESC).',
+                };
               }
               return {
                 success: false,
-                error: `Command timeout after ${timeout / 1000}s. Try using detached=true for long-running commands.`,
+                error: `Command timed out after ${timeout / 1000}s. AI should decide: retry with detached=true, increase timeout, or use different approach.`,
               };
             }
             // 合并stdout和stderr显示完整输出
@@ -1265,42 +1243,24 @@ Write-Output $proc.Id;
             clearTimeout(stuckWarningTimer);
             if (progressTimer) clearInterval(progressTimer);
 
+            // 用户主动中断：立即返回
+            if (abortController.signal.aborted) {
+              return {
+                success: false,
+                error: 'Command aborted by user (ESC ESC).',
+              };
+            }
+
             // 检查是否是被强制杀死（卡住检测触发）
             const wasKilled = bashError.message?.includes('SIGKILL') ||
                               bashError.message?.includes('killed') ||
-                              bashError.isCanceled ||
-                              abortController.signal.aborted;
+                              bashError.isCanceled;
 
             if (wasKilled) {
-              // 进程被强制杀死，说明卡住了
-              // 自动重试：以detached模式重新运行
-              if (_autoRetry && !detached && !isWindows) {
-                const sessionId = `spica_retry_${Date.now()}`;
-                const escapedCommand = actualCommand.replace(/'/g, "'\\''");
-                const retryCommand = `tmux new-session -d -s ${sessionId} '${escapedCommand}' 2>/dev/null || screen -dmS ${sessionId} ${escapedCommand} 2>/dev/null || (${escapedCommand} &)`;
-
-                try {
-                  await execa(retryCommand, {
-                    shell: true,
-                    cwd: WORKSPACE,
-                    timeout: 5000,
-                    reject: false,
-                  });
-
-                  return {
-                    success: false,
-                    output: `Command was stuck and killed after ${stuckWarningMs / 1000}s. Auto-restarted in detached mode.\nSession: ${sessionId}\n\nTo view: tmux attach -t ${sessionId}\nTo kill: tmux kill-session -t ${sessionId}`,
-                  };
-                } catch {
-                  return {
-                    success: false,
-                    error: `Command stuck after ${stuckWarningMs / 1000}s. Auto-retry failed. Try using detached=true manually.`,
-                  };
-                }
-              }
+              // 返回错误给AI，让AI决定下一步
               return {
                 success: false,
-                error: `Command stuck after ${stuckWarningMs / 1000}s and was killed. Try: detached=true, timeout=300, or interactive=true.`,
+                error: `Command stuck after ${stuckWarningMs / 1000}s and was killed. AI should decide: retry with detached=true, increase timeout, or use different approach.`,
               };
             }
 
