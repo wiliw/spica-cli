@@ -688,9 +688,11 @@ export function setupAgentEvents(
       screen.appendScroll(COLORS.muted(`\n[tools] ${batchToolCount} parallel calls...\n`));
     }
 
-    // 只显示开始标记（compact和verbose统一格式）
+    // 显示开始标记
     const argsPreview = formatArgsCompact(data.arguments || {}, 30);
-    screen.appendScroll(COLORS.muted(`\n[${seq}] ${data.name} ${argsPreview} ...`));
+    screen.appendScroll(COLORS.muted(`\n[${seq}] ${data.name} ${argsPreview} ... `));
+    // 强制刷新（工具调用需要立即显示）
+    screen.flushOutput();
   });
 
   // 工具调用结果
@@ -710,6 +712,8 @@ export function setupAgentEvents(
       const summary = formatToolSummary(data);
       screen.appendScroll(`${icon} ${data.name} → ${summary}\n`);
     }
+    // 强制刷新
+    screen.flushOutput();
 
     // 更新状态栏
     if (model) {

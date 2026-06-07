@@ -212,7 +212,16 @@ export class ScreenManager {
       // 保留最后一个不完整行在缓冲中
       this.outputBuffer = lines[lines.length - 1] || '';
 
-      // 每行输出后，刷新输入框（如果有pending input）
+      // 每行输出后，刷新输入框
+      this.refreshInputDuringStreaming();
+    }
+  }
+
+  // 强制刷新输出缓冲（用于工具调用等需要立即显示的内容）
+  flushOutput(): void {
+    if (this.outputBuffer) {
+      this.writeLine(this.outputBuffer);
+      this.outputBuffer = '';
       this.refreshInputDuringStreaming();
     }
   }
