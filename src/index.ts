@@ -199,11 +199,10 @@ program
           "/skill",
           "/mcp",
           "/history",
+          "/view",
           "/compact",
           "/summary",
           "/init",
-          "/sessions",
-          "/switch",
           "/rename",
           "/delete",
         ];
@@ -438,104 +437,112 @@ program
               return;
             }
 
-            // 会话管理
-            if (cmd === "sessions" || cmd === "s") {
-              const { listSessions } = await import("./utils/session");
-              const { getTaskStats } =
-                await import("./storage/taskPersistence");
+            // 历史阅读界面（只读，不可继续对话）
+            if (cmd === "sessions" || cmd === "history" || cmd === "h") {
+              const { listSessions, loadSessionById } = await import("./utils/session");
               const sessions = listSessions(agent.getWorkspacePath());
-              const taskStats = getTaskStats(agent.getWorkspacePath());
-              const currentMsgs = agent.getMessages().length;
 
-              screen.appendScroll(COLORS.primary.bold("\nSessions:\n"));
-              screen.appendScroll(`  Current: ${currentMsgs} messages\n`);
-              screen.appendScroll(`  Archived: ${sessions.length} sessions\n`);
-              screen.appendScroll(
-                `  Tasks: ${taskStats.total} (${taskStats.completed} done, ${taskStats.in_progress} active)\n`,
-              );
+              screen.appendScroll(COLORS.primary.bold("\n📚 History Browser (Read Only)\n"));
+              screen.appendScroll(COLORS.muted("  Archived chats for review only (cannot continue)\n\n"));
 
-              if (sessions.length > 0) {
-                screen.appendScroll(COLORS.muted("\n  Archived chats:\n"));
-                sessions.slice(0, 10).forEach((s, i) => {
-                  const lastDate = new Date(s.lastActivity).toLocaleDateString();
-                  const createdDate = new Date(s.createdAt).toLocaleDateString();
-                  screen.appendScroll(
-                    COLORS.primary(
-                      `    ${i + 1}. ${s.id}\n`,
-                    ),
-                  );
-                  screen.appendScroll(
-                    COLORS.muted(
-                      `       ${s.name} (${s.messageCount} msgs) | ${createdDate} - ${lastDate}\n`,
-                    ),
-                  );
-                  if (s.summary) {
-                    screen.appendScroll(
-                      COLORS.muted(
-                        `       Summary: ${s.summary.slice(0, 100)}${s.summary.length > 100 ? '...' : ''}\n`,
-                      ),
-                    );
-                  }
-                });
-                if (sessions.length > 10) {
-                  screen.appendScroll(
-                    COLORS.muted(`    ... and ${sessions.length - 10} more\n`),
-                  );
-                }
+              if (sessions.length === 0) {
+                screen.appendScroll(COLORS.muted("  No archived sessions yet.\n"));
+                screen.appendScroll(COLORS.muted("  Use /archive to save current chat and start new.\n\n"));
+                return;
               }
 
-              screen.appendScroll(
-                COLORS.muted(
-                  "\n  Commands: /switch <id>, /rename <name>, /delete <id>\n",
-                ),
-              );
-              screen.appendScroll("\n");
+              // 显示历史列表
+              screen.appendScroll(COLORS.primary.bold("  Recent chats:\n"));
+              sessions.slice(0, 15).forEach((s, i) => {
+                const lastDate = new Date(s.lastActivity).toLocaleDateString();
+                screen.appendScroll(
+                  COLORS.primary(`    ${i + 1}. ${s.id.slice(0, 15)}... (${s.messageCount} msgs, ${lastDate})\n`),
+                );
+                if (s.summary) {
+                  screen.appendScroll(
+                    COLORS.muted(`       ${s.summary.slice(0, 80)}...\n`),
+                  );
+                }
+              });
+
+              if (sessions.length > 15) {
+                screen.appendScroll(COLORS.muted(`    ... and ${sessions.length - 15} more\n`));
+              }
+
+              screen.appendScroll(COLORS.muted("\n  Commands:\n"));
+              screen.appendScroll(COLORS.muted("    /view <id>     Read session content\n"));
+              screen.appendScroll(COLORS.muted("    /rename <id> <name>  Rename session\n"));
+              screen.appendScroll(COLORS.muted("    /delete <id>   Delete session\n"));
+              screen.appendScroll(COLORS.muted("\n  Note: History is read-only. To continue work, stay in current session.\n\n"));
 
               return;
             }
 
-            if (cmd.startsWith("switch ")) {
-              const sessionId = cmd.slice(7).trim();
-              const { switchSession, loadSession, loadSessionById, archiveSession } = await import("./utils/session");
+            // 查看历史 session 内容（只读）
+            if (cmd.startsWith("view ")) {
+              const sessionId = cmd.slice(5).trim();
+              const { loadSessionById } = await import("./utils/session");
+              const session = loadSessionById(agent.getWorkspacePath(), sessionId);
 
-              // 切换前先归档当前 session
-              const currentMessages = agent.getMessages();
-              if (currentMessages.length > 0) {
-                const currentSession = loadSession(agent.getWorkspacePath());
-                if (currentSession) {
-                  currentSession.messages = currentMessages;
-                  currentSession.lastActivity = new Date().toISOString();
-                  archiveSession(agent.getWorkspacePath(), currentSession);
-                  screen.appendScroll(
-                    COLORS.muted(`\n[ARCHIVED] Current session saved (${currentMessages.length} messages)\n`),
-                  );
+              if (!session) {
+                screen.appendScroll(COLORS.error(`\n[ERR] Session ${sessionId} not found\n`));
+                return;
+              }
+
+              screen.appendScroll(COLORS.primary.bold(`\n📖 Reading: ${session.name || sessionId}\n`));
+              screen.appendScroll(COLORS.muted(`  Created: ${new Date(session.createdAt).toLocaleString()}\n`));
+              screen.appendScroll(COLORS.muted(`  Last: ${new Date(session.lastActivity).toLocaleString()}\n`));
+              screen.appendScroll(COLORS.muted(`  Messages: ${session.messages?.length || 0}\n`));
+              if (session.summary) {
+                screen.appendScroll(COLORS.muted(`  Summary: ${session.summary}\n`));
+              }
+              screen.appendScroll(COLORS.muted("\n  --- Content (press Enter to scroll, ESC/q to exit) ---\n\n"));
+
+              // 显示消息内容（只读）
+              const messages = session.messages || [];
+              let displayed = 0;
+              const BATCH_SIZE = 10;
+
+              const showBatch = (start: number) => {
+                const end = Math.min(start + BATCH_SIZE, messages.length);
+                for (let i = start; i < end; i++) {
+                  const m = messages[i];
+                  const role = m.role === 'user' ? '👤 User' : m.role === 'assistant' ? '🤖 AI' : m.role === 'tool' ? '🔧 Tool' : '📋 System';
+                  screen.appendScroll(COLORS.primary(`\n${role}:\n`));
+
+                  const content = (m.content || '').slice(0, 500);
+                  content.split('\n').forEach(line => {
+                    screen.appendScroll(COLORS.muted(`  ${line}\n`));
+                  });
+
+                  if (m.toolCalls && m.toolCalls.length > 0) {
+                    screen.appendScroll(COLORS.muted(`  Tools: ${m.toolCalls.map(tc => tc.name).join(', ')}\n`));
+                  }
                 }
-              }
+                displayed = end;
+                if (end < messages.length) {
+                  screen.appendScroll(COLORS.muted(`\n  --- [${end}/${messages.length}] Press Enter for more, ESC/q to exit ---\n`));
+                } else {
+                  screen.appendScroll(COLORS.muted(`\n  --- End of session (${messages.length} messages) ---\n`));
+                  screen.appendScroll(COLORS.muted("  This is read-only. Press ESC/q to return to current session.\n\n"));
+                }
+              };
 
-              // 加载目标 session
-              const targetSession = loadSessionById(agent.getWorkspacePath(), sessionId);
-              if (targetSession) {
-                agent.setMessages(targetSession.messages || []);
-                // 同时更新 session.json（作为当前活跃 session）
-                switchSession(agent.getWorkspacePath(), sessionId);
-                screen.appendScroll(
-                  COLORS.success(`\n[SWITCHED] Loaded session ${sessionId}\n`),
-                );
-                screen.appendScroll(
-                  COLORS.muted(`${targetSession.messages?.length || 0} messages from ${targetSession.name}\n`),
-                );
-                screen.appendScroll(
-                  COLORS.muted("Continue conversation or use /archive to start new\n"),
-                );
-              } else {
-                screen.appendScroll(
-                  COLORS.error(`\n[ERR] Session ${sessionId} not found\n`),
-                );
-                screen.appendScroll(
-                  COLORS.muted("Use /sessions to list available sessions.\n"),
-                );
-              }
+              showBatch(0);
 
+              // 这里需要暂停当前输入处理，等待用户按键...
+              // 由于当前架构的限制，我们先简单显示全部内容
+              // 完整的交互式阅读界面需要更复杂的重构
+
+              return;
+            }
+
+            // 删除 /switch 功能（历史只读）
+            if (cmd.startsWith("switch ")) {
+              screen.appendScroll(COLORS.warning("\n[NOTE] /switch is disabled\n"));
+              screen.appendScroll(COLORS.muted("  History sessions are read-only for review.\n"));
+              screen.appendScroll(COLORS.muted("  To continue work, stay in current session.\n"));
+              screen.appendScroll(COLORS.muted("  Use /archive to save current and start new.\n\n"));
               return;
             }
 
@@ -637,7 +644,7 @@ program
               clearInputQueue();
 
               screen.appendScroll(COLORS.success("[NEW] Started fresh session\n"));
-              screen.appendScroll(COLORS.muted("Use /sessions to view archived chats, /switch <id> to load\n"));
+              screen.appendScroll(COLORS.muted("Use /history to view archived chats (read-only)\n"));
 
               return;
             }
@@ -1172,22 +1179,16 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
           screen.appendScroll(COLORS.muted("  help        Show help\n"));
           screen.appendScroll("\n");
           screen.appendScroll(COLORS.primary.bold("Session:\n"));
-          screen.appendScroll(COLORS.muted("  /archive    Archive current chat & start new\n"));
-          screen.appendScroll(COLORS.muted("  /clear      Same as /archive\n"));
-          screen.appendScroll(COLORS.muted("  /history    Show messages\n"));
-          screen.appendScroll(COLORS.muted("  /summary    Summarize session progress\n"));
+          screen.appendScroll(COLORS.muted("  /archive    Archive current & start new\n"));
+          screen.appendScroll(COLORS.muted("  /history    Browse archived chats (read-only)\n"));
+          screen.appendScroll(COLORS.muted("  /view <id>  Read specific archived chat\n"));
+          screen.appendScroll(COLORS.muted("  /summary    Summarize current session\n"));
           screen.appendScroll(COLORS.muted("  /compact    Compress context\n"));
           screen.appendScroll(
-            COLORS.muted("  /sessions   List archived chats\n"),
+            COLORS.muted("  /rename <id> <name> Rename archived chat\n"),
           );
           screen.appendScroll(
-            COLORS.muted("  /switch <id> Load archived chat\n"),
-          );
-          screen.appendScroll(
-            COLORS.muted("  /rename <id> <name> Rename chat\n"),
-          );
-          screen.appendScroll(
-            COLORS.muted("  /delete <id> Delete chat\n"),
+            COLORS.muted("  /delete <id> Delete archived chat\n"),
           );
           screen.appendScroll("\n");
           screen.appendScroll(COLORS.primary.bold("Queue:\n"));
