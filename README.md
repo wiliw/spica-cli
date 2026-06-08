@@ -1,9 +1,26 @@
 # spica-cli
 
-**AI Coding Agent CLI** - A powerful, self-improving coding agent with intelligent tool orchestration, automatic retry mechanisms, and code quality analysis.
+**AI Coding Agent CLI** - Your intelligent coding companion with automatic conflict detection, smart retries, and industry-standard code quality analysis.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/node/v/spica-cli)](https://nodejs.org)
+[![GitHub Stars](https://img.shields.io/github/stars/zison/spica-cli?style=social)](https://github.com/zison/spica-cli)
+[![GitHub Issues](https://img.shields.io/github/issues/zison/spica-cli)](https://github.com/zison/spica-cli/issues)
+[![npm downloads](https://img.shields.io/npm/dt/spica-cli)](https://www.npmjs.com/package/spica-cli)
+
+**English** | [中文](README_CN.md)
+
+---
+
+## Why spica-cli?
+
+🎯 **Smart & Safe**: Detects file conflicts automatically, retries failed commands, validates syntax before saving
+
+📊 **Quality-Focused**: Built on Martin Fowler's maintainability research - helps you write AI-friendly code
+
+⚡ **Fast & Efficient**: Parallel tool execution, smart context compression, real-time token tracking
+
+🔌 **MCP Ready**: Model Context Protocol support for extending capabilities
 
 ---
 
