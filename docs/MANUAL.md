@@ -351,6 +351,4 @@ spica set vllm http://localhost:8000/v1 dummy <model>
 
 ## See Also
 
-- [CONFIGURATION.md](CONFIGURATION.md) - Configuration guide
-- [STORAGE.md](STORAGE.md) - Storage locations
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Architecture details
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Contributing guide

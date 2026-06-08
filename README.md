@@ -111,8 +111,8 @@ npm run lint     # Lint check
 
 ## Documentation
 
-- [MANUAL.md](docs/MANUAL.md) - User manual
-- [CONFIGURATION.md](docs/CONFIGURATION.md) - Configuration guide
+- [MANUAL.md](docs/MANUAL.md) - Complete user manual
+- [CONTRIBUTING.md](docs/CONTRIBUTING.md) - Contributing guide
 
 ## License
 
