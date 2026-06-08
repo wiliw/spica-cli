@@ -306,7 +306,8 @@ program
             // 禁用 Bracketed Paste Mode
             screen.writeRaw(`${ESC}[?2004l`);
             tuiHandler!.end();
-            screen.appendScroll(COLORS.error("\n[FORCE EXIT]"));
+            screen.end();
+            console.log(COLORS.error("[FORCE EXIT]"));
             process.exit(0);
             return;
           }
@@ -335,14 +336,14 @@ program
             // 禁用 Bracketed Paste Mode
             screen.writeRaw(`${ESC}[?2004l`);
             tuiHandler!.end();
+            screen.end();  // 先结束TUI，恢复终端
             const messages = agent.getMessages();
             saveSession(agent.getWorkspacePath(), messages);
             await shutdownMCP();
             state.setAgent(null);
-            screen.appendScroll(
-              COLORS.muted(`\nSession saved (${messages.length} messages)\n`),
-            );
-            screen.appendScroll(COLORS.muted("Goodbye!\n"));
+            // 使用console.log而不是appendScroll
+            console.log(COLORS.muted(`Session saved (${messages.length} messages)`));
+            console.log(COLORS.muted("Goodbye!"));
             process.exit(0);
             return;
           }
