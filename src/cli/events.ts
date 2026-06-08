@@ -850,10 +850,12 @@ export function setupAgentEvents(
   });
 
   on('stream', (data: StreamData) => {
-    // 从 reasoning 切换到 stream 时，清除thinking动画
+    // 从 reasoning 切换到 stream 时，清除thinking动画并换行
     if (reasoningStarted && !justSwitchedFromReasoning) {
       justSwitchedFromReasoning = true;
       screen.clearThinkingAnimation();
+      // 先刷新流式缓冲，再换行
+      screen.flushStreamBuffer();
       screen.appendScroll('\n');
     }
 
