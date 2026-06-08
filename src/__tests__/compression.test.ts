@@ -331,4 +331,83 @@ describe('Compression Integration', () => {
       expect(setCalls).toBeGreaterThanOrEqual(1);  // At least one from first compact
     });
   });
+
+  describe('System prompt preservation', () => {
+    it('should preserve system prompt when compressing', async () => {
+      // Setup messages with system prompt at index 0
+      testMessages = [
+        { role: 'system', content: 'You are spica, a coding agent CLI.' },
+        { role: 'user', content: 'X'.repeat(400) },
+        { role: 'assistant', content: 'Y'.repeat(400) },
+        { role: 'user', content: 'X'.repeat(400) },
+        { role: 'assistant', content: 'Y'.repeat(400) },
+        { role: 'user', content: 'X'.repeat(400) },
+        { role: 'assistant', content: 'Y'.repeat(400) },
+        { role: 'user', content: 'X'.repeat(400) },
+        { role: 'assistant', content: 'Y'.repeat(400) }
+      ];
+
+      await agent.compact();
+
+      expect(mockLLM.setMessages).toHaveBeenCalled();
+      const finalMessages = mockLLM.setMessages.mock.calls[0][0];
+
+      // System prompt must be preserved at index 0
+      expect(finalMessages[0].role).toBe('system');
+      expect(finalMessages[0].content).toContain('spica');
+    });
+
+    it('should preserve system prompt even in secondary compression', async () => {
+      // Very large message set to trigger secondary compression
+      testMessages = [
+        { role: 'system', content: 'You are spica, a coding agent CLI. AGENTS.md content here.' },
+        { role: 'user', content: 'X'.repeat(500) },
+        { role: 'assistant', content: 'Y'.repeat(500) },
+        { role: 'user', content: 'X'.repeat(500) },
+        { role: 'assistant', content: 'Y'.repeat(500) },
+        { role: 'user', content: 'X'.repeat(500) },
+        { role: 'assistant', content: 'Y'.repeat(500) },
+        { role: 'user', content: 'X'.repeat(500) },
+        { role: 'assistant', content: 'Y'.repeat(500) },
+        { role: 'user', content: 'X'.repeat(500) },
+        { role: 'assistant', content: 'Y'.repeat(500) },
+        { role: 'user', content: 'X'.repeat(500) },
+        { role: 'assistant', content: 'Y'.repeat(500) },
+        { role: 'user', content: 'X'.repeat(500) },
+        { role: 'assistant', content: 'Y'.repeat(500) },
+        { role: 'user', content: 'X'.repeat(500) },
+        { role: 'assistant', content: 'Y'.repeat(500) },
+        { role: 'user', content: 'X'.repeat(500) },
+        { role: 'assistant', content: 'Y'.repeat(500) },
+        { role: 'user', content: 'X'.repeat(500) },
+        { role: 'assistant', content: 'Y'.repeat(500) }
+      ];
+
+      await agent.compact();
+
+      const finalMessages = mockLLM.setMessages.mock.calls[0][0];
+      // System prompt must still be at index 0
+      expect(finalMessages[0].role).toBe('system');
+      expect(finalMessages[0].content).toContain('spica');
+    });
+
+    it('should handle compression without system prompt', async () => {
+      // Messages without system prompt
+      testMessages = [
+        { role: 'user', content: 'X'.repeat(400) },
+        { role: 'assistant', content: 'Y'.repeat(400) },
+        { role: 'user', content: 'X'.repeat(400) },
+        { role: 'assistant', content: 'Y'.repeat(400) },
+        { role: 'user', content: 'X'.repeat(400) },
+        { role: 'assistant', content: 'Y'.repeat(400) }
+      ];
+
+      await agent.compact();
+
+      const finalMessages = mockLLM.setMessages.mock.calls[0][0];
+      // Should work without system prompt (first message is summary or recent)
+      expect(finalMessages.length).toBeGreaterThan(0);
+      expect(finalMessages[0].role).not.toBe('system');
+    });
+  });
 });

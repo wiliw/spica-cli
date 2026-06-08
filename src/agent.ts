@@ -591,7 +591,18 @@ async init() {
 
   setMessages(messages: ChatMessage[]) {
     if (this.llm) {
-      const cleanedMessages = this.cleanMessagesForLLM(messages);
+      // 保留系统提示词
+      const currentMessages = this.llm.getMessages();
+      const systemPrompt = currentMessages.find(m => m.role === 'system');
+
+      let messagesWithSystem = messages;
+      if (systemPrompt) {
+        // 过滤掉传入消息中可能存在的 system（避免重复）
+        const filteredMessages = messages.filter(m => m.role !== 'system');
+        messagesWithSystem = [systemPrompt, ...filteredMessages];
+      }
+
+      const cleanedMessages = this.cleanMessagesForLLM(messagesWithSystem);
       this.llm.setMessages(cleanedMessages);
     }
   }
@@ -1191,12 +1202,23 @@ public async compact(): Promise<void> {
   private async compactToTarget(targetTokens: number): Promise<void> {
     if (!this.llm) return;
     const allMessages = this.llm.getMessages();
+
+    // 分离系统提示词（始终保留）
+    const systemPrompt = allMessages.find(m => m.role === 'system');
+    const messagesWithoutSystem = allMessages.filter(m => m.role !== 'system');
+
+    // 如果没有非系统消息，不需要压缩
+    if (messagesWithoutSystem.length === 0) {
+      this.emit('context_compressed', { before: allMessages.length, after: allMessages.length, tokensBefore: 0, tokensAfter: 0 });
+      return;
+    }
+
     const tokenCounter = new TokenCounter();
     const provider = this.llm.getProvider();
     tokenCounter.setContextWindow(provider.getContextWindow());
     const contextWindow = provider.getContextWindow();
 
-    const usedTokens = tokenCounter.estimateMessages(allMessages);
+    const usedTokens = tokenCounter.estimateMessages(messagesWithoutSystem);
 
     // 如果 tokens 已经低于目标，不需要压缩
     if (usedTokens < targetTokens) {
@@ -1211,10 +1233,10 @@ public async compact(): Promise<void> {
     // 测试证明 min=3 max=8 过于激进，会丢失太多上下文
     // Adaptive floor: small windows keep fewer, large windows keep more
     const minKeep = Math.max(3, Math.min(8, Math.ceil(contextWindow / 50000)));
-    keepCount = Math.max(minKeep, Math.min(keepCount, Math.max(minKeep + 2, 15), Math.floor(allMessages.length * 0.25)));
+    keepCount = Math.max(minKeep, Math.min(keepCount, Math.max(minKeep + 2, 15), Math.floor(messagesWithoutSystem.length * 0.25)));
 
-    const recentMessages = allMessages.slice(-keepCount);
-    const _oldMessages = allMessages.slice(0, -keepCount);
+    const recentMessages = messagesWithoutSystem.slice(-keepCount);
+    const _oldMessages = messagesWithoutSystem.slice(0, -keepCount);
 
     // Adaptive truncation: 1% of context window, floor 500 chars
     const maxContentLength = Math.max(500, Math.floor(contextWindow * 0.01));
@@ -1268,7 +1290,7 @@ public async compact(): Promise<void> {
       safetyTokens = tokenCounter.estimateMessages(safetyTruncated);
     }
     // Recompute oldMessages to match possibly reduced recent set
-    const finalOldMessages = allMessages.slice(0, allMessages.length - safetyTruncated.length);
+    const finalOldMessages = messagesWithoutSystem.slice(0, messagesWithoutSystem.length - safetyTruncated.length);
 
     if (finalOldMessages.length > 0) {
       const summary = await this.generateSummary(finalOldMessages);
@@ -1289,9 +1311,9 @@ public async compact(): Promise<void> {
         }
       }
 
-      // 第二遍：保留 user/assistant/system，以及匹配的 tool messages
+      // 第二遍：保留 user/assistant，以及匹配的 tool messages（不含 system，因为已分离）
       for (const m of safetyTruncated) {
-        if (m.role === 'user' || m.role === 'assistant' || m.role === 'system') {
+        if (m.role === 'user' || m.role === 'assistant') {
           // 如果是 assistant with toolCalls，检查每个toolCall是否有对应的tool message
           if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
             const hasAllToolMessages = m.toolCalls.every(tc => existingToolMessageIds.has(tc.id));
@@ -1312,23 +1334,33 @@ public async compact(): Promise<void> {
         }
       }
 
-      const compressed = [summary, ...safetyTruncatedClean];
+      // 组装压缩后的消息：系统提示词 + 摘要 + 保留的消息
+      const compressed = systemPrompt
+        ? [systemPrompt, summary, ...safetyTruncatedClean]
+        : [summary, ...safetyTruncatedClean];
       this.llm.setMessages(compressed);
 
       // 检查压缩后的 tokens，如果仍然超限，继续压缩
       const newTokens = tokenCounter.estimateMessages(compressed);
       if (newTokens > targetTokens && compressed.length > 3) {
-        // 再次压缩，只保留最近 2 条 + 摘要
-        const finalMessages = compressed.slice(-2);
-        const secondSummary = await this.generateSummary(compressed.slice(0, -2));
-        this.llm.setMessages([secondSummary, ...finalMessages]);
+        // 再次压缩，只保留最近 2 条 + 摘要（保留系统提示词）
+        const toCompressAgain = compressed.filter(m => m.role !== 'system');
+        const finalMessages = toCompressAgain.slice(-2);
+        const secondSummary = await this.generateSummary(toCompressAgain.slice(0, -2));
+        const finalCompressed = systemPrompt
+          ? [systemPrompt, secondSummary, ...finalMessages]
+          : [secondSummary, ...finalMessages];
+        this.llm.setMessages(finalCompressed);
       }
     } else {
-      // 没有旧消息，只截断（也要过滤）
-      const safetyTruncatedClean = safetyTruncated.filter(m => 
-        m.role === 'user' || m.role === 'assistant' || m.role === 'system'
+      // 没有旧消息，只截断（也要过滤，并保留系统提示词）
+      const safetyTruncatedClean = safetyTruncated.filter(m =>
+        m.role === 'user' || m.role === 'assistant'
       );
-      this.llm.setMessages(safetyTruncatedClean);
+      const finalMessages = systemPrompt
+        ? [systemPrompt, ...safetyTruncatedClean]
+        : safetyTruncatedClean;
+      this.llm.setMessages(finalMessages);
     }
 
     this.emit('context_compressed', {

@@ -227,6 +227,108 @@ it('should suggest for ENOENT error', () => {
     });
   });
 
+  describe('setMessages preserves system prompt', () => {
+    it('should preserve system prompt when clearing messages', () => {
+      // Create a mock LLM with system prompt in messages
+      const mockLLMWithSystem = {
+        setSystemPrompt: vi.fn(),
+        setMessages: vi.fn(),
+        getMessages: vi.fn().mockReturnValue([
+          { role: 'system', content: 'You are spica, a coding agent CLI.' },
+          { role: 'user', content: 'Previous user message' },
+          { role: 'assistant', content: 'Previous assistant response' }
+        ]),
+        on: vi.fn(),
+        generate: vi.fn(),
+        continueWithAllToolResults: vi.fn(),
+        generateDirect: vi.fn(),
+        checkConnection: vi.fn().mockResolvedValue({ success: true }),
+        getProvider: vi.fn().mockReturnValue({ getContextWindow: vi.fn().mockReturnValue(128000) }),
+        interrupt: vi.fn(),
+      };
+
+      // Inject mock
+      Object.defineProperty(agent, 'llm', { value: mockLLMWithSystem, writable: true });
+
+      // Call setMessages with empty array (simulating /clear)
+      agent.setMessages([]);
+
+      // Verify setMessages was called with system prompt preserved
+      expect(mockLLMWithSystem.setMessages).toHaveBeenCalled();
+      const finalMessages = mockLLMWithSystem.setMessages.mock.calls[0][0];
+
+      // System prompt should be preserved
+      expect(finalMessages[0].role).toBe('system');
+      expect(finalMessages[0].content).toContain('spica');
+    });
+
+    it('should preserve system prompt when setting new messages', () => {
+      const mockLLMWithSystem = {
+        setSystemPrompt: vi.fn(),
+        setMessages: vi.fn(),
+        getMessages: vi.fn().mockReturnValue([
+          { role: 'system', content: 'You are spica, a coding agent CLI.' },
+          { role: 'user', content: 'Old message 1' },
+          { role: 'assistant', content: 'Old response 1' }
+        ]),
+        on: vi.fn(),
+        generate: vi.fn(),
+        continueWithAllToolResults: vi.fn(),
+        generateDirect: vi.fn(),
+        checkConnection: vi.fn().mockResolvedValue({ success: true }),
+        getProvider: vi.fn().mockReturnValue({ getContextWindow: vi.fn().mockReturnValue(128000) }),
+        interrupt: vi.fn(),
+      };
+
+      Object.defineProperty(agent, 'llm', { value: mockLLMWithSystem, writable: true });
+
+      // Set new messages (simulating session switch)
+      agent.setMessages([
+        { role: 'user', content: 'New message 1' },
+        { role: 'assistant', content: 'New response 1' }
+      ]);
+
+      expect(mockLLMWithSystem.setMessages).toHaveBeenCalled();
+      const finalMessages = mockLLMWithSystem.setMessages.mock.calls[0][0];
+
+      // System prompt should be preserved at index 0
+      expect(finalMessages[0].role).toBe('system');
+      expect(finalMessages.length).toBe(3);  // system + 2 new messages
+    });
+
+    it('should not duplicate system prompt if new messages contain system', () => {
+      const mockLLMWithSystem = {
+        setSystemPrompt: vi.fn(),
+        setMessages: vi.fn(),
+        getMessages: vi.fn().mockReturnValue([
+          { role: 'system', content: 'You are spica, a coding agent CLI.' },
+        ]),
+        on: vi.fn(),
+        generate: vi.fn(),
+        continueWithAllToolResults: vi.fn(),
+        generateDirect: vi.fn(),
+        checkConnection: vi.fn().mockResolvedValue({ success: true }),
+        getProvider: vi.fn().mockReturnValue({ getContextWindow: vi.fn().mockReturnValue(128000) }),
+        interrupt: vi.fn(),
+      };
+
+      Object.defineProperty(agent, 'llm', { value: mockLLMWithSystem, writable: true });
+
+      // Set messages that include a system prompt (should be filtered out)
+      agent.setMessages([
+        { role: 'system', content: 'Different system prompt' },
+        { role: 'user', content: 'User message' }
+      ]);
+
+      const finalMessages = mockLLMWithSystem.setMessages.mock.calls[0][0];
+
+      // Should only have one system prompt (the original one)
+      const systemMessages = finalMessages.filter(m => m.role === 'system');
+      expect(systemMessages.length).toBe(1);
+      expect(systemMessages[0].content).toContain('spica');  // Original preserved
+    });
+  });
+
   describe('events', () => {
     it('should be an EventEmitter', () => {
       expect(agent).toBeInstanceOf(EventEmitter);

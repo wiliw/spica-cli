@@ -51,7 +51,10 @@ export abstract class BaseProvider extends EventEmitter {
   abstract checkConnection(signal?: AbortSignal): Promise<{ success: boolean; type?: string; error?: string; hint?: string }>;
 
   setSystemPrompt(prompt: string) {
-    this.messages = [{ role: 'system', content: prompt }];
+    // 移除旧的 system 消息，保留其他消息
+    this.messages = this.messages.filter(m => m.role !== 'system');
+    // 在开头添加新的 system 消息
+    this.messages.unshift({ role: 'system', content: prompt });
   }
 
   addMessage(message: ChatMessage) {
