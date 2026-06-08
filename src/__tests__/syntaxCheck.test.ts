@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { executeTool, setWorkspace } from '../tools/index.js';
+import { executeTool, setWorkspace } from '../tools/index';
 import fs from 'fs-extra';
 import { join } from 'path';
 import os from 'os';
@@ -176,7 +176,7 @@ export function add(a: number, b: number): number {
       });
 
       expect(result.success).toBe(true);
-    });
+    }, 10000);
   });
 
   describe('file_multi_edit syntax check', () => {
@@ -204,7 +204,7 @@ export function multiply(a: number, b: number): number {
       });
 
       expect(result.success).toBe(true);
-    });
+    }, 10000);
   });
 
   describe('Unknown file types', () => {

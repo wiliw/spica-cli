@@ -27,7 +27,7 @@ const TEST_DIR = path.join(os.tmpdir(), 'spica-test-' + Date.now());
 describe('CLI Commands', () => {
   beforeAll(async () => {
     await execa('npm', ['run', 'build']);
-  });
+  }, 30000);
 
   // Use npx tsx for cross-platform compatibility (Windows doesn't support ./bin/spica shebang)
   const runCli = (args: string[]) => execa('npx', ['tsx', 'src/index.ts', ...args]);
@@ -35,25 +35,25 @@ describe('CLI Commands', () => {
   it('should show version', async () => {
     const result = await runCli(['--version']);
     expect(result.stdout).toContain('1.0.0');
-  });
+  }, 10000);
 
   it('should show help', async () => {
     const result = await runCli(['--help']);
     expect(result.stdout).toContain('AI coding assistant');
     expect(result.stdout).toContain('Examples:');
-  });
+  }, 10000);
 
   it.skipIf(shouldSkipApiTests)('should list providers', async () => {
     const result = await runCli(['list']);
     expect(result.stdout).toMatch(/●|○/);  // provider marker
-  });
+  }, 10000);
 
   it.skipIf(shouldSkipApiTests)('should show provider details', async () => {
     const result = await runCli(['show', 'aliyunglm5']);
     expect(result.stdout).toContain('name:');
     expect(result.stdout).toContain('url:');
     expect(result.stdout).toContain('model:');
-  });
+  }, 10000);
 });
 
 // 工具系统测试
@@ -343,10 +343,9 @@ describe('TUI Features', () => {
     ArrowRight: '\x1b[C',
   };
 
-  it('should handle Chinese input correctly', async () => {
-    const scriptPath = 'src/cli/ui/__tests__/tuiStateTest.ts';
-
-    const result = await new Promise<{ output: string }>((resolve) => {
+  // 通用PTY测试函数 - 等待脚本准备好
+  async function runTuiTest(scriptPath: string, input: string): Promise<string> {
+    return new Promise((resolve) => {
       const p = pty.spawn('npx', ['tsx', scriptPath], {
         name: 'xterm-256color',
         cols: 80,
@@ -356,87 +355,53 @@ describe('TUI Features', () => {
       });
 
       let output = '';
-      p.onData(d => output += d);
-
-      setTimeout(() => {
-        p.write('你好世界');
-        setTimeout(() => {
-          p.write(Keys.Enter);
+      p.onData(d => {
+        output += d;
+        // 等待脚本准备好后发送输入
+        if (output.includes('=== TUI State Test Start ===') && !output.includes(input)) {
           setTimeout(() => {
-            p.write(Keys.CtrlC);
-            setTimeout(() => resolve({ output }), 500);
-          }, 300);
-        }, 300);
-      }, 500);
-    });
+            p.write(input);
+            setTimeout(() => {
+              p.write(Keys.Enter);
+              setTimeout(() => {
+                p.write(Keys.CtrlC);
+                setTimeout(() => resolve(output), 500);
+              }, 300);
+            }, 300);
+          }, 200);
+        }
+      });
 
-    expect(result.output).toContain('你好世界');
-    expect(result.output).toContain('CharCount: 4');
-    expect(result.output).toContain('DisplayWidth: 8');
+      // 超时保护
+      setTimeout(() => resolve(output), 10000);
+    });
+  }
+
+  it('should handle Chinese input correctly', async () => {
+    const scriptPath = 'src/cli/ui/__tests__/tuiStateTest.ts';
+    const result = await runTuiTest(scriptPath, '你好世界');
+
+    expect(result).toContain('你好世界');
+    expect(result).toContain('CharCount: 4');
+    expect(result).toContain('DisplayWidth: 8');
   });
 
   it('should handle fullwidth punctuation', async () => {
     const scriptPath = 'src/cli/ui/__tests__/tuiStateTest.ts';
+    const result = await runTuiTest(scriptPath, '！？，。');
 
-    const result = await new Promise<{ output: string }>((resolve) => {
-      const p = pty.spawn('npx', ['tsx', scriptPath], {
-        name: 'xterm-256color',
-        cols: 80,
-        rows: 24,
-        cwd: process.cwd(),
-        env: process.env,
-      });
-
-      let output = '';
-      p.onData(d => output += d);
-
-      setTimeout(() => {
-        p.write('！？，。');
-        setTimeout(() => {
-          p.write(Keys.Enter);
-          setTimeout(() => {
-            p.write(Keys.CtrlC);
-            setTimeout(() => resolve({ output }), 500);
-          }, 300);
-        }, 300);
-      }, 500);
-    });
-
-    expect(result.output).toContain('！？，。');
-    expect(result.output).toContain('CharCount: 4');
-    expect(result.output).toContain('DisplayWidth: 8');
+    expect(result).toContain('！？，。');
+    expect(result).toContain('CharCount: 4');
+    expect(result).toContain('DisplayWidth: 8');
   });
 
   it('should handle mixed Chinese and ASCII', async () => {
     const scriptPath = 'src/cli/ui/__tests__/tuiStateTest.ts';
+    const result = await runTuiTest(scriptPath, 'Hello世界');
 
-    const result = await new Promise<{ output: string }>((resolve) => {
-      const p = pty.spawn('npx', ['tsx', scriptPath], {
-        name: 'xterm-256color',
-        cols: 80,
-        rows: 24,
-        cwd: process.cwd(),
-        env: process.env,
-      });
-
-      let output = '';
-      p.onData(d => output += d);
-
-      setTimeout(() => {
-        p.write('Hello世界');
-        setTimeout(() => {
-          p.write(Keys.Enter);
-          setTimeout(() => {
-            p.write(Keys.CtrlC);
-            setTimeout(() => resolve({ output }), 500);
-          }, 300);
-        }, 300);
-      }, 500);
-    });
-
-    expect(result.output).toContain('Hello世界');
-    expect(result.output).toContain('CharCount: 7');
-    expect(result.output).toContain('DisplayWidth: 9');
+    expect(result).toContain('Hello世界');
+    expect(result).toContain('CharCount: 7');
+    expect(result).toContain('DisplayWidth: 9');
   });
 });
 

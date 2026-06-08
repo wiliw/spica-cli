@@ -1,2 +1,16 @@
-#!/usr/bin/env -S npx tsx
-import('../src/index.ts');
+#!/bin/bash
+# Resolve spica-cli directory (handles npm link scenarios)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/../tsconfig.json" ]; then
+  # Development mode
+  TSCONFIG="$SCRIPT_DIR/../tsconfig.json"
+  SRC="$SCRIPT_DIR/../src/index.ts"
+elif [ -f "$SCRIPT_DIR/../lib/node_modules/spica-cli/tsconfig.json" ]; then
+  # Global npm install mode
+  TSCONFIG="$SCRIPT_DIR/../lib/node_modules/spica-cli/tsconfig.json"
+  SRC="$SCRIPT_DIR/../lib/node_modules/spica-cli/src/index.ts"
+else
+  # Fallback: use npx tsx without tsconfig (may have issues in Bun projects)
+  exec npx tsx "$SCRIPT_DIR/../src/index.ts" "$@"
+fi
+exec npx tsx --tsconfig "$TSCONFIG" "$SRC" "$@"

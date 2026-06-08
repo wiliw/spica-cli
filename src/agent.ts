@@ -25,9 +25,21 @@ function extractResourcePath(toolName: string, args: Record<string, unknown>): s
   // bash 命令中可能涉及的文件（检测 rm、mv、cp 等操作）
   if (toolName === 'bash') {
     const cmd = (args.command as string) || '';
-    // 提取 rm/mv/cp/cat/echo > 等操作的文件路径
-    const fileOpMatch = cmd.match(/(?:rm|mv|cp|cat|head|tail|sed|awk|echo\s*>>|echo\s*>)\s+(['"]?)([^\s'"]+)\1/);
-    if (fileOpMatch) return fileOpMatch[2];
+    // 检查是否有文件修改操作
+    if (/\b(rm|mv|cp|rsync)\b/.test(cmd)) {
+      // 提取最后一个非选项参数作为文件路径
+      const parts = cmd.split(/\s+/).filter(p => !p.startsWith('-') && !p.startsWith('--'));
+      // rm/mv/cp 通常最后一个或倒数第二个参数是目标文件
+      const filePath = parts[parts.length - 1] || parts[parts.length - 2];
+      if (filePath && !filePath.includes('|') && !filePath.includes('>')) {
+        return filePath;
+      }
+    }
+    // 检查写入重定向
+    const writeMatch = cmd.match(/>>\s*(\S+)/);
+    if (writeMatch) return writeMatch[1];
+    const redirectMatch = cmd.match(/>\s*(\S+)/);
+    if (redirectMatch && !cmd.includes('>>') && !cmd.includes('|')) return redirectMatch[1];
   }
   // git 操作（整个仓库）
   if (toolName === 'git') {

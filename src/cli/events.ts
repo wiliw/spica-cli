@@ -412,7 +412,7 @@ function countAgents(output: string): number {
 // 格式化工具结果摘要
 function formatToolSummary(data: { name: string; success: boolean; output?: string; error?: string; content?: string }): string {
   if (!data.success) {
-    const errorMsg = data.error ? data.error.slice(0, 40) : '';
+    const errorMsg = data.error || '';
     return errorMsg ? `err: ${errorMsg}` : 'failed';
   }
 
@@ -450,7 +450,7 @@ function formatToolSummary(data: { name: string; success: boolean; output?: stri
       return 'deleted';
     case 'file_copy':
     case 'file_move': {
-      return output ? output.slice(0, 30) : 'done';
+      return output || 'done';
     }
     case 'directory_create':
       return 'created';
@@ -488,7 +488,7 @@ function formatToolSummary(data: { name: string; success: boolean; output?: stri
       return 'done';
     case 'monitor': {
       const taskId = data.content || '';
-      return taskId ? taskId.slice(0, 15) : 'started';
+      return taskId || 'started';
     }
     case 'task_stop':
       return 'stopped';
@@ -592,8 +592,8 @@ function displayToolResult(record: ToolCallRecord, data: ToolResultData): void {
       }
       case 'web_search':
       case 'web_fetch': {
-        const query = record.args.query || record.args.url as string;
-        if (query) screen.appendScroll(COLORS.muted(` ${query.slice(0, 50)}`));
+        const query = (record.args.query || record.args.url) as string | undefined;
+        if (query) screen.appendScroll(COLORS.muted(` ${query}`));
         break;
       }
       case 'git': {
@@ -656,26 +656,78 @@ function displayToolResult(record: ToolCallRecord, data: ToolResultData): void {
       }
     }
   } else {
-    // Compact模式：简洁显示
+    // Compact模式：完整显示（工具名+参数+结果）
     screen.appendScroll(COLORS.tool(`${record.name}`));
 
-    // 显示文件名（只显示basename）
-    const filePath = record.args.path as string;
-    if (filePath) {
-      const filename = filePath.split('/').pop() || filePath;
-      screen.appendScroll(COLORS.file(` ${filename}`));
-    }
-
-    // grep显示pattern
-    if (record.name === 'grep') {
-      const pattern = record.args.pattern as string;
-      if (pattern) screen.appendScroll(COLORS.muted(` ${pattern.slice(0, 20)}`));
-    }
-
-    // glob显示pattern
-    if (record.name === 'glob') {
-      const pattern = record.args.pattern as string;
-      if (pattern) screen.appendScroll(COLORS.muted(` ${pattern}`));
+    // 根据工具类型显示关键参数
+    switch (record.name) {
+      case 'file_read':
+      case 'file_write':
+      case 'file_edit':
+      case 'file_multi_edit':
+      case 'file_patch':
+      case 'file_replace':
+      case 'file_insert':
+      case 'file_delete':
+      case 'file_copy':
+      case 'file_move':
+      case 'file_exists': {
+        const path = record.args.path as string;
+        if (path) screen.appendScroll(COLORS.file(` ${path}`));
+        break;
+      }
+      case 'bash': {
+        const cmd = (record.args.command as string) || '';
+        if (cmd) screen.appendScroll(COLORS.muted(` ${cmd}`));
+        break;
+      }
+      case 'grep': {
+        const pattern = record.args.pattern as string;
+        const path = record.args.path as string;
+        if (pattern) screen.appendScroll(COLORS.muted(` ${pattern}`));
+        if (path) screen.appendScroll(COLORS.file(` ${path}`));
+        break;
+      }
+      case 'glob': {
+        const pattern = record.args.pattern as string;
+        if (pattern) screen.appendScroll(COLORS.muted(` ${pattern}`));
+        break;
+      }
+      case 'web_search':
+      case 'web_fetch': {
+        const query = (record.args.query || record.args.url) as string | undefined;
+        if (query) screen.appendScroll(COLORS.muted(` ${query}`));
+        break;
+      }
+      case 'git': {
+        const action = record.args.action as string;
+        if (action) screen.appendScroll(COLORS.muted(` ${action}`));
+        break;
+      }
+      case 'test':
+      case 'lint': {
+        const path = record.args.path as string;
+        if (path) screen.appendScroll(COLORS.file(` ${path}`));
+        break;
+      }
+      case 'directory_list':
+      case 'directory_create': {
+        const path = record.args.path as string;
+        if (path) screen.appendScroll(COLORS.file(` ${path}`));
+        break;
+      }
+      case 'todo_write':
+      case 'todo_read': {
+        screen.appendScroll(COLORS.muted(` todos`));
+        break;
+      }
+      case 'workspace': {
+        const path = record.args.path as string;
+        if (path) screen.appendScroll(COLORS.file(` ${path}`));
+        break;
+      }
+      default:
+        break;
     }
 
     screen.appendScroll(COLORS.muted(` → `));
@@ -692,10 +744,9 @@ function getMainArg(name: string, args: Record<string, unknown>): string | null 
     case 'file_write':
     case 'file_edit':
     case 'file_multi_edit':
-      return (args.path as string)?.split('/').pop() || null;
+      return (args.path as string) || null;
     case 'bash':
-      const cmd = (args.command as string) || '';
-      return cmd.slice(0, 30) + (cmd.length > 30 ? '...' : '');
+      return (args.command as string) || null;
     case 'grep':
       return (args.pattern as string) || null;
     case 'glob':
@@ -834,7 +885,7 @@ export function setupAgentEvents(
     }
   });
 
-  // 工具调用开始
+  // 工具调用开始 - 不显示，只在结果时显示完整信息
   on('tool_call', (data: ToolCallData) => {
     state.setStreamingOutput(false);
     screen.setStreaming(false);
@@ -842,20 +893,11 @@ export function setupAgentEvents(
     if (reasoningStarted) {
       screen.appendScroll('\n');
       reasoningStarted = false;
-      // 清除thinking动画
       screen.clearThinkingAnimation();
     }
 
-    // 注册工具调用
-    const seq = registerToolCall(data);
-
-    // 显示并行状态（如果有多个工具同时调用）
-    if (batchToolCount > 1 && seq === 1) {
-      screen.appendScroll(COLORS.muted(`\n[tools] ${batchToolCount} parallel calls...\n`));
-    }
-
-    // 简洁显示：只显示工具名（不显示序号）
-    screen.appendScroll(COLORS.tool(`\n${data.name}`));
+    // 注册工具调用（不显示）
+    registerToolCall(data);
     screen.flushOutput();
   });
 
@@ -1002,12 +1044,7 @@ export function setupAgentEvents(
     screen.refreshInput();
   });
 
-  on('tool_conflict_warning', (data: { conflicts: Array<{ path: string; tools: string[] }>; message: string }) => {
-    screen.appendScroll(COLORS.warning(`\n[conflict] ${data.message}\n`));
-    for (const conflict of data.conflicts) {
-      screen.appendScroll(COLORS.muted(`  ${conflict.path}: ${conflict.tools.join(', ')}\n`));
-    }
-  });
+  // 工具冲突警告 - 内部机制，不显示给用户
 
   on('context_warning', (data: ContextWarningData) => {
     const color = data.level === 'warning' ? COLORS.warning : COLORS.muted;

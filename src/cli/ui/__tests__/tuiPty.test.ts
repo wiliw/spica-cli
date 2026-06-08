@@ -97,8 +97,20 @@ async function runPTYTest(
       }
     };
 
-    // 等待进程启动后开始发送输入
-    setTimeout(sendNext, 500);
+    // 等待脚本准备好（检测启动标记）后开始发送输入
+    const startTime = Date.now();
+    const maxWait = 5000;
+    const checkReady = () => {
+      if (output.includes('=== TUI State Test Start ===')) {
+        setTimeout(sendNext, 200);  // 确认后再等待200ms
+      } else if (Date.now() - startTime < maxWait) {
+        setTimeout(checkReady, 100);
+      } else {
+        // 超时也继续发送
+        sendNext();
+      }
+    };
+    setTimeout(checkReady, 100);
   });
 }
 
