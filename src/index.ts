@@ -200,6 +200,7 @@ program
           "/mcp",
           "/history",
           "/compact",
+          "/summary",
           "/init",
           "/sessions",
           "/switch",
@@ -905,6 +906,89 @@ program
               return;
             }
 
+            // 总结当前 session（已完成 + 未完成）
+            if (cmd === "summary" || cmd === "sum") {
+              const msgs = agent.getMessages();
+
+              if (msgs.length === 0) {
+                screen.appendScroll(COLORS.muted("\n[SUMMARY] No messages to summarize\n"));
+                return;
+              }
+
+              screen.appendScroll(COLORS.primary.bold("\n[SUMMARY] Analyzing session...\n"));
+              screen.appendScroll(COLORS.muted("Generating summary...\n"));
+
+              try {
+                const llm = agent.getLLM();
+                if (!llm) {
+                  screen.appendScroll(COLORS.error("LLM not available\n"));
+                  return;
+                }
+
+                // 构建总结提示词
+                const userMessages = msgs
+                  .filter(m => m.role === 'user')
+                  .map(m => m.content || '')
+                  .slice(0, 10);
+
+                const assistantMessages = msgs
+                  .filter(m => m.role === 'assistant')
+                  .map(m => {
+                    let content = m.content || '';
+                    if (m.toolCalls && m.toolCalls.length > 0) {
+                      const tools = m.toolCalls.map(tc => tc.name).join(', ');
+                      content = `[Tools: ${tools}] ${content.slice(0, 50)}`;
+                    }
+                    return content;
+                  })
+                  .slice(0, 10);
+
+                const prompt = `请总结以下对话session的工作内容。要求：
+1. 简洁明了（200字以内）
+2. 区分"已完成"和"进行中/未完成"的任务
+3. 提及主要涉及的文件或功能
+4. 如果有未解决的问题，简要说明
+
+用户请求：
+${userMessages.join('\n')}
+
+AI回复摘要：
+${assistantMessages.join('\n')}
+
+请按以下格式输出：
+
+## 已完成
+- ...
+
+## 进行中/未完成
+- ...
+
+## 涉及内容
+文件/功能: ...`;
+
+                const response = await llm.generateDirect(prompt);
+                const summary = response.content || 'Unable to generate summary';
+
+                screen.appendScroll("\n");
+                summary.split("\n").forEach((line) => {
+                  if (line.startsWith("##")) {
+                    screen.appendScroll(COLORS.primary.bold(`${line}\n`));
+                  } else if (line.startsWith("-")) {
+                    screen.appendScroll(COLORS.muted(`${line}\n`));
+                  } else {
+                    screen.appendScroll(`${line}\n`);
+                  }
+                });
+                screen.appendScroll("\n");
+                screen.appendScroll(COLORS.muted(`Session: ${msgs.length} messages analyzed\n`));
+
+              } catch (err) {
+                screen.appendScroll(COLORS.error(`\n[ERR] Failed to generate summary\n`));
+              }
+
+              return;
+            }
+
             // 历史（显示最近消息）
             if (cmd === "history") {
               const msgs = agent.getMessages();
@@ -1091,6 +1175,7 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
           screen.appendScroll(COLORS.muted("  /archive    Archive current chat & start new\n"));
           screen.appendScroll(COLORS.muted("  /clear      Same as /archive\n"));
           screen.appendScroll(COLORS.muted("  /history    Show messages\n"));
+          screen.appendScroll(COLORS.muted("  /summary    Summarize session progress\n"));
           screen.appendScroll(COLORS.muted("  /compact    Compress context\n"));
           screen.appendScroll(
             COLORS.muted("  /sessions   List archived chats\n"),
