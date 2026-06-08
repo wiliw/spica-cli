@@ -132,16 +132,22 @@ export class SpicaAgent extends EventEmitter {
   getLLM(): LLMClient | null {
     return this.llm;
   }
-  private interruptFlag = false;
   private workspacePath: string;
   private projectConfig: ProjectConfig = {};
   private _todos: Todo[] = [];
   private _initialized = false;
   private _initPromise: Promise<void> | null = null;
   private _providerName?: string;
-  private _initAbortController: AbortController | null = null;
   private _cachedSkills: SkillDefinition[] = [];
   private _compacting = false;
+
+  // === Interrupt 机制（参考 Crush 设计）===
+  // 当前活跃的 AbortController（每个请求独立）
+  private currentAbortController: AbortController | null = null;
+  // pendingCancel 标记（interrupt 后设置，防止新请求进入）
+  private pendingCancel: boolean = false;
+  // cancelSeq 序号（高水位标记）
+  private cancelSeq: number = 0;
 
   // 极危险操作模式（即使在 bypass 模式也需要确认）
   private static readonly DANGEROUS_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
@@ -170,12 +176,9 @@ export class SpicaAgent extends EventEmitter {
     return null;
   }
 
-  // 工具级 AbortController（用于中断单个工具）
-  private toolAbortControllers: Map<string, AbortController> = new Map();
-
   // 待处理的新输入（用于在工具执行间隙插入新指令）
   private pendingInput: string | null = null;
-  
+
   // 队列输入注入回调（由 CLI 设置，用于在迭代间隙获取队列输入）
   private queueInputCallback: (() => string | null) | null = null;
 
@@ -196,52 +199,55 @@ export class SpicaAgent extends EventEmitter {
   }
 
   /**
- * Interrupt agent execution
- *
- * Effects:
- * - Sets interrupt flag to stop current operation
- * - Aborts initialization if in progress
- * - Interrupts LLM streaming
- * - Aborts all active tool executions
- *
- * @emits tool_aborted when a tool is aborted
- */
-interrupt() {
-    this.interruptFlag = true;
-    // 中断 init 中的连接检测
-    if (this._initAbortController) {
-      this._initAbortController.abort();
+   * Interrupt agent execution - new simplified mechanism
+   *
+   * Effects:
+   * - Sets pendingCancel = true (prevents new requests)
+   * - Increments cancelSeq (high-water mark)
+   * - Aborts currentAbortController if exists
+   * - Interrupts LLM streaming
+   * - Emits 'agent_interrupted' event
+   */
+  interrupt() {
+    // 设置 pendingCancel（防止新请求进入）
+    this.pendingCancel = true;
+    this.cancelSeq++;
+
+    // Abort 当前活跃的 AbortController
+    if (this.currentAbortController) {
+      this.currentAbortController.abort();
     }
+
+    // 中断 LLM streaming
     if (this.llm) {
       this.llm.interrupt();
     }
-    // 中断所有正在执行的工具
-    this.toolAbortControllers.forEach((controller, toolName) => {
-      controller.abort();
-      this.emit('tool_aborted', { tool: toolName });
-    });
-    this.toolAbortControllers.clear();
+
+    // 通知 UI
+    this.emit('agent_interrupted', { reason: 'User pressed ESC ESC', cancelSeq: this.cancelSeq });
   }
 
-  
-  // 中断单个工具（不中断整个 runLoop）
-  abortTool(toolName: string): void {
-    const controller = this.toolAbortControllers.get(toolName);
-    if (controller) {
-      controller.abort();
-      this.toolAbortControllers.delete(toolName);
-      this.emit('tool_aborted', { tool: toolName });
+  /**
+   * Check if current request should be canceled (cancel-on-entry)
+   */
+  private checkCanceledOnEntry(): boolean {
+    return this.pendingCancel;
+  }
+
+  /**
+   * Clear pending cancel if we're the current cancelSeq
+   */
+  private clearPendingCancel(expectedSeq: number): void {
+    if (this.cancelSeq === expectedSeq) {
+      this.pendingCancel = false;
     }
   }
 
-  // 注册工具 AbortController
-  registerToolAbortController(toolName: string, controller: AbortController): void {
-    this.toolAbortControllers.set(toolName, controller);
-  }
-
-  // 清除工具 AbortController
-  clearToolAbortController(toolName: string): void {
-    this.toolAbortControllers.delete(toolName);
+  /**
+   * Check if agent is currently running a runLoop
+   */
+  isRunning(): boolean {
+    return this.currentAbortController !== null;
   }
 
   // 设置待处理的新输入（用于在工具执行间隙插入新指令）
@@ -377,19 +383,22 @@ interrupt() {
 
   // 带重试的 LLM 调用（参考 Claude Code 等 coding agent 的重试策略）
   private async callLLMWithRetry<T>(
-    operation: () => Promise<T>,
+    operation: (signal?: AbortSignal) => Promise<T>,
     operationName: string,
-    maxRetries: number = 10
+    maxRetries: number = 10,
+    signal?: AbortSignal
   ): Promise<T> {
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      if (this.interruptFlag) {
+      // 检查中断信号
+      if (signal?.aborted) {
         throw new Error('Interrupted by user');
       }
 
       try {
-        return await operation();
+        // 🔴 关键：传递 signal 给 operation
+        return await operation(signal);
       } catch (error: unknown) {
         // InterruptError: don't retry, propagate immediately
         if (error instanceof InterruptError || (error instanceof Error && error.name === 'InterruptError')) {
@@ -403,7 +412,8 @@ interrupt() {
           break;
         }
 
-        if (this.interruptFlag) {
+        // 检查中断信号
+        if (signal?.aborted) {
           break;
         }
 
@@ -418,7 +428,7 @@ interrupt() {
           throw error;
         }
 
-        if (this.interruptFlag) {
+        if (signal?.aborted) {
           break;
         }
 
@@ -434,13 +444,13 @@ interrupt() {
 
         const start = Date.now();
         while (Date.now() - start < delay) {
-          if (this.interruptFlag) {
+          if (signal?.aborted) {
             break;
           }
           await new Promise(resolve => setTimeout(resolve, 100));
         }
 
-        if (this.interruptFlag) {
+        if (signal?.aborted) {
           break;
         }
       }
@@ -476,8 +486,6 @@ async init() {
   }
   
   private async _doInit(): Promise<void> {
-    this._initAbortController = new AbortController();
-
     // 初始化Skills（首次运行时复制默认包）
     await initSkills();
 
@@ -497,9 +505,8 @@ async init() {
       name: config.name,
     });
 
-    // 检查API连接（支持中断）
-    const connectionResult = await this.llm.checkConnection(this._initAbortController.signal);
-    this._initAbortController = null;
+    // 检查API连接
+    const connectionResult = await this.llm.checkConnection();
 
     if (!connectionResult.success) {
       this.emit('connection_error', {
@@ -628,21 +635,32 @@ async init() {
  * @throws InterruptError if interrupted by user
  */
 async runLoop(prompt: string, maxIterations = 50): Promise<string> {
-    this.interruptFlag = false;
-
-    // 验证 prompt 不为空
-    if (!prompt || prompt.trim().length === 0) {
-      this.emit('empty_input');
-      return 'Empty input - no task to execute. Please provide a prompt.';
+    // 🔴 Cancel-on-entry: 如果 pendingCancel，拒绝进入
+    if (this.checkCanceledOnEntry()) {
+      this.emit('agent_interrupted', { reason: 'Canceled on entry (pendingCancel)' });
+      return '[INTERRUPTED] Request canceled before execution';
     }
 
-    if (!this.llm) {
-      await this.init();
-    }
+    // 创建本次 runLoop 专用的 AbortController
+    const entryCancelSeq = this.cancelSeq;
+    const abortController = new AbortController();
+    this.currentAbortController = abortController;
+    const signal = abortController.signal;
 
-    if (!this.llm) {
-      throw new Error('LLM client not initialized');
-    }
+    try {
+      // 验证 prompt 不为空
+      if (!prompt || prompt.trim().length === 0) {
+        this.emit('empty_input');
+        return 'Empty input - no task to execute. Please provide a prompt.';
+      }
+
+      if (!this.llm) {
+        await this.init();
+      }
+
+      if (!this.llm) {
+        throw new Error('LLM client not initialized');
+      }
 
     // 🔒 自动checkpoint：在AI工作前创建备份点（文件快照，不污染git）
     await this.createAutoCheckpoint(prompt);
@@ -693,8 +711,10 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
     let response;
     try {
       response = await this.callLLMWithRetry(
-        () => this.llm!.generate(prompt, toolDefinitions),
-        'llm_generate'
+        (sig) => this.llm!.generate(prompt, toolDefinitions, sig),
+        'llm_generate',
+        10,
+        signal  // 🔴 关键：传递 abort signal
       );
     } catch (llmError: unknown) {
       const errorMsg = llmError instanceof Error ? llmError.message : String(llmError);
@@ -722,11 +742,11 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
     let criticalErrorDetected: { tool: string; error: string; suggestion: string } | null = null;
     let queueInjectedThisIteration = false;  // 防止同一迭代内重复注入队列
 
-    while (!response.finished && iterations < maxIterations && !this.interruptFlag) {
+    while (!response.finished && iterations < maxIterations && !signal.aborted) {
       iterations++;
       queueInjectedThisIteration = false;  // 每次迭代重置
 
-      if (this.interruptFlag) {
+      if (signal.aborted) {
         break;
       }
 
@@ -755,8 +775,10 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
             // 关键修复：使用 generateFromHistory 而不是 generate('', ...)
             // generate('', ...) 会添加空 user 消息，破坏对话历史，导致 LLM 混乱
             response = await this.callLLMWithRetry(
-              () => this.llm!.generateFromHistory(toolDefinitions),
-              'llm_generate_reasoning_continue'
+              (sig) => this.llm!.generateFromHistory(toolDefinitions, sig),
+              'llm_generate_reasoning_continue',
+              10,
+              signal  // 🔴 关键：传递 abort signal
             );
           } catch (retryError: unknown) {
             const errorMsg = retryError instanceof Error ? retryError.message : String(retryError);
@@ -798,8 +820,10 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
           // 关键修复：使用 generateFromHistory 而不是 generate('', ...)
           // 因为上面已经添加了提示消息，不需要再添加空的 user 消息
           response = await this.callLLMWithRetry(
-            () => this.llm!.generateFromHistory(toolDefinitions),
-            'llm_generate_empty_retry'
+            (sig) => this.llm!.generateFromHistory(toolDefinitions, sig),
+            'llm_generate_empty_retry',
+            10,
+            signal  // 🔴 关键：传递 abort signal
           );
         } catch (retryError: unknown) {
           const errorMsg = retryError instanceof Error ? retryError.message : String(retryError);
@@ -827,7 +851,7 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
 
         // 执行单个工具的内部函数
         const executeSingleTool = async (tc: { name: string; id: string; arguments: Record<string, unknown> }): Promise<{ name: string; id: string; result: string; isCritical?: boolean; referencedSkills?: string[] }> => {
-          if (this.interruptFlag) return { name: tc.name, id: tc.id, result: 'interrupted' };
+          if (signal.aborted) return { name: tc.name, id: tc.id, result: 'interrupted' };
 
           const tcArgs = tc.arguments || {};
 
@@ -854,28 +878,21 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
           this.emit('tool_call', { name: tc.name, arguments: tcArgs });
           setWorkspace(this.workspacePath);
 
-          const toolAbortController = new AbortController();
-          this.registerToolAbortController(tc.name, toolAbortController);
-          tcArgs._abortSignal = toolAbortController.signal;
+          // 传递 runLoop 的 signal 给工具（让工具能响应中断）
+          tcArgs._abortSignal = signal;
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const eventCallback = (event: string, data: any) => {
             this.emit(event, data);
-            if (event === 'tool_stuck_warning') {
-              this.abortTool(tc.name);
-              // 不设置interruptFlag，让工具自己处理恢复
-              // bash工具已有autoRetry机制，会返回结果继续执行
-            }
           };
 
           try {
             const result = await executeTool(tc.name, tcArgs, eventCallback);
-            this.clearToolAbortController(tc.name);
 
             if (!result.success) {
               if (result.error?.includes('aborted') || result.error?.includes('interrupted')) {
-                this.emit('tool_result', { name: tc.name, success: false, error: `Tool execution aborted (stuck or interrupted). Try: detached=true, shorter timeout, or interactive mode.` });
-                return { name: tc.name, id: tc.id, result: `Tool interrupted, need to try other approaches`, isCritical: true };
+                this.emit('tool_result', { name: tc.name, success: false, error: 'interrupted' });
+                return { name: tc.name, id: tc.id, result: `Tool interrupted`, isCritical: true };
               }
 
               if (this.isCriticalToolError(tc.name, result)) {
@@ -910,7 +927,6 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
               referencedSkills: tc.name === 'skill' && result.success ? result.referencedSkills : undefined
             };
           } catch (toolError: unknown) {
-            this.clearToolAbortController(tc.name);
             const errorMsg = toolError instanceof Error ? toolError.message : String(toolError);
             this.emit('tool_result', { name: tc.name, success: false, error: errorMsg });
             return { name: tc.name, id: tc.id, result: `Tool execution error: ${errorMsg}` };
@@ -924,7 +940,7 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
         const sequentialResults: Array<{ name: string; id: string; result: string; isCritical?: boolean; referencedSkills?: string[] }> = [];
         for (const conflictGroup of sequential) {
           for (const tc of conflictGroup) {
-            if (this.interruptFlag) {
+            if (signal.aborted) {
               sequentialResults.push({ name: tc.name, id: tc.id, result: 'interrupted' });
               break;
             }
@@ -939,14 +955,12 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
         allToolResults.push(...toolResults);
 
         // 中断检查：如果被中断，先保存tool results到历史，再停止
-        if (this.interruptFlag) {
+        if (signal.aborted) {
           // 重要：保存已执行的tool results，避免历史损坏（缺少tool messages导致API报错）
           if (toolResults.length > 0 && this.llm) {
             this.llm.addToolMessages(toolResults.map(t => ({ id: t.id, result: t.result })));
           }
-          this.emit('agent_interrupted', {
-            toolResults: toolResults.map(t => ({ name: t.name, result: t.result.slice(0, 100) })),
-          });
+          // 注意：不再 emit agent_interrupted，因为 interrupt() 已经触发过了
           return '[INTERRUPTED] Agent execution stopped by user (ESC ESC). You can retry or continue with a new request.';
         }
 
@@ -992,12 +1006,15 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
           this.emit('waiting_for_llm');  // 通知外部启动心跳
           try {
             response = await this.callLLMWithRetry(
-              () => this.llm!.continueWithAllToolResults(
+              (sig) => this.llm!.continueWithAllToolResults(
                 toolResults.map(t => ({ name: t.name, result: t.result, id: t.id })),
                 toolDefinitions,
-                postToolMessages  // 在 tool 消息之后添加
+                postToolMessages,  // 在 tool 消息之后添加
+                sig  // 🔴 传递 signal
               ),
-              'llm_continue'
+              'llm_continue',
+              10,
+              signal  // 🔴 关键：传递 abort signal
             );
           } catch (llmError: unknown) {
             const errorMsg = llmError instanceof Error ? llmError.message : String(llmError);
@@ -1055,7 +1072,7 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
         }));
 
       saveProjectContext(this.workspacePath, simplifiedMessages);
-      
+
       if (this._todos.length > 0) {
         const state = loadProjectState(this.workspacePath) || {
           phase: 'unknown' as const,
@@ -1069,8 +1086,18 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
       }
     }
 
+    // 释放 currentAbortController，清理 pendingCancel
+    this.currentAbortController = null;
+    this.clearPendingCancel(entryCancelSeq);
+
     return assistantContent;
+  } catch (error) {
+    // 异常情况下也要释放
+    this.currentAbortController = null;
+    this.clearPendingCancel(entryCancelSeq);
+    throw error;
   }
+}
 
   getProjectConfig(): ProjectConfig {
     return this.projectConfig;

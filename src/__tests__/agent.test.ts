@@ -341,29 +341,4 @@ it('should suggest for ENOENT error', () => {
       expect(handler).toHaveBeenCalledWith({ data: 'test' });
     });
   });
-
-  describe('abortTool', () => {
-    it('should abort registered tool', () => {
-      const controller = new AbortController();
-      agent.registerToolAbortController('test_tool', controller);
-      
-      const eventSpy = vi.fn();
-      agent.on('tool_aborted', eventSpy);
-      
-      agent.abortTool('test_tool');
-      
-      expect(controller.signal.aborted).toBe(true);
-      expect(eventSpy).toHaveBeenCalledWith({ tool: 'test_tool' });
-    });
-
-    it('should clear tool abort controller after abort', () => {
-      const controller = new AbortController();
-      agent.registerToolAbortController('test_tool', controller);
-      
-      agent.abortTool('test_tool');
-      
-      // Controller should be removed
-      agent.abortTool('test_tool'); // Should not throw
-    });
-  });
 });

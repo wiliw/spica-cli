@@ -146,7 +146,9 @@ interface TodoUpdateData {
 }
 
 interface AgentInterruptedData {
-  toolResults: Array<{ name: string; result: string }>;
+  toolResults?: Array<{ name: string; result: string }>;
+  reason?: string;
+  cancelSeq?: number;  // 🔴 用于防止重复显示
 }
 
 interface AgentStoppedOnErrorData {
@@ -186,12 +188,19 @@ let nextToolSeq = 1;
 // 当前批次的工具调用数量（用于显示并行状态）
 let batchToolCount = 0;
 
+// Interrupt 状态：防止多次显示 interrupt 消息
+let interruptDisplayed = false;
+let lastInterruptCancelSeq = 0;
+
 // 重置工具追踪状态（每次新对话开始时）
 function resetToolTracking(): void {
   activeToolCalls.clear();
   idToSeq.clear();
   nextToolSeq = 1;
   batchToolCount = 0;
+  // 🔴 同时重置 interrupt 状态
+  interruptDisplayed = false;
+  lastInterruptCancelSeq = 0;
 }
 
 // 注册工具调用
@@ -413,7 +422,9 @@ function countAgents(output: string): number {
 function formatToolSummary(data: { name: string; success: boolean; output?: string; error?: string; content?: string }): string {
   if (!data.success) {
     const errorMsg = data.error || '';
-    return errorMsg ? `err: ${errorMsg}` : 'failed';
+    // compact 模式：显示错误类型（不超过30字符）
+    const firstLine = errorMsg.split('\n')[0].slice(0, 30);
+    return `err: ${firstLine}`;
   }
 
   const name = data.name;
@@ -897,8 +908,20 @@ export function setupAgentEvents(
     screen.clearThinkingAnimation();
     reasoningStarted = false;
 
-    // 注册工具调用（不显示）
+    // 注册工具调用
     registerToolCall(data);
+
+    // 🔴 关键：显示工具开始提示（让用户知道 bash 正在执行，可以 ESC ESC）
+    // 只显示关键工具（bash, file_write 等）
+    const importantTools = ['bash', 'file_write', 'file_edit', 'web_fetch', 'web_search'];
+    if (importantTools.includes(data.name)) {
+      const args = data.arguments || {};
+      const argsDisplay = data.name === 'bash'
+        ? String(args.command || '').slice(0, 30)
+        : String(args.path || args.url || '').slice(0, 30);
+      screen.appendScroll(COLORS.muted(`  ${data.name} ${argsDisplay} → `));
+    }
+
     screen.flushOutput();
   });
 
@@ -1050,11 +1073,24 @@ export function setupAgentEvents(
   on('agent_interrupted', (data: AgentInterruptedData) => {
     state.setStreamingOutput(false);
     screen.setStreaming(false);
-    
+
+    // 🔴 基于 cancelSeq 防止重复显示（只显示最新的 cancelSeq）
+    const currentCancelSeq = data.cancelSeq || 0;
+
+    // 如果是同一个 cancelSeq 已经显示过，不重复显示
+    if (currentCancelSeq === lastInterruptCancelSeq && interruptDisplayed) {
+      return;
+    }
+
+    // 新的 cancelSeq，显示消息
+    lastInterruptCancelSeq = currentCancelSeq;
+    interruptDisplayed = true;
+
     screen.appendScroll(COLORS.warning(`\n[interrupt] stopped\n`));
     if (data.toolResults && data.toolResults.length > 0) {
       screen.appendScroll(COLORS.muted(`  tools: ${data.toolResults.map(t => t.name).join(', ')}\n`));
     }
+
     screen.restoreCursor();
     screen.refreshInput();
   });

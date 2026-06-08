@@ -67,30 +67,35 @@ spica run "fix the bug in src/index.ts"
 ### File Operations
 `file_read` `file_write` `file_edit` `file_multi_edit` `file_replace` `file_insert` `file_delete` `file_copy` `file_move` `file_exists` `file_patch`
 
-### Search
-`glob` `grep` `directory_list`
+### Directory & Search
+`directory_create` `directory_list` `glob` `grep`
 
 ### Shell & Git
-`bash` `git`
+`bash` `monitor` `task_stop` `git` `workspace`
 
 ### Code Quality
-`code_health` `test_quality_check` `lint` `test`
+`code_health` `test_quality_check` `lint` `test` `format`
 
 ### Web
 `web_search` `web_fetch` `gh`
 
 ### Task Management
-`todo` `task` `workspace` `question`
+`todo_write` `todo_read` `task` `skill` `question`
 
 ## Interactive Commands
 
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
-| `/clear` | Clear session history |
+| `/archive` | Archive current & start new |
+| `/history` | Browse archived chats (read-only) |
+| `/summary` | Summarize current session |
 | `/compact` | Compress context |
-| `/bypass` | Auto-approve operations |
-| `/strict` | Require confirmation |
+| `/queue` | Show input queue |
+| `/checkpoint` | Manage checkpoints |
+| `/skill` | Manage skills |
+| `/mcp` | Manage MCP servers |
+| `/status` | Show session status |
 | `/init` | Generate AGENTS.md |
 
 ## Configuration

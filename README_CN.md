@@ -67,30 +67,35 @@ spica run "修复 src/index.ts 中的 bug"
 ### 文件操作
 `file_read` `file_write` `file_edit` `file_multi_edit` `file_replace` `file_insert` `file_delete` `file_copy` `file_move` `file_exists` `file_patch`
 
-### 搜索
-`glob` `grep` `directory_list`
+### 目录与搜索
+`directory_create` `directory_list` `glob` `grep`
 
 ### Shell & Git
-`bash` `git`
+`bash` `monitor` `task_stop` `git` `workspace`
 
 ### 代码质量
-`code_health` `test_quality_check` `lint` `test`
+`code_health` `test_quality_check` `lint` `test` `format`
 
 ### Web
 `web_search` `web_fetch` `gh`
 
 ### 任务管理
-`todo` `task` `workspace` `question`
+`todo_write` `todo_read` `task` `skill` `question`
 
 ## 交互命令
 
 | 命令 | 描述 |
 |---------|-------------|
 | `/help` | 显示可用命令 |
-| `/clear` | 清除会话历史 |
+| `/archive` | 归档当前并开始新会话 |
+| `/history` | 浏览归档聊天（只读） |
+| `/summary` | 总结当前会话 |
 | `/compact` | 压缩上下文 |
-| `/bypass` | 自动批准操作 |
-| `/strict` | 需要确认 |
+| `/queue` | 显示输入队列 |
+| `/checkpoint` | 管理检查点 |
+| `/skill` | 管理技能 |
+| `/mcp` | 管理 MCP 服务器 |
+| `/status` | 显示会话状态 |
 | `/init` | 生成 AGENTS.md |
 
 ## 配置

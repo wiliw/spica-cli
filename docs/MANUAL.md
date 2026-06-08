@@ -50,12 +50,11 @@ spica -p <name>    # Use specific provider
 
 | Command | Description |
 |---------|-------------|
-| `/new` | Start fresh session (archives current) |
-| `/clear` or `/reset` | Clear current session |
-| `/history` | Show message history |
+| `/archive` or `/new` or `/clear` | Archive current & start new |
+| `/history` or `/h` or `/sessions` | Browse archived chats (read-only) |
+| `/view <id>` | Read specific archived chat |
+| `/summary` | Summarize current session |
 | `/compact` | Compress context to reduce token usage |
-| `/sessions` or `/s` | List archived sessions |
-| `/switch <id>` | Switch to specific session |
 | `/rename <id> <name>` | Rename a session |
 | `/delete <id>` | Delete a session |
 
@@ -160,12 +159,14 @@ spica -p <name>    # Use specific provider
 | `test` | Run tests | filter, coverage |
 | `format` | Format code | path |
 
-### Other (2 tools)
+### Other (4 tools)
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
 | `question` | Ask user | text |
 | `file_patch` | Apply diff patch | path, patch |
+| `code_health` | Analyze code quality | path, threshold |
+| `test_quality_check` | Detect test anti-patterns | testFile, threshold |
 
 ---
 

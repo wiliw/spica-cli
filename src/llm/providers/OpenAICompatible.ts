@@ -254,9 +254,9 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
         }
       }
 
-      // 中断时不要push不完整的toolCalls assistant message
+      // 中断时抛出错误，让调用者知道是被中断的
       if (signal?.aborted) {
-        return { finished: true };
+        throw new Error('LLM streaming aborted by user interrupt');
       }
 
       if (hasToolCalls && toolCalls.length > 0) {
@@ -283,7 +283,7 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
       return { finished: true };
     } catch (error: any) {
       if (signal?.aborted) {
-        return { finished: true };
+        throw new Error('LLM streaming aborted by user interrupt');
       }
       if (error.message?.includes('streaming')) {
         return await this.generateNonStreaming(prompt, tools);
@@ -552,9 +552,9 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
         }
       }
 
-      // 中断时不要push不完整的toolCalls assistant message
+      // 中断时抛出错误，让调用者知道是被中断的
       if (signal?.aborted) {
-        return { finished: true };
+        throw new Error('LLM streaming aborted by user interrupt');
       }
 
       if (hasToolCalls && toolCalls.length > 0) {

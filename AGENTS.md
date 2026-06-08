@@ -5,9 +5,9 @@
 spica-cli is an AI coding agent CLI with interactive and single-task modes. It supports multiple LLM providers, MCP servers, and a skill system for extending capabilities.
 
 **Entry points:**
-- `src/index.ts` - CLI entry, command parsing, interactive mode (1541 lines)
-- `src/agent.ts` - Core agent loop, tool execution, message handling (1338 lines)
-- `src/tools/index.ts` - All tool definitions (2566 lines)
+- `src/index.ts` - CLI entry, command parsing, interactive mode (1549 lines)
+- `src/agent.ts` - Core agent loop, tool execution, message handling (1438 lines)
+- `src/tools/index.ts` - All tool definitions (3081 lines)
 
 **Key directories:**
 - `src/llm/providers/` - LLM provider implementations (OpenAI-compatible)
@@ -15,9 +15,9 @@ spica-cli is an AI coding agent CLI with interactive and single-task modes. It s
 - `src/skills/` - Skill system (loading, execution)
 - `src/cli/` - TUI, events, input handling
 - `src/core/RuntimeState.ts` - Single source of truth for runtime state
-- `src/builtin-skills/` - Built-in skills (superpowers package, 14 skills)
+- `src/builtin-skills/superpowers/` - Built-in skills (14 skills)
 
-**Stats:** 44 source files, 44 test files
+**Stats:** 52 source files, 61 test files
 
 ## Build
 
@@ -42,14 +42,14 @@ npx vitest run -t "<test name>"     # Run specific test by name
 npm run test:run -- --coverage      # Run with coverage
 ```
 
-**Test locations:** `src/__tests__/` and `src/**/__tests__/` (44 test files)
+**Test locations:** `src/__tests__/` and `src/**/__tests__/`
 
-**Known issues:** 7 tests fail in `boundaryCases.test.ts` (interrupt/compression edge cases). These are expected failures related to async interrupt handling.
+**Known issues:** 9 tests fail in `boundaryCases.test.ts` (interrupt/compression edge cases). These are expected failures related to async interrupt handling and test timeouts.
 
 ## Lint
 
 ```bash
-npm run lint         # Run ESLint (0 errors, 46 warnings allowed)
+npm run lint         # Run ESLint (0 errors, 63 warnings allowed)
 npm run lint:fix     # Auto-fix lint issues
 npm run lint:strict  # Fail on warnings (not used in CI)
 ```
@@ -169,3 +169,15 @@ spica checkpoint clean             # Clean old checkpoints (keep 20)
 - Use `spica checkpoint restore <id>` to restore files from any checkpoint
 - Checkpoints are automatically created before each AI operation
 - Old checkpoints are cleaned automatically (keep last 20)
+
+## Learnings System
+
+When the user corrects the AI, write a new `.spica/learnings/YYYY-MM-DD-topic.md` file.
+
+These are auto-loaded into the system prompt on every session start via `getSystemPrompt()` in `src/prompts/system.ts`.
+
+**Format:** Freeform markdown. Keep it concise — one lesson per file.
+
+**Current learnings:**
+- `2026-05-30-learnings-mechanism.md` - How the learnings system works
+- `2026-06-05-subagent-superpowers-issue.md` - Known issue with subagent/superpowers integration

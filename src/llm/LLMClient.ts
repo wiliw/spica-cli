@@ -83,13 +83,25 @@ export class LLMClient extends EventEmitter {
     this.tools = tools;
   }
 
-  async generate(prompt: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
+  async generate(prompt: string, tools?: ToolDefinition[], externalSignal?: AbortSignal): Promise<LLMResponse> {
     // 提前创建AbortController，支持中断rate limiter等待
     // 如果有旧的 controller，先 abort 避免竞态
     if (this.abortController) {
       this.abortController.abort();
     }
     this.abortController = new AbortController();
+
+    // 🔴 关键：链接外部 signal（来自 agent 的 currentAbortController）
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        this.abortController.abort();
+      } else {
+        externalSignal.addEventListener('abort', () => {
+          this.abortController!.abort();
+        });
+      }
+    }
+
     const toolsToUse = tools || this.tools;
 
     try {
@@ -186,7 +198,8 @@ export class LLMClient extends EventEmitter {
   async continueWithAllToolResults(
     toolResults: Array<{ name: string; result: string; id?: string }>,
     tools?: ToolDefinition[],
-    postToolMessages?: ChatMessage[]
+    postToolMessages?: ChatMessage[],
+    externalSignal?: AbortSignal
   ): Promise<LLMResponse> {
     const toolsToUse = tools || this.tools;
     const lastMessage = this.provider.getMessages()[this.provider.getMessages().length - 1];
@@ -206,6 +219,17 @@ export class LLMClient extends EventEmitter {
 
     // 提前创建AbortController
     this.abortController = new AbortController();
+
+    // 🔴 链接外部 signal
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        this.abortController!.abort();
+      } else {
+        externalSignal.addEventListener('abort', () => {
+          this.abortController?.abort();
+        });
+      }
+    }
 
     try {
       await this.rateLimiter.waitForAvailability(this.abortController.signal);
@@ -295,9 +319,20 @@ export class LLMClient extends EventEmitter {
   }
 
   // 从历史消息继续生成（不添加新的user消息）
-  async generateFromHistory(tools?: ToolDefinition[]): Promise<LLMResponse> {
+  async generateFromHistory(tools?: ToolDefinition[], externalSignal?: AbortSignal): Promise<LLMResponse> {
     const toolsToUse = tools || this.tools;
     this.abortController = new AbortController();
+
+    // 🔴 链接外部 signal
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        this.abortController!.abort();
+      } else {
+        externalSignal.addEventListener('abort', () => {
+          this.abortController?.abort();
+        });
+      }
+    }
 
     try {
       await this.rateLimiter.waitForAvailability(this.abortController.signal);

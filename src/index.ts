@@ -286,11 +286,12 @@ program
           // ESC ESC 中断
           if (result.isInterrupt) {
             if (state.getAgent()) {
-              state.getAgent()!.interrupt();
-              // 不要在这里设置 isProcessing = false！
-              // 让 handleInput 自己在 runLoop 结束后设置
-              // 防止竞态：用户中断后立即输入新内容导致两个 runLoop 同时运行
-              updateStatusBar();
+              const agent = state.getAgent()!;
+              agent.interrupt();
+
+              // 不等待：interrupt 会立即 abort，runLoop 会尽快退出
+              // 新的输入会被 handleInput 的 isProcessing 检查阻挡
+              // 直到当前 runLoop 结束
 
               screen.appendScroll(COLORS.warning("\n[INTERRUPTED]\n"));
               screen.setStreaming(false);

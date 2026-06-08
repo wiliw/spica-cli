@@ -1118,23 +1118,21 @@ Write-Output $proc.Id;
 
           // 创建 AbortController 用于卡住检测和中断（优先使用 agent 传入的 signal）
           const externalSignal = safeArgs._abortSignal as AbortSignal | undefined;
-          const abortController = externalSignal
-            ? new AbortController()
-            : new AbortController();
+          const abortController = new AbortController();
 
-          // 如果有外部 signal，监听它的 abort 事件
-          if (externalSignal) {
-            if (externalSignal.aborted) {
-              abortController.abort();
-            } else {
-              externalSignal.addEventListener('abort', () => {
-                abortController.abort();
-              });
-            }
+          // 如果外部 signal 已经 aborted，立即 abort
+          if (externalSignal?.aborted) {
+            abortController.abort();
+          }
+          // 链接外部 signal：当外部 abort 时，也 abort 本地 controller
+          // 🔴 关键：保存 handler 引用以便后续清理（防止内存泄漏）
+          const abortHandler = () => abortController.abort();
+          if (externalSignal && !externalSignal.aborted) {
+            externalSignal.addEventListener('abort', abortHandler);
           }
 
 // === 卡住检测和强制终止机制 ===
-          // 关键修复：先启动进程，确保 pid 就绪，再设置 timer
+          // 关键修复：先启动进程，确保 pid 就绪，再设置 timer 和 abort listener
           let stuckWarningSent = false;
           let progressTimer: NodeJS.Timeout | null = null;
           const startTime = Date.now();
@@ -1183,6 +1181,20 @@ Write-Output $proc.Id;
             }
           }, stuckWarningMs);
 
+          // 🔴 关键修复：主动检查 abort 状态（每 200ms）
+          // execa 的 cancelSignal 对于无输出的命令不会立即生效
+          // 我们需要主动检查并 kill 进程组
+          const abortCheckInterval = setInterval(() => {
+            if (abortController.signal.aborted && bashProcess.pid) {
+              clearInterval(abortCheckInterval);
+              try {
+                process.kill(-bashProcess.pid, 'SIGKILL');
+              } catch {
+                try { process.kill(bashProcess.pid, 'SIGKILL'); } catch {}
+              }
+            }
+          }, 200);
+
           // 进度报告定时器（降低阈值，让用户看到进度）
           if (eventCallback) {
             progressTimer = setInterval(() => {
@@ -1197,7 +1209,12 @@ Write-Output $proc.Id;
 
             // 清除定时器（正常完成）
             clearTimeout(stuckWarningTimer);
+            clearInterval(abortCheckInterval);
             if (progressTimer) clearInterval(progressTimer);
+            // 🔴 清理 abort handler（防止内存泄漏）
+            if (externalSignal && abortHandler) {
+              externalSignal.removeEventListener('abort', abortHandler);
+            }
 
             // 检查是否超时或被中断
             if (bashResult.timedOut || abortController.signal.aborted) {
@@ -1241,10 +1258,23 @@ Write-Output $proc.Id;
           } catch (bashError: any) {
             // 清除定时器
             clearTimeout(stuckWarningTimer);
+            clearInterval(abortCheckInterval);
             if (progressTimer) clearInterval(progressTimer);
+            // 🔴 清理 abort handler（防止内存泄漏）
+            if (externalSignal && abortHandler) {
+              externalSignal.removeEventListener('abort', abortHandler);
+            }
 
-            // 用户主动中断：立即返回
+            // 用户主动中断：立即 kill 进程组并返回
             if (abortController.signal.aborted) {
+              // 🔴 关键：kill 整个进程组（detached: true 创建的）
+              if (bashProcess.pid) {
+                try {
+                  process.kill(-bashProcess.pid, 'SIGKILL');
+                } catch {
+                  try { process.kill(bashProcess.pid, 'SIGKILL'); } catch {}
+                }
+              }
               return {
                 success: false,
                 error: 'Command aborted by user (ESC ESC).',
@@ -1539,14 +1569,13 @@ Write-Output $proc.Id;
         // 创建 AbortController
         const externalSignal = safeArgs._abortSignal as AbortSignal | undefined;
         const abortController = new AbortController();
+        const abortHandler = () => abortController.abort();
 
         if (externalSignal) {
           if (externalSignal.aborted) {
             abortController.abort();
           } else {
-            externalSignal.addEventListener('abort', () => {
-              abortController.abort();
-            });
+            externalSignal.addEventListener('abort', abortHandler);
           }
         }
 
@@ -1667,8 +1696,16 @@ Write-Output $proc.Id;
             ? `DuckDuckGo搜索结果 (${htmlResults.length}个):\n\n${htmlResults.join('\n\n')}`
             : `搜索完成但未找到有效结果。\n\n建议:\n1. 设置 TAVILY_API_KEY 环境变量使用 Tavily API (推荐)\n2. 使用更具体的搜索词\n3. 尝试英文关键词\n\n提示: DuckDuckGo 可能检测到自动化请求，返回主页而非搜索结果。`;
 
+          // 清理 abort handler
+          if (externalSignal && abortHandler) {
+            externalSignal.removeEventListener('abort', abortHandler);
+          }
           return { success: true, output };
         } catch (searchError: any) {
+          // 清理 abort handler
+          if (externalSignal && abortHandler) {
+            externalSignal.removeEventListener('abort', abortHandler);
+          }
           if (abortController.signal.aborted || searchError.code === 'ERR_CANCELED' || searchError.message?.includes('abort')) {
             return { success: false, error: 'Tool execution aborted by user (ESC ESC).' };
           }
@@ -1688,15 +1725,14 @@ Write-Output $proc.Id;
 
         // 创建 AbortController（支持 ESC ESC 中断）
         const externalSignal = safeArgs._abortSignal as AbortSignal | undefined;
-        const abortController = externalSignal ? new AbortController() : new AbortController();
+        const abortController = new AbortController();
+        const abortHandler = () => abortController.abort();
 
         if (externalSignal) {
           if (externalSignal.aborted) {
             abortController.abort();
           } else {
-            externalSignal.addEventListener('abort', () => {
-              abortController.abort();
-            });
+            externalSignal.addEventListener('abort', abortHandler);
           }
         }
 
@@ -1776,8 +1812,16 @@ Write-Output $proc.Id;
 
           const output = title ? `标题: ${title}\n\n内容:\n${body}` : body;
 
+          // 清理 abort handler
+          if (externalSignal && abortHandler) {
+            externalSignal.removeEventListener('abort', abortHandler);
+          }
           return { success: true, output };
         } catch (fetchError: any) {
+          // 清理 abort handler
+          if (externalSignal && abortHandler) {
+            externalSignal.removeEventListener('abort', abortHandler);
+          }
           // 检查是否是中断导致的错误
           if (abortController.signal.aborted || fetchError.code === 'ERR_CANCELED' || fetchError.message?.includes('abort')) {
             return { success: false, error: 'Tool execution aborted by user (ESC ESC).' };
