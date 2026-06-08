@@ -3,10 +3,12 @@
 **AI Coding Agent CLI** - Your intelligent coding companion with automatic conflict detection, smart retries, and industry-standard code quality analysis.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js Version](https://img.shields.io/node/v/spica-cli)](https://nodejs.org)
-[![GitHub Stars](https://img.shields.io/github/stars/zison/spica-cli?style=social)](https://github.com/zison/spica-cli)
+[![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.4-blue.svg)](https://www.typescriptlang.org/)
+[![GitHub Stars](https://img.shields.io/github/stars/zison/spica-cli?style=social)](https://github.com/zison/spica-cli/stargazers)
 [![GitHub Issues](https://img.shields.io/github/issues/zison/spica-cli)](https://github.com/zison/spica-cli/issues)
-[![npm downloads](https://img.shields.io/npm/dt/spica-cli)](https://www.npmjs.com/package/spica-cli)
+[![GitHub Last Commit](https://img.shields.io/github/last-commit/zison/spica-cli)](https://github.com/zison/spica-cli/commits)
+[![Code Size](https://img.shields.io/github/languages/code-size/zison/spica-cli)](https://github.com/zison/spica-cli)
 
 **English** | [中文](README_CN.md)
 
