@@ -8,7 +8,7 @@
        _|                     
 ```
 
-一个基于 OpenAI API 的命令行编程助手，支持并行工具执行、自动重试和代码质量分析。
+一个支持 OpenAI-compatible API 的命令行编程助手。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org)
@@ -20,72 +20,85 @@
 
 [English](README.md) | **中文**
 
----
-
-## 主要功能
-
-- **工具冲突检测**：多个工具操作同一资源时自动顺序执行
-- **自动重试**：命令超时时后台重试
-- **语法检查**：保存 TS/JS/Python 文件时自动验证语法
-- **代码质量分析**：基于 McCabe 复杂度等指标
-- **MCP 支持**：可扩展外部工具
-- **上下文压缩**：智能压缩对话历史节省 token
-
----
-
-## 快速开始
+## 安装
 
 ```bash
-# 安装
-npm install
-
-# 构建
-npm run build
-
-# 配置提供商
-spica set deepseek https://api.deepseek.com/v1 sk-xxx deepseek-chat
-spica use deepseek
-
-# 运行
-spica              # 交互模式
-spica run "任务"   # 单任务模式
+npm install -g spica-cli
 ```
 
----
+或从源码构建：
 
-## 主要特性
+```bash
+git clone https://github.com/zison/spica-cli
+cd spica-cli
+npm install
+npm run build
+```
 
-### 🔧 智能工具编排
-- **冲突自动检测**：检测文件/资源冲突，按正确顺序执行（并行 vs 顺序）
-- **自动重试机制**：Bash/Test 命令超时时自动在分离模式重试
-- **中断恢复**：优雅的中断处理，状态保存
+## 使用
 
-### 📊 代码质量分析
-基于 Martin Fowler 的"AI 编码可维护性传感器"和学术研究：
+```bash
+# 配置提供商
+spica set deepseek https://api.deepseek.com/v1 sk-xxx deepseek-chat
 
-| 工具 | 目的 | 阈值 |
-|------|---------|------------|
-| `code_health` | 检测复杂度、嵌套、长度问题 | 评分 ≥ 9.5 |
-| `test_quality_check` | 检测测试反模式 | 评分 ≥ 7.0 |
+# 切换提供商
+spica use deepseek
 
-### 🛡️ 安全特性
-- **语法自动检查**：TS/JS/Python/Go/Rust/Shell 语法验证
-- **Shell 注入检测**：阻止危险命令模式
-- **权限模式**：严格/绕过模式
+# 启动交互模式
+spica
 
----
+# 执行单任务
+spica run "修复 src/index.ts 中的 bug"
+```
 
-## 命令
+## 功能
+
+- **33 个内置工具**：文件读写编辑、bash、grep、glob、git、web fetch 等
+- **工具冲突检测**：自动处理并发文件操作
+- **自动重试**：命令超时时后台重试
+- **语法验证**：自动检查 TS/JS/Python/Go/Rust/Shell
+- **代码质量分析**：圈复杂度、嵌套深度、函数长度
+- **测试质量检查**：检测过度 mock、只测正常路径等问题
+- **MCP 支持**：通过 Model Context Protocol 扩展外部工具
+- **上下文压缩**：减少长对话的 token 使用
+
+## 工具
+
+### 文件操作
+`file_read` `file_write` `file_edit` `file_multi_edit` `file_replace` `file_insert` `file_delete` `file_copy` `file_move` `file_exists` `file_patch`
+
+### 搜索
+`glob` `grep` `directory_list`
+
+### Shell & Git
+`bash` `git`
+
+### 代码质量
+`code_health` `test_quality_check` `lint` `test`
+
+### Web
+`web_search` `web_fetch` `gh`
+
+### 任务管理
+`todo` `task` `workspace` `question`
+
+## 交互命令
 
 | 命令 | 描述 |
 |---------|-------------|
-| `spica` | 启动交互 TUI 模式 |
-| `spica run <请求>` | 执行单任务 |
-| `spica set <名称> <URL> <密钥> <模型>` | 添加 LLM 提供商 |
-| `spica use <名称>` | 切换活跃提供商 |
-| `spica list` | 列出所有提供商 |
+| `/help` | 显示可用命令 |
+| `/clear` | 清除会话历史 |
+| `/compact` | 压缩上下文 |
+| `/bypass` | 自动批准操作 |
+| `/strict` | 需要确认 |
+| `/init` | 生成 AGENTS.md |
 
----
+## 配置
+
+```
+~/.spica/settings.json    # 全局配置
+<project>/.spica/         # 项目会话
+```
 
 ## 开发
 
@@ -93,17 +106,13 @@ spica run "任务"   # 单任务模式
 npm run dev      # 开发模式
 npm run build    # 构建 CLI
 npm test         # 运行测试
-npm run lint     # 运行检查
+npm run lint     # 代码检查
 ```
-
----
 
 ## 文档
 
-- [MANUAL.md](docs/MANUAL.md) - 完整用户手册
+- [MANUAL.md](docs/MANUAL.md) - 用户手册
 - [CONFIGURATION.md](docs/CONFIGURATION.md) - 配置指南
-
----
 
 ## 许可证
 

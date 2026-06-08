@@ -8,7 +8,7 @@
        _|                     
 ```
 
-一个基于 OpenAI API 的命令行编程助手，支持并行工具执行、自动重试和代码质量分析。
+A command-line coding agent that supports OpenAI-compatible APIs.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org)
@@ -20,128 +20,67 @@
 
 **English** | [中文](README_CN.md)
 
----
-
-## 主要功能
-
-- **工具冲突检测**：多个工具操作同一资源时自动顺序执行
-- **自动重试**：命令超时时后台重试
-- **语法检查**：保存 TS/JS/Python 文件时自动验证语法
-- **代码质量分析**：基于 McCabe 复杂度等指标
-- **MCP 支持**：可扩展外部工具
-- **上下文压缩**：智能压缩对话历史节省 token
-
----
-
-## ✨ Unique Features
-
-### 🔧 Intelligent Tool Orchestration
-- **Automatic Conflict Detection**: Detects file/resource conflicts and executes tools in proper order (parallel vs sequential)
-- **Auto-Retry Mechanism**: Bash/Test commands automatically retry in detached mode when timeout occurs
-- **Interrupt Recovery**: Graceful interrupt handling with state preservation
-
-### 📊 Code Quality Analysis (Industry-Standard)
-Based on Martin Fowler's "Maintainability sensors for coding agents" and academic research:
-
-| Tool | Purpose | Thresholds |
-|------|---------|------------|
-| `code_health` | Detect complexity, nesting, length issues | Score ≥ 9.5 for AI-friendly code |
-| `test_quality_check` | Detect test anti-patterns (over-mocking, happy-path-only) | Score ≥ 7.0 |
-
-### 🛡️ Safety Features
-- **Syntax Auto-Check**: Automatic syntax validation for TS/JS/Python/Go/Rust/Shell
-- **Shell Injection Detection**: Blocks dangerous command patterns
-- **Permission Modes**: Strict/Bypass modes for different security needs
-
-### 🚀 Performance Optimizations
-- **Context Compression**: Smart message compression to maximize token usage
-- **Token-Aware**: Real-time token counting and warnings
-- **Progress Reporting**: Live progress updates for long-running operations
-
----
-
-## Quick Start
+## Installation
 
 ```bash
-# Install
-npm install
-
-# Build
-npm run build
-
-# Configure provider
-spica set deepseek https://api.deepseek.com/v1 sk-xxx deepseek-chat
-spica use deepseek
-
-# Run
-spica              # Interactive mode
-spica run "task"   # Single task mode
+npm install -g spica-cli
 ```
 
----
+Or build from source:
 
-## Commands
+```bash
+git clone https://github.com/zison/spica-cli
+cd spica-cli
+npm install
+npm run build
+```
 
-| Command | Description |
-|---------|-------------|
-| `spica` | Start interactive TUI mode |
-| `spica run <request>` | Execute single task |
-| `spica set <name> <url> <key> <model>` | Add LLM provider |
-| `spica use <name>` | Switch active provider |
-| `spica list` | List all providers |
-| `spica show [name]` | Show provider details |
-| `spica remove <names...>` | Remove providers |
-| `spica -p <name>` | Use specific provider for one session |
+## Usage
 
----
+```bash
+# Configure a provider
+spica set deepseek https://api.deepseek.com/v1 sk-xxx deepseek-chat
 
-## 🛠️ Tools
+# Use a provider
+spica use deepseek
+
+# Start interactive mode
+spica
+
+# Run a single task
+spica run "fix the bug in src/index.ts"
+```
+
+## Features
+
+- **33 built-in tools**: file read/write/edit, bash, grep, glob, git, web fetch, etc.
+- **Tool conflict detection**: automatically handles concurrent file operations
+- **Auto-retry**: commands retry in background on timeout
+- **Syntax validation**: automatic check for TS/JS/Python/Go/Rust/Shell
+- **Code quality analysis**: cyclomatic complexity, nesting depth, function length
+- **Test quality check**: detects over-mocking, happy-path-only tests
+- **MCP support**: extend with external tools via Model Context Protocol
+- **Context compression**: reduces token usage for long conversations
+
+## Tools
 
 ### File Operations
-| Tool | Description |
-|------|-------------|
-| `file_read` | Read file (required before write/edit) |
-| `file_write` | Create/overwrite file with syntax check |
-| `file_edit` | Exact text replacement with syntax check |
-| `file_multi_edit` | Multiple edits at once |
-| `file_replace` | Regex-based replacement |
-| `file_insert` | Insert at specific line |
-| `file_delete` | Delete file or directory |
-| `file_copy` / `file_move` | Copy/move files |
-| `file_exists` | Check path existence |
+`file_read` `file_write` `file_edit` `file_multi_edit` `file_replace` `file_insert` `file_delete` `file_copy` `file_move` `file_exists` `file_patch`
 
-### Code Quality (NEW)
-| Tool | Description |
-|------|-------------|
-| `code_health` | Analyze code maintainability (complexity, nesting, length) |
-| `test_quality_check` | Detect test anti-patterns (TST-004, TST-005, TST-008) |
-| `lint` | Run project linter (auto-detects tsc, eslint, golangci-lint, etc.) |
-| `test` | Run tests with auto-retry (auto-detects vitest, pytest, go test, etc.) |
+### Search
+`glob` `grep` `directory_list`
 
-### Search & Shell
-| Tool | Description |
-|------|-------------|
-| `glob` | Find files by pattern |
-| `grep` | Search text patterns in files |
-| `bash` | Run shell commands (auto-retry on timeout) |
-| `git` | Git operations |
+### Shell & Git
+`bash` `git`
 
-### Web & GitHub
-| Tool | Description |
-|------|-------------|
-| `web_search` | Search web (DuckDuckGo/Tavily) |
-| `web_fetch` | Fetch URL content |
-| `gh` | GitHub CLI operations |
+### Code Quality
+`code_health` `test_quality_check` `lint` `test`
+
+### Web
+`web_search` `web_fetch` `gh`
 
 ### Task Management
-| Tool | Description |
-|------|-------------|
-| `todo` | Task tracking with persistence |
-| `task` | Parallel subagent execution |
-| `workspace` | Get/switch workspace |
-| `question` | Ask user for clarification |
-
----
+`todo` `task` `workspace` `question`
 
 ## Interactive Commands
 
@@ -149,48 +88,17 @@ spica run "task"   # Single task mode
 |---------|-------------|
 | `/help` | Show available commands |
 | `/clear` | Clear session history |
-| `/history` | Show message history |
-| `/compact` | Compress context to save tokens |
-| `/bypass` | Auto-approve all operations |
-| `/strict` | Require confirmation for risky operations |
-| `/status` | Show current status |
-| `/skills` | List available skills |
-| `/init` | Generate AGENTS.md for project |
-
----
-
-## 📖 Code Quality Standards
-
-### code_health Thresholds (Martin Fowler's Recommendations)
-
-| Metric | Threshold | Reason |
-|--------|-----------|--------|
-| Cyclomatic Complexity | ≤ 10 | McCabe complexity for AI readability |
-| Nesting Depth | ≤ 4 | Deep nesting is hard to trace |
-| Function Length | ≤ 50 lines | Long functions hide intent |
-| File Length | ≤ 200 lines | Long files are hard to navigate |
-| Parameters | ≤ 5 | Many parameters = confusing |
-
-### test_quality_check Anti-Patterns (Research-Based)
-
-| Pattern | ID | Problem |
-|---------|-----|---------|
-| Over-mocking | TST-004 | Mocks > 70% of calls = fake test |
-| Happy-path-only | TST-005 | No error case tests = incomplete |
-| Assertion-free | TST-008 | No assertions = useless test |
-| Incomplete mock | TST-006 | Mock returns partial data |
-| Test-only method | TST-007 | Production code pollution |
-
----
+| `/compact` | Compress context |
+| `/bypass` | Auto-approve operations |
+| `/strict` | Require confirmation |
+| `/init` | Generate AGENTS.md |
 
 ## Configuration
 
 ```
-~/.spica/settings.json  # Global config (providers, MCP, skills, hooks)
-<project>/.spica/       # Project session & tasks
+~/.spica/settings.json    # Global config
+<project>/.spica/         # Project session
 ```
-
----
 
 ## Development
 
@@ -198,32 +106,13 @@ spica run "task"   # Single task mode
 npm run dev      # Development mode
 npm run build    # Build CLI
 npm test         # Run tests
-npm run lint     # Run linter
+npm run lint     # Lint check
 ```
 
----
+## Documentation
 
-## 📚 Documentation
-
-- [MANUAL.md](docs/MANUAL.md) - Complete user manual
+- [MANUAL.md](docs/MANUAL.md) - User manual
 - [CONFIGURATION.md](docs/CONFIGURATION.md) - Configuration guide
-- [SPEC-GAP-ANALYSIS.md](docs/SPEC-GAP-ANALYSIS.md) - Design analysis
-
----
-
-## 🔗 Related Projects
-
-- [Claude Code](https://github.com/anthropics/claude-code) - Anthropic's CLI
-- [Aider](https://github.com/aider-ai/aider) - AI pair programming
-- [OpenHands](https://github.com/All-Hands-AI/OpenHands) - Autonomous AI developer
-
----
-
-## Keywords
-
-`ai-coding-agent` `cli-tool` `code-quality` `test-quality` `automatic-retry` `llm-agent` `developer-tools` `code-analysis` `maintainability` `coding-assistant`
-
----
 
 ## License
 
