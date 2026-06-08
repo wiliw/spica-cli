@@ -879,6 +879,17 @@ export function setupAgentEvents(
     screen.appendStreamChunk(COLORS.primary(data.chunk));
   });
 
+  on('message', (data: { role: string; content: string }) => {
+    if (data.role === 'assistant' && data.content) {
+      // 确保thinking动画已清除
+      screen.clearThinkingAnimation();
+      // 如果流式没有输出（非流式响应），直接显示完整消息
+      if (!state.isStreamingOutput()) {
+        screen.appendScroll(COLORS.primary(data.content + '\n'));
+      }
+    }
+  });
+
   on('reasoning', (data: ReasoningData) => {
     if (!reasoningStarted) {
       reasoningStarted = true;
@@ -1073,6 +1084,7 @@ export function setupAgentEvents(
   on('agent_interrupted', (data: AgentInterruptedData) => {
     state.setStreamingOutput(false);
     screen.setStreaming(false);
+    screen.clearThinkingAnimation();
 
     // 🔴 基于 cancelSeq 防止重复显示（只显示最新的 cancelSeq）
     const currentCancelSeq = data.cancelSeq || 0;

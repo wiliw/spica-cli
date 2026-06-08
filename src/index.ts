@@ -84,6 +84,7 @@ process.on("SIGINT", () => {
       screen.appendScroll(
         COLORS.warning("\n[INTERRUPTED] Ctrl+C again to exit\n"),
       );
+      screen.clearThinkingAnimation();
       screen.setStreaming(false);
       screen.restoreCursor();
       screen.refreshInput();
@@ -254,6 +255,7 @@ program
 
         // 设置 Ctrl+O 切换回调
         screen.setVerboseToggleCallback(() => {
+          screen.clearThinkingAnimation();
           const newMode = state.toggleVerboseMode();
           screen.appendScroll(
             COLORS.secondary(
@@ -1068,10 +1070,12 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
                 updateStatusBar();
                 try {
                   await agent.runLoop(prompt);
+                  screen.clearThinkingAnimation();
                   screen.setStreaming(false);
                   screen.appendScroll(COLORS.success("\n[OK] Done\n"));
                   playBell("done"); // 工作完成提示音
                 } catch (error: unknown) {
+                  screen.clearThinkingAnimation();
                   screen.setStreaming(false);
                   const errorMsg = error instanceof Error ? error.message : String(error);
                   screen.appendScroll(
@@ -1134,6 +1138,7 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
               screen.setStreaming(false);
               screen.appendScroll("\n");
             }
+            screen.clearThinkingAnimation();
 
             // 显示运行统计
             const stats = formatRunStats(elapsed, agent, tokenCounter);
@@ -1148,6 +1153,7 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
               screen.setStreaming(false);
               screen.appendScroll("\n");
             }
+            screen.clearThinkingAnimation();
             // 显示运行统计（即使失败也显示）
             const stats = formatRunStats(elapsed, agent, tokenCounter);
             screen.appendScroll(COLORS.muted(`\n${stats}\n`));
@@ -1155,6 +1161,7 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
             playBell("error");
           }
           // 输出完成，恢复光标到输入框并刷新显示
+          screen.clearThinkingAnimation();
           screen.setStreaming(false);
           screen.restoreCursor();
           screen.refreshInput();

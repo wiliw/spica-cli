@@ -36,6 +36,7 @@ export class ScreenManager {
   // Thinking动画状态
   private thinkingAnimationFrame: number = 0;
   private thinkingAnimationTimer: NodeJS.Timeout | null = null;
+  private thinkingAnimationStopped: boolean = false;
   private thinkingAnimationFrames: string[] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
   constructor() {
@@ -297,6 +298,7 @@ export class ScreenManager {
     }
 
     // 显示初始帧
+    this.thinkingAnimationStopped = false;
     this.showThinkingFrame();
 
     // 定时更新动画帧
@@ -307,6 +309,7 @@ export class ScreenManager {
   }
 
   private showThinkingFrame(): void {
+    if (this.thinkingAnimationStopped) return;
     const frame = this.thinkingAnimationFrames[this.thinkingAnimationFrame];
     // 在scroll区域最后一行显示动画
     writeStdout(`${ESC}[?25l`);
@@ -317,6 +320,7 @@ export class ScreenManager {
   }
 
   clearThinkingAnimation(): void {
+    this.thinkingAnimationStopped = true;
     if (this.thinkingAnimationTimer) {
       clearInterval(this.thinkingAnimationTimer);
       this.thinkingAnimationTimer = null;
@@ -480,8 +484,8 @@ export class ScreenManager {
         return false;
       }
 
-      // Enter 键不处理
-      if (data === '\r' || data === '\n') return false;
+      // Enter 键 - 流式输出时允许提交（index.ts 的 queue 会排队处理）
+      if (data === '\r' || data === '\n') return true;
 
       // 删除键
       if (data === '\x7f' || data === '\b') {
