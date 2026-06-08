@@ -886,26 +886,27 @@ export function setupAgentEvents(
     }
   });
 
-  // 工具调用开始 - 不显示，只在结果时显示完整信息
+  // 工具调用开始 - 清除thinking动画
   on('tool_call', (data: ToolCallData) => {
     state.setStreamingOutput(false);
     screen.setStreaming(false);
 
-    if (reasoningStarted) {
-      screen.appendScroll('\n');
-      reasoningStarted = false;
-      screen.clearThinkingAnimation();
-    }
+    // 总是清除thinking动画（无论reasoningStarted状态）
+    screen.clearThinkingAnimation();
+    reasoningStarted = false;
 
     // 注册工具调用（不显示）
     registerToolCall(data);
     screen.flushOutput();
   });
 
-  // 工具调用结果
+  // 工具调用结果 - 清除thinking动画
   on('tool_result', (data: ToolResultData) => {
     state.setStreamingOutput(false);
     screen.setStreaming(false);
+
+    // 确保清除thinking动画
+    screen.clearThinkingAnimation();
 
     // 匹配工具调用
     const record = matchToolResult(data);
