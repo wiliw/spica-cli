@@ -637,6 +637,7 @@ async init() {
 async runLoop(prompt: string, maxIterations = 50): Promise<string> {
     // 🔴 Cancel-on-entry: 如果 pendingCancel，拒绝进入
     if (this.checkCanceledOnEntry()) {
+      this.pendingCancel = false;
       this.emit('agent_interrupted', { reason: 'Canceled on entry (pendingCancel)' });
       return '[INTERRUPTED] Request canceled before execution';
     }
@@ -886,8 +887,34 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
             this.emit(event, data);
           };
 
+          // Auto-retry on timeout for bash/test: double timeout and retry up to 2 times
+          const isTimeoutRetryable = tc.name === 'bash' || tc.name === 'test';
+          const maxToolRetries = isTimeoutRetryable ? 2 : 0;
+          let toolRetries = 0;
+
           try {
-            const result = await executeTool(tc.name, tcArgs, eventCallback);
+            let result = await executeTool(tc.name, tcArgs, eventCallback);
+
+            while (
+              toolRetries < maxToolRetries &&
+              !result.success &&
+              isTimeoutRetryable &&
+              (result.error?.toLowerCase().includes('timeout') ||
+               result.error?.toLowerCase().includes('timed out'))
+            ) {
+              if (signal.aborted) break;
+              toolRetries++;
+              const prevTimeout = (tcArgs.timeout as number) || 120;
+              tcArgs.timeout = prevTimeout * 2;
+              this.emit('tool_retry', {
+                tool: tc.name,
+                attempt: toolRetries,
+                maxRetries: maxToolRetries,
+                timeout: tcArgs.timeout,
+                error: result.error
+              });
+              result = await executeTool(tc.name, tcArgs, eventCallback);
+            }
 
             if (!result.success) {
               if (result.error?.includes('aborted') || result.error?.includes('interrupted')) {
@@ -1086,16 +1113,10 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
       }
     }
 
-    // 释放 currentAbortController，清理 pendingCancel
-    this.currentAbortController = null;
-    this.clearPendingCancel(entryCancelSeq);
-
     return assistantContent;
-  } catch (error) {
-    // 异常情况下也要释放
+  } finally {
     this.currentAbortController = null;
-    this.clearPendingCancel(entryCancelSeq);
-    throw error;
+    this.clearPendingCancel(this.cancelSeq);
   }
 }
 
@@ -1144,12 +1165,12 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
       bash: (e, a) =>
         e.includes('command not found') ? `Command not found: ${a.command}. Try: install required tool, or use alternative command.`
         : e.includes('Permission denied') ? `Permission denied: ${a.command}. Try: check permissions, or use sudo if safe.`
-        : e.includes('timeout') ? `Command timed out. Try: detached=true for background, shorter timeout, or break into smaller steps.`
+        : e.includes('timeout') ? `Command timed out (auto-retried with doubled timeout, max 2 retries). Try: detached=true for background, or break into smaller steps.`
         : `Execution failed. Try: check command syntax, or use simpler command.`,
       glob: (e, a) => `Search failed: ${a.pattern}. Try: simpler pattern (e.g., *.ts), or check directory exists.`,
       grep: (e, a) => `Search failed. Try: simpler pattern, or use glob first to find files.`,
       test: (e, _a) =>
-        e.includes('timeout') ? `Test timed out. Try: run specific test file, or use quick validation (tsc, lint).`
+        e.includes('timeout') ? `Test timed out (auto-retried with doubled timeout, max 2 retries). Try: run specific test file, or use quick validation (tsc, lint).`
         : `Test failed. Try: run single test file, or check test output for details.`,
       lint: (e, _a) =>
         e.includes('error') ? `Lint errors found. Try: fix errors one by one, or use format tool.`
