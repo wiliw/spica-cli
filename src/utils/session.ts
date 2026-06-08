@@ -28,6 +28,7 @@ export interface SessionState {
   id: string;
   name: string;
   createdAt: string;
+  summary?: string;  // 归档时的摘要
 }
 
 // Generate unique session ID
@@ -158,17 +159,99 @@ export function saveSession(workspacePath: string, messages: ChatMessage[], sess
   }
 }
 
+// Generate simple summary from messages (user messages + tool calls)
+export function generateSessionSummary(messages: ChatMessage[]): string {
+  if (messages.length === 0) return '';
+
+  const parts: string[] = [];
+
+  // Extract user messages (first 3)
+  const userMessages = messages
+    .filter(m => m.role === 'user')
+    .slice(0, 3)
+    .map(m => (m.content || '').slice(0, 100));
+
+  if (userMessages.length > 0) {
+    parts.push('Tasks: ' + userMessages.join(' | '));
+  }
+
+  // Extract tool names used
+  const toolNames = new Set<string>();
+  for (const m of messages) {
+    if (m.toolCalls) {
+      for (const tc of m.toolCalls) {
+        toolNames.add(tc.name);
+      }
+    }
+  }
+
+  if (toolNames.size > 0) {
+    const toolsList = Array.from(toolNames).slice(0, 10).join(', ');
+    parts.push('Tools: ' + toolsList);
+  }
+
+  return parts.join('. ').slice(0, 500);  // Max 500 chars
+}
+
 // Archive session to sessions directory
-export function archiveSession(workspacePath: string, session: SessionState): void {
+export async function archiveSessionWithSummary(
+  workspacePath: string,
+  session: SessionState,
+  agent?: { generateDirect: (prompt: string) => Promise<{ content?: string }> }
+): Promise<string> {
   try {
     const sessionsDir = join(workspacePath, SESSIONS_DIR);
     fs.ensureDirSync(sessionsDir);
+
+    // Generate summary
+    let summary = '';
+
+    if (agent && session.messages.length > 0) {
+      // Try LLM summary first
+      try {
+        const userMessages = session.messages
+          .filter(m => m.role === 'user')
+          .map(m => m.content || '')
+          .slice(0, 5);
+
+        const prompt = `Summarize this coding session in 50-100 words. Focus on the main tasks, files modified, and outcomes:\n\n${userMessages.join('\n')}`;
+
+        const response = await agent.generateDirect(prompt);
+        if (response.content) {
+          summary = response.content.slice(0, 300);
+        }
+      } catch {
+        // Fallback to simple summary
+        summary = generateSessionSummary(session.messages);
+      }
+    } else {
+      summary = generateSessionSummary(session.messages);
+    }
+
+    session.summary = summary;
 
     // Save with session ID as filename
     const sessionPath = join(sessionsDir, `${session.id}.json`);
     fs.writeJsonSync(sessionPath, session, { spaces: 2 });
 
-    // 不限制数量，聊天记录是开发者的资产
+    return summary;
+  } catch {
+    return '';
+  }
+}
+
+// Archive session without LLM summary (simple version)
+export function archiveSession(workspacePath: string, session: SessionState): void {
+  try {
+    const sessionsDir = join(workspacePath, SESSIONS_DIR);
+    fs.ensureDirSync(sessionsDir);
+
+    // Generate simple summary
+    session.summary = generateSessionSummary(session.messages);
+
+    // Save with session ID as filename
+    const sessionPath = join(sessionsDir, `${session.id}.json`);
+    fs.writeJsonSync(sessionPath, session, { spaces: 2 });
   } catch {
     // 忽略归档错误
   }

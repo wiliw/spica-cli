@@ -459,20 +459,22 @@ program
                   const lastDate = new Date(s.lastActivity).toLocaleDateString();
                   const createdDate = new Date(s.createdAt).toLocaleDateString();
                   screen.appendScroll(
-                    COLORS.muted(
+                    COLORS.primary(
                       `    ${i + 1}. ${s.id}\n`,
                     ),
                   );
                   screen.appendScroll(
                     COLORS.muted(
-                      `       Name: ${s.name} (${s.messageCount} msgs)\n`,
+                      `       ${s.name} (${s.messageCount} msgs) | ${createdDate} - ${lastDate}\n`,
                     ),
                   );
-                  screen.appendScroll(
-                    COLORS.muted(
-                      `       Created: ${createdDate}, Last: ${lastDate}\n`,
-                    ),
-                  );
+                  if (s.summary) {
+                    screen.appendScroll(
+                      COLORS.muted(
+                        `       Summary: ${s.summary.slice(0, 100)}${s.summary.length > 100 ? '...' : ''}\n`,
+                      ),
+                    );
+                  }
                 });
                 if (sessions.length > 10) {
                   screen.appendScroll(
@@ -586,10 +588,46 @@ program
                 if (session) {
                   session.messages = currentMessages;
                   session.lastActivity = new Date().toISOString();
+
+                  // 生成摘要（使用 LLM）
+                  screen.appendScroll(COLORS.muted("\n[ARCHIVING] Generating summary...\n"));
+
+                  const { archiveSessionWithSummary, generateSessionSummary } = await import("./utils/session");
+                  let summary = '';
+
+                  // 尝试 LLM 摘要
+                  try {
+                    const llm = agent.getLLM();
+                    if (llm) {
+                      const userMessages = currentMessages
+                        .filter(m => m.role === 'user')
+                        .map(m => (m.content || '').slice(0, 200))
+                        .slice(0, 3);
+
+                      if (userMessages.length > 0) {
+                        const prompt = `Summarize this coding session in 50-100 words (Chinese or English). Focus on main tasks and files:\n\n${userMessages.join('\n')}`;
+                        const response = await llm.generateDirect(prompt);
+                        summary = response.content?.slice(0, 200) || '';
+                      }
+                    }
+                  } catch {
+                    // Fallback
+                  }
+
+                  if (!summary) {
+                    summary = generateSessionSummary(currentMessages);
+                  }
+
+                  session.summary = summary;
                   archiveSession(agent.getWorkspacePath(), session);
+
                   screen.appendScroll(
-                    COLORS.success(`\n[ARCHIVED] Saved ${currentMessages.length} messages (${session.id})\n`),
+                    COLORS.success(`\n[ARCHIVED] Saved ${currentMessages.length} messages\n`),
                   );
+                  screen.appendScroll(COLORS.muted(`  ID: ${session.id}\n`));
+                  if (summary) {
+                    screen.appendScroll(COLORS.muted(`  Summary: ${summary.slice(0, 150)}...\n`));
+                  }
                 }
               }
 
@@ -597,7 +635,7 @@ program
               agent.setMessages([]);
               clearInputQueue();
 
-              screen.appendScroll(COLORS.muted("[NEW] Started fresh session\n"));
+              screen.appendScroll(COLORS.success("[NEW] Started fresh session\n"));
               screen.appendScroll(COLORS.muted("Use /sessions to view archived chats, /switch <id> to load\n"));
 
               return;
