@@ -8,7 +8,7 @@
        _|                     
 ```
 
-**AI 编程助手 CLI** - 智能编码伴侣，自动冲突检测、智能重试、行业标准代码质量分析。
+一个基于 OpenAI API 的命令行编程助手，支持并行工具执行、自动重试和代码质量分析。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org)
@@ -22,15 +22,14 @@
 
 ---
 
-## 为什么选择 spica-cli？
+## 主要功能
 
-🎯 **智能安全**：自动检测文件冲突，重试失败命令，保存前验证语法
-
-📊 **质量优先**：基于 Martin Fowler 的可维护性研究 - 帮你写出 AI 易读的代码
-
-⚡ **高效快速**：并行工具执行，智能上下文压缩，实时 token 统计
-
-🔌 **MCP 支持**：Model Context Protocol 扩展能力
+- **工具冲突检测**：多个工具操作同一资源时自动顺序执行
+- **自动重试**：命令超时时后台重试
+- **语法检查**：保存 TS/JS/Python 文件时自动验证语法
+- **代码质量分析**：基于 McCabe 复杂度等指标
+- **MCP 支持**：可扩展外部工具
+- **上下文压缩**：智能压缩对话历史节省 token
 
 ---
 

@@ -8,7 +8,7 @@
        _|                     
 ```
 
-**AI Coding Agent CLI** - Your intelligent coding companion with automatic conflict detection, smart retries, and industry-standard code quality analysis.
+一个基于 OpenAI API 的命令行编程助手，支持并行工具执行、自动重试和代码质量分析。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org)
@@ -22,15 +22,14 @@
 
 ---
 
-## Why spica-cli?
+## 主要功能
 
-🎯 **Smart & Safe**: Detects file conflicts automatically, retries failed commands, validates syntax before saving
-
-📊 **Quality-Focused**: Built on Martin Fowler's maintainability research - helps you write AI-friendly code
-
-⚡ **Fast & Efficient**: Parallel tool execution, smart context compression, real-time token tracking
-
-🔌 **MCP Ready**: Model Context Protocol support for extending capabilities
+- **工具冲突检测**：多个工具操作同一资源时自动顺序执行
+- **自动重试**：命令超时时后台重试
+- **语法检查**：保存 TS/JS/Python 文件时自动验证语法
+- **代码质量分析**：基于 McCabe 复杂度等指标
+- **MCP 支持**：可扩展外部工具
+- **上下文压缩**：智能压缩对话历史节省 token
 
 ---
 
