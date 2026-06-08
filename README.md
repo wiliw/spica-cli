@@ -8,7 +8,7 @@
        _|                     
 ```
 
-A command-line coding agent that supports OpenAI-compatible APIs.
+A command-line tool for coding with LLMs. Works with any OpenAI-compatible API.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org)

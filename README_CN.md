@@ -8,7 +8,7 @@
        _|                     
 ```
 
-一个支持 OpenAI-compatible API 的命令行编程助手。
+一个在终端中使用 LLM 编程的工具。支持任意 OpenAI-compatible API。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org)
