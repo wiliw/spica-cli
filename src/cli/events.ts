@@ -656,7 +656,8 @@ function displayToolResult(record: ToolCallRecord, data: ToolResultData): void {
       }
     }
   } else {
-    // Compact模式：完整显示（工具名+参数+结果）
+    // Compact模式：完整显示（工具名+参数+结果），带缩进
+    screen.appendScroll(COLORS.muted('  '));  // 缩进
     screen.appendScroll(COLORS.tool(`${record.name}`));
 
     // 根据工具类型显示关键参数
@@ -842,9 +843,9 @@ export function setupAgentEvents(
 
   on('connection_error', (data: ConnectionErrorData) => {
     state.setConnectionErrorShown(true);
-    screen.appendScroll(COLORS.error(`\n[ERR] ${data.type}: ${data.hint}\n`));
-    if (data.error) {
-      screen.appendScroll(COLORS.muted(`Details: ${data.error}\n`));
+    screen.appendScroll(COLORS.error(`\nError: ${data.type}\n`));
+    if (data.hint && data.hint.length < 50) {
+      screen.appendScroll(COLORS.muted(`${data.hint}\n`));
     }
   });
 
@@ -946,21 +947,14 @@ export function setupAgentEvents(
     screen.restoreCursor();
   });
 
-  on('error_suggestion', (data: ErrorSuggestionData) => {
-    screen.appendScroll(COLORS.warning(`\n[hint] ${data.suggestion}\n`));
-  });
+  // AI建议信息 - 内部机制，不显示给用户
 
-  on('empty_response_warning', (data: { iteration: number; message: string }) => {
-    screen.appendScroll(COLORS.warning(`\n[warn] Empty response, retrying...\n`));
-  });
+  // 空响应警告 - 内部机制，自动重试
 
-  on('retry_attempt', (data: RetryAttemptData) => {
-    screen.appendScroll(COLORS.muted(`\n[retry] ${data.operation} #${data.attempt}/${data.maxRetries} in ${Math.floor(data.delay/1000)}s\n`));
-    screen.restoreCursor();
-  });
+  // 重试信息 - 内部机制，不显示给用户
 
   on('workspace_changed', (data: WorkspaceChangedData) => {
-    screen.appendScroll(COLORS.file(`\n[dir] ${data.path}\n`));
+    screen.appendScroll(COLORS.muted(`\nWorkspace: ${data.path}\n`));
   });
 
   // Subagent 事件
@@ -1046,17 +1040,9 @@ export function setupAgentEvents(
 
   // 工具冲突警告 - 内部机制，不显示给用户
 
-  on('context_warning', (data: ContextWarningData) => {
-    const color = data.level === 'warning' ? COLORS.warning : COLORS.muted;
-    screen.appendScroll(color(`\n[ctx] ${data.message}\n`));
-    if (data.suggestion) {
-      screen.appendScroll(COLORS.muted(`  → ${data.suggestion}\n`));
-    }
-  });
+  // AI提示信息 - 内部机制，不显示给用户
 
-  on('checkpoint_created', (data: { hash: string; message: string }) => {
-    screen.appendScroll(COLORS.muted(`\n[ckpt] ${data.message.slice(0, 30)}\n`));
-  });
+  // Checkpoint创建 - 内部信息，不显示给用户
 
   on('agent_interrupted', (data: AgentInterruptedData) => {
     state.setStreamingOutput(false);
