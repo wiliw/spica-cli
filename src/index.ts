@@ -10,7 +10,7 @@ import {
   setDefaultProvider,
   GLOBAL_SETTINGS_FILE,
 } from "./utils/settings";
-import { loadSession, saveSession } from "./utils/session";
+import { loadSession, saveSession, archiveSession } from "./utils/session";
 import {
   parseSkillInput,
   getSkill,
@@ -192,6 +192,7 @@ program
           "/queue",
           "/q",
           "/undo",
+          "/archive",
           "/clear",
           "/reset",
           "/checkpoint",
@@ -200,7 +201,6 @@ program
           "/history",
           "/compact",
           "/init",
-          "/new",
           "/sessions",
           "/switch",
           "/rename",
@@ -437,15 +437,6 @@ program
               return;
             }
 
-            if (cmd === "clear" || cmd === "reset") {
-              agent.setMessages([]);
-              clearInputQueue();
-
-              screen.appendScroll(COLORS.muted("\n[OK] Session cleared\n"));
-
-              return;
-            }
-
             // 会话管理
             if (cmd === "sessions" || cmd === "s") {
               const { listSessions } = await import("./utils/session");
@@ -562,25 +553,29 @@ program
               return;
             }
 
-            // 创建新 session（保存当前，重新开始）
-            if (cmd === "new") {
-              // 保存当前 session
+            // 归档当前聊天并开始新聊天（/new, /archive, /clear, /reset 都可触发）
+            if (cmd === "new" || cmd === "archive" || cmd === "clear" || cmd === "reset") {
               const currentMessages = agent.getMessages();
+
+              // 归档当前 session（如果有消息）
               if (currentMessages.length > 0) {
-                saveSession(agent.getWorkspacePath(), currentMessages);
-                screen.appendScroll(
-                  COLORS.muted(`\n[ARCHIVE] Saved current session (${currentMessages.length} messages)\n`),
-                );
+                const session = loadSession(agent.getWorkspacePath());
+                if (session) {
+                  session.messages = currentMessages;
+                  session.lastActivity = new Date().toISOString();
+                  archiveSession(agent.getWorkspacePath(), session);
+                  screen.appendScroll(
+                    COLORS.success(`\n[ARCHIVED] Saved ${currentMessages.length} messages (${session.id})\n`),
+                  );
+                }
               }
 
-              // 清空 agent 消息
+              // 清空当前 session，开始新聊天
               agent.setMessages([]);
-              screen.appendScroll(
-                COLORS.success(`\n[NEW] Started fresh session\n`),
-              );
-              screen.appendScroll(
-                COLORS.muted("Previous session archived. Use /sessions to switch back.\n"),
-              );
+              clearInputQueue();
+
+              screen.appendScroll(COLORS.muted("[NEW] Started fresh session\n"));
+              screen.appendScroll(COLORS.muted("Use /sessions to view archived chats, /switch <id> to load\n"));
 
               return;
             }
@@ -1032,21 +1027,21 @@ If AGENTS.md already exists, preserve valuable content and supplement updates.`;
           screen.appendScroll(COLORS.muted("  help        Show help\n"));
           screen.appendScroll("\n");
           screen.appendScroll(COLORS.primary.bold("Session:\n"));
-          screen.appendScroll(COLORS.muted("  /new        Start fresh session (archives current)\n"));
-          screen.appendScroll(COLORS.muted("  /clear      Clear session\n"));
+          screen.appendScroll(COLORS.muted("  /archive    Archive current chat & start new\n"));
+          screen.appendScroll(COLORS.muted("  /clear      Same as /archive\n"));
           screen.appendScroll(COLORS.muted("  /history    Show messages\n"));
           screen.appendScroll(COLORS.muted("  /compact    Compress context\n"));
           screen.appendScroll(
-            COLORS.muted("  /sessions   List archived sessions\n"),
+            COLORS.muted("  /sessions   List archived chats\n"),
           );
           screen.appendScroll(
-            COLORS.muted("  /switch <id> Switch to session\n"),
+            COLORS.muted("  /switch <id> Load archived chat\n"),
           );
           screen.appendScroll(
-            COLORS.muted("  /rename <id> <name> Rename session\n"),
+            COLORS.muted("  /rename <id> <name> Rename chat\n"),
           );
           screen.appendScroll(
-            COLORS.muted("  /delete <id> Delete session\n"),
+            COLORS.muted("  /delete <id> Delete chat\n"),
           );
           screen.appendScroll("\n");
           screen.appendScroll(COLORS.primary.bold("Queue:\n"));
@@ -1337,7 +1332,7 @@ async function runSimpleMode(
 
       if (trimmed === "help") {
         console.log(
-          "Commands: quit, exit, help, /clear, /compact, /history, /status",
+          "Commands: quit, exit, help, /archive, /compact, /history, /status",
         );
         rl.prompt();
         return;
@@ -1345,9 +1340,20 @@ async function runSimpleMode(
 
       if (trimmed.startsWith("/")) {
         const cmd = trimmed.slice(1).toLowerCase();
-        if (cmd === "clear") {
+        if (cmd === "clear" || cmd === "archive" || cmd === "new") {
+          // 归档当前聊天并开始新聊天
+          const currentMessages = agent.getMessages();
+          if (currentMessages.length > 0) {
+            const session = loadSession(agent.getWorkspacePath());
+            if (session) {
+              session.messages = currentMessages;
+              session.lastActivity = new Date().toISOString();
+              archiveSession(agent.getWorkspacePath(), session);
+              console.log(COLORS.success(`[ARCHIVED] Saved ${currentMessages.length} messages`));
+            }
+          }
           agent.setMessages([]);
-          console.log(COLORS.muted("[OK] Session cleared"));
+          console.log(COLORS.muted("[NEW] Started fresh session"));
         } else if (cmd === "compact") {
           await agent.compact();
         } else if (cmd === "history") {

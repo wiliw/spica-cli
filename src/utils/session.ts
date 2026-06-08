@@ -159,7 +159,7 @@ export function saveSession(workspacePath: string, messages: ChatMessage[], sess
 }
 
 // Archive session to sessions directory
-function archiveSession(workspacePath: string, session: SessionState): void {
+export function archiveSession(workspacePath: string, session: SessionState): void {
   try {
     const sessionsDir = join(workspacePath, SESSIONS_DIR);
     fs.ensureDirSync(sessionsDir);
@@ -168,8 +168,7 @@ function archiveSession(workspacePath: string, session: SessionState): void {
     const sessionPath = join(sessionsDir, `${session.id}.json`);
     fs.writeJsonSync(sessionPath, session, { spaces: 2 });
 
-    // Clean up old sessions (keep max 10)
-    cleanupOldSessions(sessionsDir, 10);
+    // 不限制数量，聊天记录是开发者的资产
   } catch {
     // 忽略归档错误
   }
