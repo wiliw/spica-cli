@@ -1,5 +1,13 @@
 # spica-cli
 
+```
+              _)              
+   __|  __ \   |   __|   _` | 
+ \__ \  |   |  |  (     (   | 
+ ____/  .__/  _| \___| \__,_| 
+       _|                     
+```
+
 **AI Coding Agent CLI** - Your intelligent coding companion with automatic conflict detection, smart retries, and industry-standard code quality analysis.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)

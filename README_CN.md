@@ -1,5 +1,13 @@
 # spica-cli
 
+```
+              _)              
+   __|  __ \   |   __|   _` | 
+ \__ \  |   |  |  (     (   | 
+ ____/  .__/  _| \___| \__,_| 
+       _|                     
+```
+
 **AI 编程助手 CLI** - 智能编码伴侣，自动冲突检测、智能重试、行业标准代码质量分析。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
