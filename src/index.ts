@@ -454,18 +454,29 @@ program
               );
 
               if (sessions.length > 0) {
-                screen.appendScroll(COLORS.muted("\n  Recent sessions:\n"));
-                sessions.slice(0, 5).forEach((s, i) => {
-                  const date = new Date(s.lastActivity).toLocaleDateString();
+                screen.appendScroll(COLORS.muted("\n  Archived chats:\n"));
+                sessions.slice(0, 10).forEach((s, i) => {
+                  const lastDate = new Date(s.lastActivity).toLocaleDateString();
+                  const createdDate = new Date(s.createdAt).toLocaleDateString();
                   screen.appendScroll(
                     COLORS.muted(
-                      `    ${i + 1}. ${s.name} (${s.messageCount} msgs, ${date})\n`,
+                      `    ${i + 1}. ${s.id}\n`,
+                    ),
+                  );
+                  screen.appendScroll(
+                    COLORS.muted(
+                      `       Name: ${s.name} (${s.messageCount} msgs)\n`,
+                    ),
+                  );
+                  screen.appendScroll(
+                    COLORS.muted(
+                      `       Created: ${createdDate}, Last: ${lastDate}\n`,
                     ),
                   );
                 });
-                if (sessions.length > 5) {
+                if (sessions.length > 10) {
                   screen.appendScroll(
-                    COLORS.muted(`    ... and ${sessions.length - 5} more\n`),
+                    COLORS.muted(`    ... and ${sessions.length - 10} more\n`),
                   );
                 }
               }
