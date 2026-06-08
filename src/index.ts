@@ -482,25 +482,37 @@ program
 
             if (cmd.startsWith("switch ")) {
               const sessionId = cmd.slice(7).trim();
-              const { switchSession, loadSession } = await import("./utils/session");
+              const { switchSession, loadSession, loadSessionById, archiveSession } = await import("./utils/session");
 
-              // 先切换 session 文件
-              if (switchSession(agent.getWorkspacePath(), sessionId)) {
-                // 重新加载 session 到 agent 内存
-                const session = loadSession(agent.getWorkspacePath());
-                if (session && session.messages) {
-                  agent.setMessages(session.messages);
+              // 切换前先归档当前 session
+              const currentMessages = agent.getMessages();
+              if (currentMessages.length > 0) {
+                const currentSession = loadSession(agent.getWorkspacePath());
+                if (currentSession) {
+                  currentSession.messages = currentMessages;
+                  currentSession.lastActivity = new Date().toISOString();
+                  archiveSession(agent.getWorkspacePath(), currentSession);
                   screen.appendScroll(
-                    COLORS.success(`\n[OK] Switched to session ${sessionId}\n`),
-                  );
-                  screen.appendScroll(
-                    COLORS.muted(`Loaded ${session.messages.length} messages. Continue conversation.\n`),
-                  );
-                } else {
-                  screen.appendScroll(
-                    COLORS.warning(`\n[WARN] Session switched but no messages loaded\n`),
+                    COLORS.muted(`\n[ARCHIVED] Current session saved (${currentMessages.length} messages)\n`),
                   );
                 }
+              }
+
+              // 加载目标 session
+              const targetSession = loadSessionById(agent.getWorkspacePath(), sessionId);
+              if (targetSession) {
+                agent.setMessages(targetSession.messages || []);
+                // 同时更新 session.json（作为当前活跃 session）
+                switchSession(agent.getWorkspacePath(), sessionId);
+                screen.appendScroll(
+                  COLORS.success(`\n[SWITCHED] Loaded session ${sessionId}\n`),
+                );
+                screen.appendScroll(
+                  COLORS.muted(`${targetSession.messages?.length || 0} messages from ${targetSession.name}\n`),
+                );
+                screen.appendScroll(
+                  COLORS.muted("Continue conversation or use /archive to start new\n"),
+                );
               } else {
                 screen.appendScroll(
                   COLORS.error(`\n[ERR] Session ${sessionId} not found\n`),
