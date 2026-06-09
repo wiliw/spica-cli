@@ -527,13 +527,22 @@ name: 'bash',
 // 获取所有工具定义（内置 + MCP动态 + 自定义工具 + 插件）
 export function getAllToolDefinitions(): ToolDefinition[] {
   const mcpTools = getMCPManager().getToolDefinitions();
-  const mcpConverted: ToolDefinition[] = mcpTools.map(t => ({
-    name: t.name,
-    description: `[MCP] ${t.description}`,
-    parameters: t.inputSchema,
-  }));
+  mcpToolNameMap.clear();
+  const mcpConverted: ToolDefinition[] = mcpTools.map(t => {
+    const sanitized = t.name.replace(/\//g, '_');
+    if (sanitized !== t.name) {
+      mcpToolNameMap.set(sanitized, t.name);
+    }
+    return {
+      name: sanitized,
+      description: `[MCP] ${t.description}`,
+      parameters: t.inputSchema,
+    };
+  });
   return [...TOOLS_DEFINITIONS, ...mcpConverted];
 }
+
+const mcpToolNameMap = new Map<string, string>();
 
 export interface ToolEventCallback {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool events have dynamic data types
@@ -1126,7 +1135,10 @@ Write-Output $proc.Id;
           }
           // 链接外部 signal：当外部 abort 时，也 abort 本地 controller
           // 🔴 关键：保存 handler 引用以便后续清理（防止内存泄漏）
-          const abortHandler = () => abortController.abort();
+          const abortHandler = () => {
+            externalSignal?.removeEventListener('abort', abortHandler);
+            abortController.abort();
+          };
           if (externalSignal && !externalSignal.aborted) {
             externalSignal.addEventListener('abort', abortHandler);
           }
@@ -2104,125 +2116,239 @@ Write-Output $proc.Id;
           };
         }
 
+        // Shared controller for early termination: when one subagent finds a
+        // definitive answer, it signals siblings to stop (saves tokens).
+        const siblingAbortController = new AbortController();
+        let earlyExitTriggered = false;
+
         const results = await Promise.all(tasks.map(async (task, i) => {
           const subTaskId = `sub-${i}-${Date.now()}`;
           const config = getSubAgentConfig(task.type);
+          const taskLabel = task.description || task.prompt.slice(0, 30);
 
           // 发送子agent启动事件
           if (eventCallback) {
             eventCallback('sub_agent_start', {
               id: subTaskId,
               type: task.type,
-              description: task.description || task.prompt.slice(0, 50),
+              description: taskLabel,
             });
           }
 
           // 动态导入避免循环依赖
           const { SpicaAgent } = await import('../agent');
-          const taskAgent = new SpicaAgent(undefined, WORKSPACE);
+          const { getRuntimeState } = await import('../core/RuntimeState');
+          const parentAgent = getRuntimeState().getAgent();
 
-          // 设置工具白名单（限制subagent权限，避免context pollution）
-          if (config.allowedTools !== '*') {
-            taskAgent.setToolWhitelist(config.allowedTools);
-          }
-
-          // 监听器引用，用于清理
-          const toolResultHandler = (data: any) => {
-            if (eventCallback) {
-              eventCallback('sub_agent_tool_result', { id: subTaskId, ...data });
-            }
+          // Determine if error is retryable (timeout, network, transient)
+          const isRetryableError = (errMsg: string): boolean => {
+            const lower = errMsg.toLowerCase();
+            if (lower.includes('interrupted') || lower.includes('parent agent')) return false;
+            if (lower.includes('blocked by whitelist')) return false;
+            if (lower.includes('authentication') || lower.includes('unauthorized')) return false;
+            return lower.includes('timeout')
+              || lower.includes('econnrefused')
+              || lower.includes('enotfound')
+              || lower.includes('etimedout')
+              || lower.includes('econnreset')
+              || lower.includes('network')
+              || lower.includes('rate limit')
+              || lower.includes('429')
+              || lower.includes('500')
+              || lower.includes('502')
+              || lower.includes('503');
           };
-          taskAgent.on('tool_result', toolResultHandler);
 
-          // 创建超时 AbortController
-          const timeoutController = new AbortController();
-          const timeoutId = setTimeout(() => {
-            timeoutController.abort();
-            // 关键：超时时中断 sub-agent
-            taskAgent.interrupt();
-          }, config.timeout);
+          const MAX_RETRIES = 1;
+          let lastError: string = 'Unknown error';
 
-          // 监听外部中断信号（父 agent 中断）
-          let abortHandler: (() => void) | null = null;
-          if (externalSignal) {
-            if (externalSignal.aborted) {
+          for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            // Check parent interrupt and sibling early-exit before each attempt
+            if (externalSignal?.aborted) {
+              return `✗ ${taskLabel}: Parent agent interrupted`;
+            }
+            if (siblingAbortController.signal.aborted) {
+              return `✗ ${taskLabel}: Early exit — sibling subagent already solved the task`;
+            }
+
+            const taskAgent = new SpicaAgent(undefined, WORKSPACE);
+
+            // 设置工具白名单（限制subagent权限，避免context pollution）
+            if (config.allowedTools !== '*') {
+              taskAgent.setToolWhitelist(config.allowedTools);
+            }
+
+            // 监听器引用，用于清理
+            const toolResultHandler = (data: any) => {
+              if (eventCallback) {
+                eventCallback('sub_agent_tool_result', { id: subTaskId, ...data });
+              }
+            };
+            taskAgent.on('tool_result', toolResultHandler);
+
+            // 创建超时 AbortController
+            const timeoutController = new AbortController();
+            const timeoutId = setTimeout(() => {
+              timeoutController.abort();
+              taskAgent.interrupt();
+            }, config.timeout);
+
+            // 监听外部中断信号（父 agent 中断）和 sibling early-exit
+            let abortHandler: (() => void) | null = null;
+            let siblingAbortHandler: (() => void) | null = null;
+            if (externalSignal) {
+              if (externalSignal.aborted) {
+                taskAgent.off('tool_result', toolResultHandler);
+                taskAgent.interrupt();
+                taskAgent.dispose();
+                clearTimeout(timeoutId);
+                return `✗ ${taskLabel}: Parent agent interrupted`;
+              }
+              abortHandler = () => {
+                taskAgent.interrupt();
+                clearTimeout(timeoutId);
+              };
+              externalSignal.addEventListener('abort', abortHandler);
+            }
+            // Listen for sibling early-exit
+            if (!siblingAbortController.signal.aborted) {
+              siblingAbortHandler = () => {
+                taskAgent.interrupt();
+                clearTimeout(timeoutId);
+              };
+              siblingAbortController.signal.addEventListener('abort', siblingAbortHandler);
+            } else {
               taskAgent.off('tool_result', toolResultHandler);
               taskAgent.interrupt();
+              taskAgent.dispose();
               clearTimeout(timeoutId);
-              return `✗ ${task.description || task.prompt.slice(0, 30)}: Parent agent interrupted`;
+              return `✗ ${taskLabel}: Early exit — sibling subagent already solved the task`;
             }
-            abortHandler = () => {
-              taskAgent.interrupt();
-              clearTimeout(timeoutId);
-            };
-            externalSignal.addEventListener('abort', abortHandler);
-          }
 
-          try {
-            await taskAgent.init();
+            try {
+              // Use lightweight sub-agent init
+              if (parentAgent) {
+                await taskAgent.initAsSubAgent(parentAgent);
+              } else {
+                await taskAgent.init();
+              }
 
-            const resultPromise = taskAgent.runLoop(task.prompt);
+              const retryNote = attempt > 0 ? '\n[RETRY] Previous attempt failed. Please try a different approach.' : '';
+              const resultPromise = taskAgent.runLoop(task.prompt + retryNote);
 
-            // 使用 AbortController 的 promise 来处理超时和中断
-            const abortPromise = new Promise<string>((_, reject) => {
-              timeoutController.signal.addEventListener('abort', () => {
-                reject(new Error(timeoutController.signal.reason || 'Timeout'));
+              // 使用 AbortController 的 promise 来处理超时和中断
+              const abortPromise = new Promise<string>((_, reject) => {
+                timeoutController.signal.addEventListener('abort', () => {
+                  reject(new Error(timeoutController.signal.reason || 'Timeout'));
+                });
               });
-            });
 
-            const result = await Promise.race([resultPromise, abortPromise]);
+              const result = await Promise.race([resultPromise, abortPromise]);
 
-            // 清理资源
-            clearTimeout(timeoutId);
-            taskAgent.off('tool_result', toolResultHandler);
-            if (abortHandler && externalSignal) {
-              externalSignal.removeEventListener('abort', abortHandler);
+              // Success — cleanup and return
+              clearTimeout(timeoutId);
+              taskAgent.off('tool_result', toolResultHandler);
+              if (abortHandler && externalSignal) {
+                externalSignal.removeEventListener('abort', abortHandler);
+              }
+              if (siblingAbortHandler) {
+                siblingAbortController.signal.removeEventListener('abort', siblingAbortHandler);
+              }
+              taskAgent.dispose();
+
+              // Truncate raw result before summarization
+              const MAX_RAW_RESULT = 3000;
+              const truncatedResult = result.length > MAX_RAW_RESULT
+                ? result.slice(0, MAX_RAW_RESULT) + '\n...[truncated]'
+                : result;
+              const summary = summarizeResult(truncatedResult);
+
+              // Check if this result is definitive — if so, signal siblings to stop early
+              if (!earlyExitTriggered && tasks.length > 1) {
+                const definitiveMarkers = [
+                  /✓/, /成功/, /完成/, /fixed/i, /resolved/i, /implemented/i,
+                  /found .* (bug|issue|problem)/i, /build .*(pass|success)/i,
+                ];
+                const isDefinitive = definitiveMarkers.some(p => p.test(summary))
+                  && !/couldn't|unable to|cannot find|no results/i.test(summary);
+                if (isDefinitive) {
+                  earlyExitTriggered = true;
+                  siblingAbortController.abort();
+                  if (eventCallback) {
+                    eventCallback('sub_agent_early_exit', { id: subTaskId, reason: 'Definitive result found' });
+                  }
+                }
+              }
+
+              if (eventCallback) {
+                eventCallback('sub_agent_done', { id: subTaskId, summary });
+              }
+
+              return `✓ ${taskLabel}: ${summary}`;
+            } catch (err: any) {
+              // Cleanup
+              clearTimeout(timeoutId);
+              taskAgent.off('tool_result', toolResultHandler);
+              if (abortHandler && externalSignal) {
+                externalSignal.removeEventListener('abort', abortHandler);
+              }
+              if (siblingAbortHandler) {
+                siblingAbortController.signal.removeEventListener('abort', siblingAbortHandler);
+              }
+              taskAgent.interrupt();
+              taskAgent.dispose();
+
+              lastError = String(err.message || err || 'Unknown error');
+
+              // Check if we should retry
+              if (attempt < MAX_RETRIES && isRetryableError(lastError) && !externalSignal?.aborted) {
+                if (eventCallback) {
+                  eventCallback('sub_agent_retry', { id: subTaskId, attempt: attempt + 1, error: lastError });
+                }
+                continue; // Retry
+              }
+
+              // Final failure
+              if (eventCallback) {
+                eventCallback('sub_agent_error', { id: subTaskId, error: lastError });
+              }
+              return `✗ ${taskLabel}: ${lastError}`;
             }
-
-            const summary = summarizeResult(result);
-
-            if (eventCallback) {
-              eventCallback('sub_agent_done', { id: subTaskId, summary });
-            }
-
-            return `✓ ${task.description || task.prompt.slice(0, 30)}: ${summary}`;
-          } catch (err: any) {
-            // 清理资源
-            clearTimeout(timeoutId);
-            taskAgent.off('tool_result', toolResultHandler);
-            if (abortHandler && externalSignal) {
-              externalSignal.removeEventListener('abort', abortHandler);
-            }
-            // 确保中断
-            taskAgent.interrupt();
-            if (eventCallback) {
-              eventCallback('sub_agent_error', { id: subTaskId, error: err.message });
-            }
-            return `✗ ${task.description || task.prompt.slice(0, 30)}: ${err.message}`;
           }
+
+          // Should not reach here, but just in case
+          return `✗ ${taskLabel}: ${lastError}`;
         }));
 
         // 分析结果，检测失败
         const failedTasks = results.filter(r => r.startsWith('✗'));
         const succeededTasks = results.filter(r => r.startsWith('✓'));
 
-        if (failedTasks.length > 0) {
-          // 有失败任务：返回部分成功状态，提示 LLM 处理失败
-          const output = results.join('\n') +
-            `\n\n[WARNING] ${failedTasks.length}/${results.length} subagent(s) failed. ` +
-            `Please analyze the errors above and either:\n` +
-            `1. Retry failed tasks with modified prompts\n` +
-            `2. Try different approaches\n` +
-            `3. Handle failed tasks directly in main agent`;
+        // Cap total output size to prevent context pollution
+        const MAX_TOTAL_OUTPUT = 2000;
+        let output = results.join('\n');
+        const warningSuffix = failedTasks.length > 0
+          ? `\n\n[WARNING] ${failedTasks.length}/${results.length} subagent(s) failed. Retry failed tasks or handle directly.`
+          : '';
 
+        if (output.length + warningSuffix.length > MAX_TOTAL_OUTPUT) {
+          // Truncate individual results to fit
+          const availablePerResult = Math.floor((MAX_TOTAL_OUTPUT - warningSuffix.length) / results.length);
+          output = results
+            .map(r => r.length > availablePerResult ? r.slice(0, availablePerResult) + '...' : r)
+            .join('\n');
+        }
+        output += warningSuffix;
+
+        if (failedTasks.length > 0) {
           return {
-            success: succeededTasks.length > 0, // 有成功则为 true（部分成功）
+            success: succeededTasks.length > 0,
             output,
             error: failedTasks.length > 0 ? `${failedTasks.length} subagent(s) failed` : undefined
           };
         }
 
-        return { success: true, output: results.join('\n') };
+        return { success: true, output };
       }
 
       case 'lint': {
@@ -2386,6 +2512,12 @@ Write-Output $proc.Id;
           if (mcpManager.hasTool(name)) {
             return await mcpManager.callTool(name, safeArgs);
           }
+        }
+        // 通过 sanitized name 映射查找 MCP 工具
+        const originalName = mcpToolNameMap.get(name);
+        if (originalName) {
+          const mcpManager = getMCPManager();
+          return await mcpManager.callTool(originalName, safeArgs);
         }
         return { success: false, error: `Unknown tool: ${name}` };
     }

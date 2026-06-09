@@ -148,6 +148,9 @@ export class SpicaAgent extends EventEmitter {
   private pendingCancel: boolean = false;
   // cancelSeq 序号（高水位标记）
   private cancelSeq: number = 0;
+  // 中断 debounce：200ms 内重复中断不递增 cancelSeq
+  private lastInterruptTime: number = 0;
+  private static readonly INTERRUPT_DEBOUNCE_MS = 200;
 
   // 极危险操作模式（即使在 bypass 模式也需要确认）
   private static readonly DANGEROUS_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
@@ -188,6 +191,18 @@ export class SpicaAgent extends EventEmitter {
   // 追踪是否收到 reasoning 内容（用于区分真正的空响应）
   private reasoningReceived: boolean = false;
 
+  /**
+   * Dispose internal resources — removes LLM event listeners and clears references.
+   * Call this when a sub-agent is no longer needed to prevent listener leaks.
+   */
+  dispose(): void {
+    if (this.llm) {
+      this.llm.removeAllListeners();
+      this.llm = null;
+    }
+    this.removeAllListeners();
+  }
+
   constructor(providerName?: string, workspacePath?: string) {
     super();
     this._providerName = providerName;
@@ -209,11 +224,19 @@ export class SpicaAgent extends EventEmitter {
    * - Emits 'agent_interrupted' event
    */
   interrupt() {
+    const now = Date.now();
+    const isDuplicate = (now - this.lastInterruptTime) < SpicaAgent.INTERRUPT_DEBOUNCE_MS;
+
     // 设置 pendingCancel（防止新请求进入）
     this.pendingCancel = true;
-    this.cancelSeq++;
 
-    // Abort 当前活跃的 AbortController
+    // Debounce: 200ms 内重复 ESC 不递增 cancelSeq
+    if (!isDuplicate) {
+      this.cancelSeq++;
+    }
+    this.lastInterruptTime = now;
+
+    // Abort 当前活跃的 AbortController（只 abort 一次，第二次调用是 no-op）
     if (this.currentAbortController) {
       this.currentAbortController.abort();
     }
@@ -224,7 +247,7 @@ export class SpicaAgent extends EventEmitter {
     }
 
     // 通知 UI
-    this.emit('agent_interrupted', { reason: 'User pressed ESC ESC', cancelSeq: this.cancelSeq });
+    this.emit('agent_interrupted', { reason: 'User pressed ESC ESC', cancelSeq: this.cancelSeq, isDuplicate });
   }
 
   /**
@@ -393,7 +416,7 @@ export class SpicaAgent extends EventEmitter {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       // 检查中断信号
       if (signal?.aborted) {
-        throw new Error('Interrupted by user');
+        throw new InterruptError('Interrupted by user');
       }
 
       try {
@@ -414,7 +437,7 @@ export class SpicaAgent extends EventEmitter {
 
         // 检查中断信号
         if (signal?.aborted) {
-          break;
+          throw new InterruptError('Interrupted by user after error');
         }
 
         // 检查是否可重试（认证等错误直接抛出）
@@ -429,7 +452,7 @@ export class SpicaAgent extends EventEmitter {
         }
 
         if (signal?.aborted) {
-          break;
+          throw new InterruptError('Interrupted by user before retry');
         }
 
         // 指数退避：2s, 4s, 8s, 16s, 32s, 64s, 120s...（最大120秒）
@@ -445,17 +468,17 @@ export class SpicaAgent extends EventEmitter {
         const start = Date.now();
         while (Date.now() - start < delay) {
           if (signal?.aborted) {
-            break;
+            throw new InterruptError('Interrupted by user during retry delay');
           }
           await new Promise(resolve => setTimeout(resolve, 100));
-        }
-
-        if (signal?.aborted) {
-          break;
         }
       }
     }
 
+    // If signal was aborted during the last attempt, prefer InterruptError
+    if (signal?.aborted) {
+      throw new InterruptError('Interrupted by user');
+    }
     throw lastError;
   }
 
@@ -475,7 +498,7 @@ export class SpicaAgent extends EventEmitter {
 async init() {
     if (this._initialized) return;
     if (this._initPromise) return this._initPromise;
-    
+
     this._initPromise = this._doInit();
     try {
       await this._initPromise;
@@ -484,7 +507,84 @@ async init() {
       this._initPromise = null;
     }
   }
-  
+
+  /**
+   * Lightweight init for sub-agents — skips MCP, skills, API check, session loading.
+   * Creates a fresh LLMClient with the same API config (no shared message state).
+   * Inherits the parent's system prompt, workspace, and a summary of recent context.
+   */
+  async initAsSubAgent(parentAgent: SpicaAgent): Promise<void> {
+    if (this._initialized) return;
+
+    const parentProviderName = parentAgent._providerName || this._providerName;
+    const config = await getProviderConfig(parentProviderName);
+
+    // Fresh LLM client — same API, isolated message history
+    this.llm = new LLMClient({
+      provider: parentProviderName || 'openai',
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
+      model: config.model,
+      name: config.name,
+    });
+
+    // Inherit system prompt from parent
+    const parentMessages = parentAgent.getLLM()?.getMessages() || [];
+    const parentSystemMsg = parentMessages.find(m => m.role === 'system');
+    if (parentSystemMsg?.content) {
+      this.llm.setSystemPrompt(parentSystemMsg.content);
+    }
+
+    // Inject recent context summary — so sub-agent knows what's happening
+    const recentUserMessages = parentMessages
+      .filter(m => m.role === 'user')
+      .slice(-3)
+      .map(m => (m.content || '').slice(0, 200));
+    const recentAssistantActions = parentMessages
+      .filter(m => m.role === 'assistant' && m.toolCalls)
+      .slice(-3)
+      .map(m => {
+        const tools = m.toolCalls?.map(tc => tc.name).join(', ') || '';
+        const content = (m.content || '').slice(0, 80);
+        return `[${tools}] ${content}`;
+      });
+
+    if (recentUserMessages.length > 0 || recentAssistantActions.length > 0) {
+      const contextParts: string[] = ['[SUB-AGENT CONTEXT] You are a sub-agent working on part of a larger task.'];
+      if (recentUserMessages.length > 0) {
+        contextParts.push(`Recent user requests:\n${recentUserMessages.map(m => `- ${m}`).join('\n')}`);
+      }
+      if (recentAssistantActions.length > 0) {
+        contextParts.push(`Recent actions taken:\n${recentAssistantActions.map(a => `- ${a}`).join('\n')}`);
+      }
+      if (this._todos.length > 0) {
+        const pendingTodos = this._todos.filter(t => t.status !== 'completed').slice(0, 5);
+        if (pendingTodos.length > 0) {
+          contextParts.push(`Current todos:\n${pendingTodos.map(t => `- [${t.status}] ${t.content}`).join('\n')}`);
+        }
+      }
+      this.llm.addMessage({
+        role: 'system',
+        content: contextParts.join('\n\n'),
+      });
+    }
+
+    // Inherit workspace and todos from parent
+    this.workspacePath = parentAgent.getWorkspacePath();
+    this._todos = [...parentAgent.todos];
+
+    // Setup stream forwarding
+    this.llm.on('chunk', (chunk: string) => {
+      this.emit('stream', { chunk });
+    });
+    this.llm.on('reasoning', (content: string) => {
+      this.reasoningReceived = true;
+      this.emit('reasoning', { content });
+    });
+
+    this._initialized = true;
+  }
+
   private async _doInit(): Promise<void> {
     // 初始化Skills（首次运行时复制默认包）
     await initSkills();
@@ -643,7 +743,9 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
     }
 
     // 创建本次 runLoop 专用的 AbortController
-    const entryCancelSeq = this.cancelSeq;
+    // cancelSeq is captured by clearPendingCancel in the finally block —
+    // if interrupt() incremented cancelSeq during execution, clearPendingCancel
+    // compares current cancelSeq with itself (always true), unblocking the next runLoop.
     const abortController = new AbortController();
     this.currentAbortController = abortController;
     const signal = abortController.signal;
@@ -699,7 +801,7 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
 
     // 当使用超过触发阈值时自动压缩（compact 内部会 emit context_compressed 事件）
     if (usedTokens > triggerThreshold) {
-      await this.compact();
+      await this.compact(signal);
     }
 
     this.emit('message', { role: 'user', content: prompt });
@@ -1208,20 +1310,20 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
  * @returns Promise that resolves when compression complete
  * @emits context_compressed with { before, after, removed }
  */
-public async compact(): Promise<void> {
+public async compact(signal?: AbortSignal): Promise<void> {
     if (!this.llm || this._compacting) return;
     this._compacting = true;
     try {
       const provider = this.llm.getProvider();
       const targetTokens = Math.floor(provider.getContextWindow() * 0.3);
-      await this.compactToTarget(targetTokens);
+      await this.compactToTarget(targetTokens, signal);
     } finally {
       this._compacting = false;
     }
   }
 
   // 压缩到指定目标tokens以下
-  private async compactToTarget(targetTokens: number): Promise<void> {
+  private async compactToTarget(targetTokens: number, signal?: AbortSignal): Promise<void> {
     if (!this.llm) return;
     const allMessages = this.llm.getMessages();
 
@@ -1315,7 +1417,7 @@ public async compact(): Promise<void> {
     const finalOldMessages = messagesWithoutSystem.slice(0, messagesWithoutSystem.length - safetyTruncated.length);
 
     if (finalOldMessages.length > 0) {
-      const summary = await this.generateSummary(finalOldMessages);
+      const summary = await this.generateSummary(finalOldMessages, signal);
       // 保留 assistant + 对应的 tool messages，过滤掉孤立的 tool messages
       const safetyTruncatedClean: ChatMessage[] = [];
       const existingToolMessageIds = new Set<string>();
@@ -1368,7 +1470,7 @@ public async compact(): Promise<void> {
         // 再次压缩，只保留最近 2 条 + 摘要（保留系统提示词）
         const toCompressAgain = compressed.filter(m => m.role !== 'system');
         const finalMessages = toCompressAgain.slice(-2);
-        const secondSummary = await this.generateSummary(toCompressAgain.slice(0, -2));
+        const secondSummary = await this.generateSummary(toCompressAgain.slice(0, -2), signal);
         const finalCompressed = systemPrompt
           ? [systemPrompt, secondSummary, ...finalMessages]
           : [secondSummary, ...finalMessages];
@@ -1394,7 +1496,7 @@ public async compact(): Promise<void> {
   }
 
   // Generate history summary using LLM
-  private async generateSummary(messages: ChatMessage[]): Promise<ChatMessage> {
+  private async generateSummary(messages: ChatMessage[], signal?: AbortSignal): Promise<ChatMessage> {
     // Filter out tool messages before compression
     const filteredMessages = messages.filter(m => 
       m.role === 'user' || m.role === 'assistant' || m.role === 'system'
@@ -1426,7 +1528,7 @@ public async compact(): Promise<void> {
     const prompt = getCompactPrompt(messagesText);
 
     try {
-      const response = await this.llm!.generateDirect(prompt);
+      const response = await this.llm!.generateDirect(prompt, signal);
       return {
         role: 'assistant',
         content: `[History Summary] ${response.content || 'Early conversation compressed'}`,

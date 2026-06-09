@@ -112,10 +112,18 @@ export class RateLimiter {
         resolve();
       }, ms);
 
-      signal?.addEventListener('abort', () => {
-        cleanup();
-        resolve();
-      });
+      if (signal) {
+        const onAbort = () => {
+          signal.removeEventListener('abort', onAbort);
+          cleanup();
+          resolve();
+        };
+        if (signal.aborted) {
+          onAbort();
+        } else {
+          signal.addEventListener('abort', onAbort);
+        }
+      }
 
       // 也检查pendingInterrupt
       checkInterval = setInterval(() => {

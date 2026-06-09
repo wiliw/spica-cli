@@ -11,10 +11,13 @@ npm test                       # Run tests with Vitest (watch mode)
 npm run test:run               # Run tests once (vitest run)
 npm run lint                   # Run ESLint
 npm run lint:fix               # Auto-fix lint issues
+npm run lint:strict            # ESLint with --max-warnings 0 (CI-ready)
 npx tsc --noEmit               # Type check only
 vitest run src/__tests__/agent.test.ts  # Run specific test file
 vitest run --grep "interrupt"           # Run tests matching pattern
 ```
+
+Note: Project is ESM (`"type": "module"` in package.json). Use `import`/`export`, not `require`. Dev uses `tsx` for TypeScript execution.
 
 ## Architecture
 
@@ -67,6 +70,13 @@ vitest run --grep "interrupt"           # Run tests matching pattern
 
 ## Key Patterns
 
+### Runtime State (Singleton)
+
+`src/core/RuntimeState.ts` — singleton managing all session state:
+- Agent instance, provider config, processing flag, UI mode, interrupt counter
+- One `getRuntimeState()` call gives access to all state everywhere
+- Also `EventBus` (`src/core/EventBus.ts`) — pub/sub for decoupled communication
+
 ### EventEmitter Pattern
 
 All async communication uses events:
@@ -76,20 +86,38 @@ agent.on('tool_result', (data) => { ... });
 agent.emit('message', { role: 'assistant', content });
 ```
 
+Key agent events: `stream`, `reasoning`, `tool_call`, `tool_progress`, `tool_result`, `message`, `context_warning`, `context_compressed`, `connection_error`, `queue_injected`, `interrupt`, `done`, `retry_attempt`, `subagent_result`
+
 ### Tool Conflict Detection
 
 Multiple tools on same resource → sequential execution:
 - `extractResourcePath()` identifies file paths in tool args
 - `detectToolConflicts()` groups conflicting operations
 - Non-conflicting tools run in parallel
+- Git operations treated as single shared resource (`git:repo`)
 
 ### Interrupt Handling
 
-ESC ESC triggers interrupt:
-1. `agent.interrupt()` called
-2. AbortController signals all running tools
+ESC ESC (or Ctrl+C) triggers interrupt:
+1. `agent.interrupt()` sets AbortController + `pendingCancel` flag + increments `cancelSeq`
+2. AbortController signals all running tools + active LLM request
 3. Bash commands killed via process group (-pid)
-4. Agent returns partial result, user can continue
+4. `cancelSeq` is passed to each tool execution — tools check it to skip stale work (prevents race conditions where abort fires between tool completions)
+5. Agent returns partial result, user can continue
+
+### Compaction
+
+`/compact` command trims conversation history:
+- Keeps system prompt + recent messages + message summaries
+- Emits `context_compressed` event with before/after counts
+- Triggered manually or automatically when context nears window limit
+
+### Hooks System
+
+`src/hooks/index.ts` — intercept tool calls:
+- `PreToolUse` / `PostToolUse` hooks with actions: `none`, `warn`, `confirm`, `block`
+- Global hooks (`~/.spica/hooks.json`) take precedence — project hooks can only be equally or more strict
+- Project hooks loaded from `<project>/.spica/hooks.json`
 
 ### Auto-Syntax Check
 
@@ -98,25 +126,66 @@ File write/edit tools auto-check syntax for:
 - Python: `python -m py_compile`
 - Go: `golangci-lint`
 - Rust: `cargo check`
+- Shell: `bash -n`
 
 Returns `syntaxErrors` field if issues found.
 
 ### Sub-Agent Pattern
 
 `task` tool spawns parallel subagents:
+- Types: `explore` (30s, read-only), `review` (60s), `fix` (120s), `build` (180s, all tools)
+- Each subagent has tool whitelist per type
 - Max 3 concurrent tasks
-- Each subagent has tool whitelist (limited permissions)
-- Timeout: 60s per subagent
 - Main agent handles failures (retry or take over)
+
+### Input Queue
+
+During agent processing, new user input goes to a queue (max 50):
+- Multiple queued inputs merged with `\n\n---\n\n` separator
+- `/queue` shows pending, `/undo` removes last
+- Auto-drain after processing completes (recursive drain loop)
+
+### Builtin Skills
+
+`src/builtin-skills/superpowers/` — skills shipped with the CLI:
+- `brainstorming`, `dispatching-parallel-agents`, `executing-plans`
+- `test-driven-development`, `systematic-debugging`, `verification-before-completion`
+- `writing-plans`, `writing-skills`, `using-superpowers`, `using-git-worktrees`
+- `subagent-driven-development`, `finishing-a-development-branch`
+- `receiving-code-review`, `requesting-code-review`
+
+Skills are loaded at startup via `initSkills()` and available as `/skill-name` commands.
+
+### LLM Provider Architecture
+
+`src/llm/providers/BaseProvider.ts` — abstract base class
+`src/llm/providers/OpenAICompatible.ts` — concrete implementation for OpenAI-compatible APIs
+`src/llm/LLMClient.ts` — facade wrapping provider + rate limiter + token counter + function caller
+
+Providers are configured in `~/.spica/config.json`. Any OpenAI-compatible API works (OpenAI, Anthropic via proxy, DeepSeek, Gemini, Together AI, Groq, local models).
+
+### Token Counting
+
+`src/llm/TokenCounter.ts` — estimates token usage for context window management:
+- `estimateMessages()` for full message array
+- `estimateText()` for individual strings
+- Used by `/status` and context warning system
+
+### Two Runtime Modes
+
+- **TUI mode** (default, interactive terminal): Full screen with scroll region, status bar, thinking animation, bracketed paste. Uses `src/cli/ui/`
+- **Simple mode** (`--no-tui` or non-TTY): Readline-based, plain text output. Same agent, simpler UI
 
 ## Testing
 
 Test structure mirrors source:
 ```
 src/__tests__/                 # Top-level tests
+src/__tests__/security/        # Security tests (shell injection, path traversal, hooks override)
 src/tools/__tests__/           # Tool tests
 src/llm/__tests__/             # LLM tests
 src/cli/__tests__/             # CLI tests
+src/core/__tests__/            # Core module tests (EventBus, ProcessMonitor, error handling)
 ```
 
 Key test categories:
@@ -125,8 +194,11 @@ Key test categories:
 - `tools.test.ts` - Tool execution
 - `edgeCases.test.ts` - Edge cases and boundary conditions
 - `regression/` - Bug regression tests
+- `security/` - Shell injection, path traversal, format injection, hooks privilege escalation
 
 Vitest globals enabled: `describe`, `it`, `expect`, `vi`
+
+E2E/manual test scripts in `scripts/`: `e2e-test.sh`, `stress-test.sh`, `test-interrupt.sh`, `test-compression.sh`, `test-skills-invocation.sh`
 
 ## Conventions
 
@@ -148,11 +220,29 @@ Technical documentation:
 
 ## Important Files
 
-- `src/index.ts` - Entry point, TUI setup
-- `src/prompts/system.ts` - System prompt for LLM
-- `src/utils/settings.ts` - Provider config management
-- `src/storage/projectState.ts` - Session persistence
-- `src/hooks/index.ts` - Tool interception hooks
+- `src/index.ts` - Entry point, TUI setup, CLI command definitions (commander)
+- `src/agent.ts` - Core agent orchestrator (~1450 lines), tool execution, interrupt management
+- `src/prompts/system.ts` - System prompt for LLM, builtin skills loading
+- `src/core/RuntimeState.ts` - Singleton session state (agent, processing, UI, interrupt)
+- `src/core/EventBus.ts` - Pub/sub event bus
+- `src/tools/index.ts` - 32 built-in tool definitions + executeTool dispatcher
+- `src/tools/subAgent.ts` - Sub-agent type configs (explore/review/fix/build)
+- `src/tools/codeHealth.ts` - Code health analysis tool
+- `src/tools/testQuality.ts` - Test quality analysis tool
+- `src/llm/LLMClient.ts` - LLM client facade (provider + rate limiter + token counter)
+- `src/llm/FunctionCaller.ts` - Tool executor registry and dispatch
+- `src/llm/RateLimiter.ts` - API rate limiting (requests/tokens per minute)
+- `src/llm/TokenCounter.ts` - Token estimation for context management
+- `src/llm/providers/BaseProvider.ts` - Abstract LLM provider
+- `src/llm/providers/OpenAICompatible.ts` - Concrete OpenAI-compatible provider
+- `src/utils/settings.ts` - Provider config management, hooks config loading
+- `src/storage/projectState.ts` - Session persistence, project state
+- `src/storage/checkpointManager.ts` - File snapshot system (`.spica/snapshots/`)
+- `src/hooks/index.ts` - Tool interception hooks (PreToolUse/PostToolUse)
 - `src/skills/index.ts` - Skill loading and execution
+- `src/builtin-skills/superpowers/` - 14 built-in skills shipped with the CLI
+- `src/cli/events.ts` - Agent event handlers, run stats formatting
+- `src/cli/queueDrain.ts` - Auto-drain input queue after processing
+- `src/mcp/client.ts` - MCP server connection and tool registry
 - `docs/MANUAL.md` - Complete user manual
 - `docs/STYLE_GUIDE.md` - Technical writing style guide

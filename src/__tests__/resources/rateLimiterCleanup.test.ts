@@ -54,8 +54,11 @@ describe('RateLimiter interruptibleSleep cleanup', () => {
     // Verify cleanup function is called in abort handler
     const cleanupMatch = source.match(/const cleanup = \(\) =>/);
     expect(cleanupMatch).not.toBeNull();
-    // Verify cleanup is called in abort handler
-    const abortHandler = source.match(/addEventListener\('abort'[^}]+cleanup\(\)/s);
+    // Verify cleanup is called via onAbort handler (proper listener cleanup)
+    const abortHandler = source.match(/signal\.addEventListener\('abort',\s*onAbort\)/);
     expect(abortHandler).not.toBeNull();
+    // Verify cleanup is called when signal is already aborted
+    const alreadyAborted = source.match(/signal\.aborted.*onAbort\(\)/s);
+    expect(alreadyAborted).not.toBeNull();
   });
 });

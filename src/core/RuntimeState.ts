@@ -28,6 +28,9 @@ interface RuntimeState {
   verboseMode: boolean;
   showThinking: boolean;
 
+  // Git branch (for status bar display, null when no repo)
+  currentBranch: string | null;
+
   // Interrupt state
   interruptCount: number;
   lastInterruptTime: number;
@@ -64,6 +67,7 @@ class RuntimeStateManager {
     connectionErrorShown: false,
     verboseMode: false,
     showThinking: false,
+    currentBranch: null,
     interruptCount: 0,
     lastInterruptTime: 0,
     shouldExit: false,
@@ -146,6 +150,15 @@ class RuntimeStateManager {
     return this.state.showThinking;
   }
 
+  // Git branch
+  setCurrentBranch(branch: string | null): void {
+    this.state.currentBranch = branch;
+  }
+
+  getCurrentBranch(): string | null {
+    return this.state.currentBranch;
+  }
+
   // Interrupt handling
   recordInterrupt(): void {
     const now = Date.now();
@@ -191,6 +204,7 @@ class RuntimeStateManager {
       connectionErrorShown: false,
       verboseMode: false,
       showThinking: false,
+      currentBranch: null,
       interruptCount: 0,
       lastInterruptTime: 0,
       shouldExit: false,

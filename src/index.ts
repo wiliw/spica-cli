@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { execSync } from "child_process";
 import { SpicaAgent } from "./agent";
 import {
   loadGlobalSettings,
@@ -158,6 +159,17 @@ program
       try {
         await agent.init();
 
+        // 检测当前 Git 分支（无 .git 则忽略）
+        try {
+          const branch = execSync('git branch --show-current', {
+            cwd: agent.getWorkspacePath(),
+            stdio: ['ignore', 'pipe', 'ignore'],
+          }).toString().trim();
+          state.setCurrentBranch(branch || null);
+        } catch {
+          state.setCurrentBranch(null);
+        }
+
         // 停止banner动画
         BG.stopBanner();
         await bannerPromise;
@@ -169,6 +181,11 @@ program
         tuiHandler = new TUIInputHandler();
         tuiHandler.start();
         tuiStarted = true;
+
+        // 首次启动提示
+        screen.appendScroll(
+          COLORS.muted('ESC ESC to interrupt, Ctrl+C ×3 to force exit\n'),
+        );
 
         // 自动加载历史
         if (!options.fresh) {
@@ -222,6 +239,10 @@ program
           const isBusy = state.isProcessing();
           const statusText = isBusy ? COLORS.warning('busy') : COLORS.success('idle');
 
+          // Git 分支（无 repo 则不显示）
+          const branch = state.getCurrentBranch();
+          const branchInfo = branch ? ` | ${branch}` : '';
+
           // 工作区路径显示（Windows 下缩写长路径）
           const workspace = agent.getWorkspacePath();
           const homeDir = os.homedir();
@@ -241,7 +262,7 @@ program
           }
 
           screen.setStatus(
-            `${statusText} | ${providerConfig.model} | ${displayPath}`,
+            `${statusText} | ${providerConfig.model}${branchInfo} | ${displayPath}`,
           );
         };
         setUpdateStatusBarFn(updateStatusBarLocal);
@@ -288,17 +309,9 @@ program
           // ESC ESC 中断
           if (result.isInterrupt) {
             if (state.getAgent()) {
-              const agent = state.getAgent()!;
-              agent.interrupt();
-
-              // 不等待：interrupt 会立即 abort，runLoop 会尽快退出
-              // 新的输入会被 handleInput 的 isProcessing 检查阻挡
-              // 直到当前 runLoop 结束
-
-              screen.appendScroll(COLORS.warning("\n[INTERRUPTED]\n"));
+              state.getAgent()!.interrupt();
+              // agent_interrupted 事件会显示消息并清理 UI
               screen.setStreaming(false);
-              screen.restoreCursor();
-              screen.refreshInput();
             }
             return;
           }

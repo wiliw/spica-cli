@@ -96,9 +96,11 @@ export class LLMClient extends EventEmitter {
       if (externalSignal.aborted) {
         this.abortController.abort();
       } else {
-        externalSignal.addEventListener('abort', () => {
-          this.abortController!.abort();
-        });
+        const onAbort = () => {
+          externalSignal.removeEventListener('abort', onAbort);
+          this.abortController?.abort();
+        };
+        externalSignal.addEventListener('abort', onAbort);
       }
     }
 
@@ -134,11 +136,24 @@ export class LLMClient extends EventEmitter {
   }
 
   // 直接生成（不使用历史消息，用于摘要等）
-  async generateDirect(prompt: string): Promise<LLMResponse> {
+  async generateDirect(prompt: string, externalSignal?: AbortSignal): Promise<LLMResponse> {
     if (this.abortController) {
       this.abortController.abort();
     }
     this.abortController = new AbortController();
+
+    // 链接外部 signal（来自 agent 的 AbortController，支持中断传播）
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        this.abortController.abort();
+      } else {
+        const onAbort = () => {
+          externalSignal.removeEventListener('abort', onAbort);
+          this.abortController?.abort();
+        };
+        externalSignal.addEventListener('abort', onAbort);
+      }
+    }
 
     try {
       await this.rateLimiter.waitForAvailability(this.abortController.signal);
@@ -223,11 +238,13 @@ export class LLMClient extends EventEmitter {
     // 🔴 链接外部 signal
     if (externalSignal) {
       if (externalSignal.aborted) {
-        this.abortController!.abort();
+        this.abortController?.abort();
       } else {
-        externalSignal.addEventListener('abort', () => {
+        const onAbort = () => {
+          externalSignal.removeEventListener('abort', onAbort);
           this.abortController?.abort();
-        });
+        };
+        externalSignal.addEventListener('abort', onAbort);
       }
     }
 
@@ -326,11 +343,13 @@ export class LLMClient extends EventEmitter {
     // 🔴 链接外部 signal
     if (externalSignal) {
       if (externalSignal.aborted) {
-        this.abortController!.abort();
+        this.abortController?.abort();
       } else {
-        externalSignal.addEventListener('abort', () => {
+        const onAbort = () => {
+          externalSignal.removeEventListener('abort', onAbort);
           this.abortController?.abort();
-        });
+        };
+        externalSignal.addEventListener('abort', onAbort);
       }
     }
 

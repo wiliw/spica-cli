@@ -3,6 +3,7 @@ import { getScreenManager } from './ui/screenManager';
 import { COLORS } from './ui/colors';
 import { TokenCounter } from '../llm/TokenCounter';
 import { getRuntimeState } from '../core/RuntimeState';
+import { execSync } from 'child_process';
 import * as os from 'os';
 
 // 事件数据类型定义
@@ -324,13 +325,17 @@ function isFullWidth(char: string): boolean {
 // 格式化函数
 // ============================================
 
-// 构建状态栏文本（状态 | 模型 | 工作区）
+// 构建状态栏文本（状态 | 模型 | 分支 | 工作区）
 function buildStatusText(
   agent: SpicaAgent,
   model: string | undefined
 ): string {
   const isBusy = state.isProcessing();
   const statusText = isBusy ? COLORS.warning('busy') : COLORS.success('idle');
+
+  // Git 分支（无 repo 则不显示）
+  const branch = state.getCurrentBranch();
+  const branchInfo = branch ? ` | ${branch}` : '';
 
   // 工作区路径显示（智能缩写）
   const workspace = agent.getWorkspacePath();
@@ -350,7 +355,7 @@ function buildStatusText(
     }
   }
 
-  return `${statusText} | ${model || '?'} | ${displayPath}`;
+  return `${statusText} | ${model || '?'}${branchInfo} | ${displayPath}`;
 }
 
 // 格式化参数（简洁版）
@@ -507,7 +512,13 @@ function formatToolSummary(data: { name: string; success: boolean; output?: stri
       return 'loaded';
     case 'task': {
       const agentCount = countAgents(output);
-      return agentCount > 0 ? `${agentCount} agents` : 'done';
+      if (agentCount > 0) return `${agentCount} agents`;
+      // Show first successful subagent description
+      const doneMatch = output.match(/✓ ([^\n]+)/);
+      if (doneMatch) return doneMatch[1].slice(0, 40);
+      const failMatch = output.match(/✗ ([^\n]+)/);
+      if (failMatch) return `failed: ${failMatch[1].slice(0, 30)}`;
+      return 'done';
     }
     case 'web_search': {
       const results = output.split('\n').filter(l => l.includes('http')).length;
@@ -524,11 +535,20 @@ function formatToolSummary(data: { name: string; success: boolean; output?: stri
       if (output.includes('closed')) return 'closed';
       return 'done';
     }
-    case 'todo_write':
+    case 'todo_write': {
+      // Extract stats: "Task List (3/5 done, 1 active, 1 pending)"
+      const statsMatch = output.match(/\((\d+)\/(\d+)\s*done,\s*(\d+)\s*active,\s*(\d+)\s*pending\)/);
+      if (statsMatch) {
+        return `${statsMatch[1]}/${statsMatch[2]} done, ${statsMatch[3]} active`;
+      }
       return 'saved';
+    }
     case 'todo_read': {
-      const todos = output.split('\n').filter(l => l.trim()).length;
-      return `${todos} items`;
+      const lines = output.split('\n').filter(l => /^\[(DONE|ACTV|PEND)\]/.test(l));
+      if (lines.length > 0) {
+        return `${lines.length} tasks`;
+      }
+      return 'empty';
     }
     case 'workspace':
       return output.slice(0, 30) || 'done';
@@ -624,9 +644,16 @@ function displayToolResult(record: ToolCallRecord, data: ToolResultData): void {
         if (path) screen.appendScroll(COLORS.file(` ${path}`));
         break;
       }
-      case 'todo_write':
+      case 'todo_write': {
+        const todoItems = record.args.todos as any[];
+        if (todoItems?.length) {
+          const done = todoItems.filter((t: any) => t.status === 'completed').length;
+          screen.appendScroll(COLORS.muted(` ${todoItems.length} tasks (${done} done)`));
+        }
+        break;
+      }
       case 'todo_read': {
-        screen.appendScroll(COLORS.muted(` todos`));
+        // No args to show — tool reads from disk
         break;
       }
       case 'workspace': {
@@ -634,8 +661,35 @@ function displayToolResult(record: ToolCallRecord, data: ToolResultData): void {
         if (path) screen.appendScroll(COLORS.file(` ${path}`));
         break;
       }
+      case 'skill': {
+        const skillName = record.args.name || record.args.skill as string;
+        if (skillName) screen.appendScroll(COLORS.muted(` ${skillName}`));
+        break;
+      }
+      case 'question': {
+        const questionText = record.args.question as string;
+        if (questionText) screen.appendScroll(COLORS.muted(` ${questionText.slice(0, 60)}`));
+        break;
+      }
+      case 'task': {
+        const taskList = record.args.tasks as any[];
+        if (taskList?.length) {
+          const descs = taskList.map((t: any) => (t.description || t.prompt || '').slice(0, 30)).join(', ');
+          screen.appendScroll(COLORS.muted(` ${descs}`));
+        }
+        break;
+      }
+      case 'task_stop': {
+        const taskId = record.args.task_id as string;
+        if (taskId) screen.appendScroll(COLORS.muted(` ${taskId}`));
+        break;
+      }
+      case 'monitor': {
+        const desc = record.args.description as string;
+        if (desc) screen.appendScroll(COLORS.muted(` ${desc.slice(0, 60)}`));
+        break;
+      }
       default:
-        // 其他工具不显示特殊参数
         break;
     }
 
@@ -728,14 +782,60 @@ function displayToolResult(record: ToolCallRecord, data: ToolResultData): void {
         if (path) screen.appendScroll(COLORS.file(` ${path}`));
         break;
       }
-      case 'todo_write':
+      case 'todo_write': {
+        const todoItems = record.args.todos as any[];
+        if (todoItems?.length) {
+          const done = todoItems.filter((t: any) => t.status === 'completed').length;
+          screen.appendScroll(COLORS.muted(` ${todoItems.length} tasks (${done} done)`));
+        }
+        break;
+      }
       case 'todo_read': {
-        screen.appendScroll(COLORS.muted(` todos`));
+        // No args to show — tool reads from disk
         break;
       }
       case 'workspace': {
         const path = record.args.path as string;
         if (path) screen.appendScroll(COLORS.file(` ${path}`));
+        break;
+      }
+      case 'skill': {
+        const skillName = record.args.name || record.args.skill as string;
+        if (skillName) screen.appendScroll(COLORS.muted(` ${skillName}`));
+        break;
+      }
+      case 'question': {
+        const questionText = record.args.question as string;
+        if (questionText) screen.appendScroll(COLORS.muted(` ${questionText.slice(0, 40)}`));
+        break;
+      }
+      case 'task': {
+        const taskList = record.args.tasks as any[];
+        if (taskList?.length) {
+          const descs = taskList.map((t: any) => (t.description || t.prompt || '').slice(0, 20)).join(', ');
+          screen.appendScroll(COLORS.muted(` ${descs}`));
+        }
+        break;
+      }
+      case 'task_stop': {
+        const taskId = record.args.task_id as string;
+        if (taskId) screen.appendScroll(COLORS.muted(` ${taskId}`));
+        break;
+      }
+      case 'monitor': {
+        const desc = record.args.description as string;
+        if (desc) screen.appendScroll(COLORS.muted(` ${desc.slice(0, 40)}`));
+        break;
+      }
+      case 'format': {
+        const fmtPath = record.args.path as string;
+        if (fmtPath) screen.appendScroll(COLORS.file(` ${fmtPath}`));
+        break;
+      }
+      case 'code_health':
+      case 'test_quality_check': {
+        const chPath = record.args.path as string;
+        if (chPath) screen.appendScroll(COLORS.file(` ${chPath}`));
         break;
       }
       default:
@@ -910,7 +1010,7 @@ export function setupAgentEvents(
     }
   });
 
-  // 工具调用开始 - 清除thinking动画
+  // 工具调用开始 - 清除thinking动画，更新状态栏
   on('tool_call', (data: ToolCallData) => {
     state.setStreamingOutput(false);
     screen.setStreaming(false);
@@ -934,6 +1034,13 @@ export function setupAgentEvents(
     }
 
     screen.flushOutput();
+  });
+
+  // 工具进度更新 — 刷新状态栏以显示最新耗时
+  on('tool_progress', (_data: { elapsed?: number; stage?: string; command?: string }) => {
+    if (model) {
+      screen.setStatus(buildStatusText(agent, model));
+    }
   });
 
   // 工具调用结果 - 清除thinking动画
@@ -992,6 +1099,19 @@ export function setupAgentEvents(
 
   on('workspace_changed', (data: WorkspaceChangedData) => {
     screen.appendScroll(COLORS.muted(`\nWorkspace: ${data.path}\n`));
+    // 重新检测 Git 分支
+    try {
+      const branch = execSync('git branch --show-current', {
+        cwd: data.path,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).toString().trim();
+      state.setCurrentBranch(branch || null);
+    } catch {
+      state.setCurrentBranch(null);
+    }
+    if (model) {
+      screen.setStatus(buildStatusText(agent, model));
+    }
   });
 
   // Subagent 事件
