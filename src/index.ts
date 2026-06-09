@@ -476,7 +476,7 @@ program
                 );
                 if (s.summary) {
                   screen.appendScroll(
-                    COLORS.muted(`       ${s.summary.slice(0, 80)}...\n`),
+                    COLORS.muted(`       ${s.summary}\n`),
                   );
                 }
               });
@@ -625,13 +625,13 @@ program
                     if (llm) {
                       const userMessages = currentMessages
                         .filter(m => m.role === 'user')
-                        .map(m => (m.content || '').slice(0, 200))
-                        .slice(0, 3);
+                        .map(m => m.content || '')
+                        .slice(0, 5);
 
                       if (userMessages.length > 0) {
                         const prompt = `Summarize this coding session in 50-100 words (Chinese or English). Focus on main tasks and files:\n\n${userMessages.join('\n')}`;
                         const response = await llm.generateDirect(prompt);
-                        summary = response.content?.slice(0, 200) || '';
+                        summary = response.content || '';
                       }
                     }
                   } catch {
@@ -650,7 +650,7 @@ program
                   );
                   screen.appendScroll(COLORS.muted(`  ID: ${session.id}\n`));
                   if (summary) {
-                    screen.appendScroll(COLORS.muted(`  Summary: ${summary.slice(0, 150)}...\n`));
+                    screen.appendScroll(COLORS.muted(`  Summary: ${summary}\n`));
                   }
                 }
               }

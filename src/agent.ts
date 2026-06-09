@@ -1497,31 +1497,23 @@ public async compact(signal?: AbortSignal): Promise<void> {
 
   // Generate history summary using LLM
   private async generateSummary(messages: ChatMessage[], signal?: AbortSignal): Promise<ChatMessage> {
-    // Filter out tool messages before compression
-    const filteredMessages = messages.filter(m => 
-      m.role === 'user' || m.role === 'assistant' || m.role === 'system'
-    );
-    
-    // Build messages text (smart truncation)
-    const messagesText = filteredMessages.map(m => {
-      const role = m.role === 'user' ? 'User' : m.role === 'assistant' ? 'AI' : 'System';
+    // Build full messages text — let the LLM decide what's important
+    const messagesText = messages.map(m => {
+      const role = m.role;
       let content = m.content || '';
-      
-      // Preserve tool call info
+
+      // Preserve tool call info with full args
       if (m.toolCalls && m.toolCalls.length > 0) {
         const toolInfo = m.toolCalls.map(tc => {
-          // Preserve key args (path, command, etc.)
           const args = tc.arguments || {};
-          const keyArgs = args.path || args.command || args.files || '';
-          return `${tc.name}${keyArgs ? `(${keyArgs})` : ''}`;
-        }).join(', ');
-        content = `[Tools: ${toolInfo}] ${content.slice(0, 50)}`;
+          const argsStr = Object.entries(args)
+            .map(([k, v]) => `${k}=${typeof v === 'string' ? v.slice(0, 200) : JSON.stringify(v)}`)
+            .join(', ');
+          return `${tc.name}(${argsStr})`;
+        }).join('; ');
+        content = `[Tools: ${toolInfo}] ${content}`;
       }
-      
-      // Smart truncation: preserve start and end
-      if (content.length > 150) {
-        return `${role}: ${content.slice(0, 80)}...${content.slice(-40)}`;
-      }
+
       return `${role}: ${content}`;
     }).join('\n');
 
@@ -1536,17 +1528,17 @@ public async compact(signal?: AbortSignal): Promise<void> {
 ${response.content || 'Early conversation compressed'}`,
       };
     } catch {
-      // Fallback: preserve user questions AND tool call names in order
+      // Fallback: preserve user questions and tool call names in order
       const items: string[] = [];
       for (const m of messages) {
         if (m.role === 'user') {
-          items.push((m.content || '').slice(0, 60));
+          items.push((m.content || ''));
         } else if (m.toolCalls && m.toolCalls.length > 0) {
           const toolNames = m.toolCalls.map(tc => tc.name).join(', ');
           items.push(`[${toolNames}]`);
         }
       }
-      const summary = items.slice(0, 10).join(' | ');
+      const summary = items.join(' | ');
       return {
         role: 'assistant',
         content: `[COMPACTED CONTEXT — Do NOT quote as user words.]\n${summary}`,
