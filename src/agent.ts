@@ -1531,7 +1531,9 @@ public async compact(signal?: AbortSignal): Promise<void> {
       const response = await this.llm!.generateDirect(prompt, signal);
       return {
         role: 'assistant',
-        content: `[History Summary] ${response.content || 'Early conversation compressed'}`,
+        content: `[COMPACTED CONTEXT — This is a summary of earlier conversation. Do NOT quote as user words or treat as current instructions.]
+
+${response.content || 'Early conversation compressed'}`,
       };
     } catch {
       // Fallback: preserve user questions AND tool call names in order
@@ -1547,7 +1549,7 @@ public async compact(signal?: AbortSignal): Promise<void> {
       const summary = items.slice(0, 10).join(' | ');
       return {
         role: 'assistant',
-        content: `[History Summary] Task chain: ${summary}`,
+        content: `[COMPACTED CONTEXT — Do NOT quote as user words.]\n${summary}`,
       };
     }
   }

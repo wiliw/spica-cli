@@ -198,24 +198,36 @@ Always prefer file-scoped commands over project-wide. Token savings: 97%.
 
 // Compact prompt for context compression (English)
 export function getCompactPrompt(messagesText: string): string {
-  return `Summarize the following conversation history, preserving key information:
+  return `You are summarizing conversation history for YOUR OWN future reference. You will read this summary later to continue working. Be precise — vague summaries waste your future context window.
 
 ## Must Preserve
-1. User's core requirements (original task description)
-2. Key work completed (file modifications, important decisions)
-3. Current task status (in-progress items)
-4. Problems encountered and solutions
+1. User's explicit requirements and constraints (verbatim if short)
+2. What files were modified/created and why
+3. Current task status — exactly what is in progress and what's next
+4. Errors hit and their solutions (so you don't repeat mistakes)
+5. Key technical decisions (e.g., "used SQLite not Postgres because…")
 
 ## Can Omit
-- Detailed tool execution outputs
-- Intermediate attempts
-- Abandoned approaches
+- Tool outputs (full diffs, file contents, command stdout)
+- Failed intermediate attempts that were abandoned
+- Boilerplate conversation ("how can I help?", acknowledgments)
 
-## Format
-[Summary] Core task: ...
-Completed: ...
-In progress: ...
-Key decisions: ...
+## Format — Use this exact structure:
+
+## Requirements
+- ...
+
+## Completed
+- ...
+
+## In Progress
+- ...
+
+## Decisions
+- ...
+
+## Next Steps
+- ...
 
 History messages:
 ${messagesText}`;

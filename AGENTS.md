@@ -5,9 +5,10 @@
 spica-cli is an AI coding agent CLI with interactive and single-task modes. It supports multiple LLM providers, MCP servers, and a skill system for extending capabilities.
 
 **Entry points:**
-- `src/index.ts` - CLI entry, command parsing, interactive mode (1549 lines)
-- `src/agent.ts` - Core agent loop, tool execution, message handling (1438 lines)
-- `src/tools/index.ts` - All tool definitions (3081 lines)
+- `src/index.ts` - CLI entry, command parsing, interactive mode (1570 lines)
+- `src/agent.ts` - Core agent loop, tool execution, message handling (1555 lines)
+- `src/tools/index.ts` - All tool definitions (3251 lines)
+- `src/cli/ui/screenManager.ts` - TUI rendering, input handling, thinking animation (715 lines)
 
 **Key directories:**
 - `src/llm/providers/` - LLM provider implementations (OpenAI-compatible)
@@ -49,12 +50,12 @@ npm run test:run -- --coverage      # Run with coverage
 ## Lint
 
 ```bash
-npm run lint         # Run ESLint (0 errors, 63 warnings allowed)
+npm run lint         # Run ESLint (0 errors, 72 warnings)
 npm run lint:fix     # Auto-fix lint issues
 npm run lint:strict  # Fail on warnings (not used in CI)
 ```
 
-**Config:** `eslint.config.js` - TypeScript strict, `@typescript-eslint/no-explicit-any` is warning only.
+**Config:** `eslint.config.js` - TypeScript strict, `@typescript-eslint/no-explicit-any` is warning only. Test files excluded from lint.
 
 ## Code Style
 
@@ -65,6 +66,16 @@ npm run lint:strict  # Fail on warnings (not used in CI)
 - Path resolution: Use `resolvePath()` for relative paths
 - Shell commands: Use array-based `execa` to prevent injection — never string interpolation
 - `RuntimeState` is the single source of truth — never use raw globals
+
+## Format
+
+```bash
+npx prettier --write <file>   # Format file with prettier
+npx prettier --check <file>   # Check formatting only
+```
+
+**Config:** `.prettierrc` — single quotes, 100 char width, ES5 trailing commas, LF line endings.
+Also see `.editorconfig` for editor-agnostic settings.
 
 ## PR Workflow
 
@@ -107,10 +118,12 @@ spica skill list                   # List available skills
 
 ## Dev Tips
 
-- Use `npm run dev` for development mode (tsx watch)
+- Use `npm run dev` for development mode (`tsx src/index.ts` with watch)
 - Agent events via `SpicaAgent` (EventEmitter), UI subscribes in `src/cli/events.ts`
 - spica reads its own AGENTS.md at runtime via `loadProjectConfig()` — keep it parseable
 - Large files needing refactor: `src/agent.ts`, `src/index.ts`, `src/tools/index.ts`
+- Always prefer file-scoped commands over project-wide: `npx tsc --noEmit <file>` instead of `npm run typecheck`
+- Run independent tools in parallel; conflicting tools (same file) are sequenced automatically
 
 ## Architecture Notes
 

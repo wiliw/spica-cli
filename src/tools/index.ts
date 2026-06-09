@@ -31,6 +31,38 @@ export function getWorkspace(): string {
   return WORKSPACE;
 }
 
+/**
+ * Link an external AbortSignal to a local AbortController.
+ * When the external signal fires, the local controller is aborted.
+ * The listener self-cleans on fire, and returns a cleanup function
+ * for the caller to call on normal completion.
+ *
+ * Usage:
+ *   const cleanup = linkAbortSignals(externalSignal, myController);
+ *   try { ... } finally { cleanup(); }
+ */
+function linkAbortSignals(
+  externalSignal: AbortSignal | undefined,
+  localController: AbortController,
+): () => void {
+  if (!externalSignal) return () => {};
+
+  if (externalSignal.aborted) {
+    localController.abort();
+    return () => {};
+  }
+
+  const handler = () => {
+    externalSignal.removeEventListener('abort', handler);
+    localController.abort();
+  };
+  externalSignal.addEventListener('abort', handler);
+
+  return () => {
+    externalSignal.removeEventListener('abort', handler);
+  };
+}
+
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -1022,8 +1054,8 @@ export async function executeTool(
         // Bypass 模式：跳过 shell injection 检测（用户明确信任）
         const bypassMode = safeArgs._bypassMode === true;
 
-        // 卡住检测阈值（默认30秒，可通过 stuckWarning 参数调整）
-        const stuckWarningMs = (safeArgs.stuckWarning as number) || 60000;
+        // 卡住检测阈值（默认120秒，可通过 stuckWarning 参数调整）
+        const stuckWarningMs = (safeArgs.stuckWarning as number) || 120000;
 
         // Shell 注入检测 — 只检测真正危险的模式，允许常用操作符 (; && || ${} <<)
         // 注意：bypassPermissions 设置已跳过此检查，此代码为历史遗留，未来可移除
@@ -1125,23 +1157,10 @@ Write-Output $proc.Id;
 
           const actualCommand = command;
 
-          // 创建 AbortController 用于卡住检测和中断（优先使用 agent 传入的 signal）
+          // 链接外部 abort signal（自动清理，防止 listener 累积）
           const externalSignal = safeArgs._abortSignal as AbortSignal | undefined;
           const abortController = new AbortController();
-
-          // 如果外部 signal 已经 aborted，立即 abort
-          if (externalSignal?.aborted) {
-            abortController.abort();
-          }
-          // 链接外部 signal：当外部 abort 时，也 abort 本地 controller
-          // 🔴 关键：保存 handler 引用以便后续清理（防止内存泄漏）
-          const abortHandler = () => {
-            externalSignal?.removeEventListener('abort', abortHandler);
-            abortController.abort();
-          };
-          if (externalSignal && !externalSignal.aborted) {
-            externalSignal.addEventListener('abort', abortHandler);
-          }
+          const cleanupAbortLink = linkAbortSignals(externalSignal, abortController);
 
 // === 卡住检测和强制终止机制 ===
           // 关键修复：先启动进程，确保 pid 就绪，再设置 timer 和 abort listener
@@ -1223,10 +1242,8 @@ Write-Output $proc.Id;
             clearTimeout(stuckWarningTimer);
             clearInterval(abortCheckInterval);
             if (progressTimer) clearInterval(progressTimer);
-            // 🔴 清理 abort handler（防止内存泄漏）
-            if (externalSignal && abortHandler) {
-              externalSignal.removeEventListener('abort', abortHandler);
-            }
+            // 清理 abort link
+            cleanupAbortLink();
 
             // 检查是否超时或被中断
             if (bashResult.timedOut || abortController.signal.aborted) {
@@ -1272,10 +1289,8 @@ Write-Output $proc.Id;
             clearTimeout(stuckWarningTimer);
             clearInterval(abortCheckInterval);
             if (progressTimer) clearInterval(progressTimer);
-            // 🔴 清理 abort handler（防止内存泄漏）
-            if (externalSignal && abortHandler) {
-              externalSignal.removeEventListener('abort', abortHandler);
-            }
+            // 清理 abort link
+            cleanupAbortLink();
 
             // 用户主动中断：立即 kill 进程组并返回
             if (abortController.signal.aborted) {
@@ -1578,18 +1593,10 @@ Write-Output $proc.Id;
         const timeoutMs = (safeArgs.timeout || 30) * 1000;
         const engine = safeArgs.engine || 'duckduckgo';
 
-        // 创建 AbortController
+        // 链接外部 abort signal
         const externalSignal = safeArgs._abortSignal as AbortSignal | undefined;
         const abortController = new AbortController();
-        const abortHandler = () => abortController.abort();
-
-        if (externalSignal) {
-          if (externalSignal.aborted) {
-            abortController.abort();
-          } else {
-            externalSignal.addEventListener('abort', abortHandler);
-          }
-        }
+        const cleanupAbortLink = linkAbortSignals(externalSignal, abortController);
 
         // Check for Tavily API key
         const tavilyApiKey = process.env.TAVILY_API_KEY;
@@ -1708,16 +1715,10 @@ Write-Output $proc.Id;
             ? `DuckDuckGo搜索结果 (${htmlResults.length}个):\n\n${htmlResults.join('\n\n')}`
             : `搜索完成但未找到有效结果。\n\n建议:\n1. 设置 TAVILY_API_KEY 环境变量使用 Tavily API (推荐)\n2. 使用更具体的搜索词\n3. 尝试英文关键词\n\n提示: DuckDuckGo 可能检测到自动化请求，返回主页而非搜索结果。`;
 
-          // 清理 abort handler
-          if (externalSignal && abortHandler) {
-            externalSignal.removeEventListener('abort', abortHandler);
-          }
+          cleanupAbortLink();
           return { success: true, output };
         } catch (searchError: any) {
-          // 清理 abort handler
-          if (externalSignal && abortHandler) {
-            externalSignal.removeEventListener('abort', abortHandler);
-          }
+          cleanupAbortLink();
           if (abortController.signal.aborted || searchError.code === 'ERR_CANCELED' || searchError.message?.includes('abort')) {
             return { success: false, error: 'Tool execution aborted by user (ESC ESC).' };
           }
@@ -1735,18 +1736,10 @@ Write-Output $proc.Id;
           return { success: false, error: e.message };
         }
 
-        // 创建 AbortController（支持 ESC ESC 中断）
+        // 链接外部 abort signal（自动清理）
         const externalSignal = safeArgs._abortSignal as AbortSignal | undefined;
         const abortController = new AbortController();
-        const abortHandler = () => abortController.abort();
-
-        if (externalSignal) {
-          if (externalSignal.aborted) {
-            abortController.abort();
-          } else {
-            externalSignal.addEventListener('abort', abortHandler);
-          }
-        }
+        const cleanupAbortLink = linkAbortSignals(externalSignal, abortController);
 
         try {
           // 为 GitHub API 自动添加 Token（避免 rate limit）
@@ -1824,16 +1817,10 @@ Write-Output $proc.Id;
 
           const output = title ? `标题: ${title}\n\n内容:\n${body}` : body;
 
-          // 清理 abort handler
-          if (externalSignal && abortHandler) {
-            externalSignal.removeEventListener('abort', abortHandler);
-          }
+          cleanupAbortLink();
           return { success: true, output };
         } catch (fetchError: any) {
-          // 清理 abort handler
-          if (externalSignal && abortHandler) {
-            externalSignal.removeEventListener('abort', abortHandler);
-          }
+          cleanupAbortLink();
           // 检查是否是中断导致的错误
           if (abortController.signal.aborted || fetchError.code === 'ERR_CANCELED' || fetchError.message?.includes('abort')) {
             return { success: false, error: 'Tool execution aborted by user (ESC ESC).' };
@@ -2205,6 +2192,7 @@ Write-Output $proc.Id;
                 return `✗ ${taskLabel}: Parent agent interrupted`;
               }
               abortHandler = () => {
+                externalSignal.removeEventListener('abort', abortHandler!);
                 taskAgent.interrupt();
                 clearTimeout(timeoutId);
               };
@@ -2213,6 +2201,7 @@ Write-Output $proc.Id;
             // Listen for sibling early-exit
             if (!siblingAbortController.signal.aborted) {
               siblingAbortHandler = () => {
+                siblingAbortController.signal.removeEventListener('abort', siblingAbortHandler!);
                 taskAgent.interrupt();
                 clearTimeout(timeoutId);
               };
