@@ -1495,26 +1495,47 @@ public async compact(signal?: AbortSignal): Promise<void> {
     });
   }
 
-  // Generate history summary using LLM
+  // Generate history summary using LLM.
+  // Tool result content is discarded — only tool names + key args are kept.
+  // This gives the LLM enough context to summarize what happened without
+  // overwhelming it with raw file contents, grep output, or bash stdout.
   private async generateSummary(messages: ChatMessage[], signal?: AbortSignal): Promise<ChatMessage> {
-    // Build full messages text — let the LLM decide what's important
+    const KEY_ARGS = new Set(['path', 'command', 'action', 'pattern', 'query', 'url', 'question', 'prompt']);
+
     const messagesText = messages.map(m => {
       const role = m.role;
-      let content = m.content || '';
 
-      // Preserve tool call info with full args
-      if (m.toolCalls && m.toolCalls.length > 0) {
-        const toolInfo = m.toolCalls.map(tc => {
-          const args = tc.arguments || {};
-          const argsStr = Object.entries(args)
-            .map(([k, v]) => `${k}=${typeof v === 'string' ? v.slice(0, 200) : JSON.stringify(v)}`)
-            .join(', ');
-          return `${tc.name}(${argsStr})`;
-        }).join('; ');
-        content = `[Tools: ${toolInfo}] ${content}`;
+      if (m.role === 'system') {
+        return `system: ${m.content || ''}`;
       }
 
-      return `${role}: ${content}`;
+      if (m.role === 'user') {
+        return `user: ${m.content || ''}`;
+      }
+
+      if (m.role === 'tool') {
+        // Discard tool result content — keep only the tool name for context
+        const toolName = (m as any).name || 'unknown';
+        return `tool_result: ${toolName}`;
+      }
+
+      // assistant
+      if (m.toolCalls && m.toolCalls.length > 0) {
+        // Preserve tool names + key args only
+        const toolInfo = m.toolCalls.map(tc => {
+          const args = tc.arguments || {};
+          const keyArgsStr = Object.entries(args)
+            .filter(([k]) => KEY_ARGS.has(k))
+            .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+            .join(', ');
+          return keyArgsStr ? `${tc.name}(${keyArgsStr})` : tc.name;
+        }).join('; ');
+        const textContent = (m.content || '').slice(0, 300);
+        return `assistant: [Tools: ${toolInfo}] ${textContent}`;
+      }
+
+      // Pure text assistant message — truncate to 300 chars
+      return `assistant: ${(m.content || '').slice(0, 300)}`;
     }).join('\n');
 
     const prompt = getCompactPrompt(messagesText);
@@ -1528,14 +1549,23 @@ public async compact(signal?: AbortSignal): Promise<void> {
 ${response.content || 'Early conversation compressed'}`,
       };
     } catch {
-      // Fallback: preserve user questions and tool call names in order
+      // Fallback: preserve user messages in full, tool calls with names + key args
       const items: string[] = [];
       for (const m of messages) {
         if (m.role === 'user') {
-          items.push((m.content || ''));
+          items.push(m.content || '');
         } else if (m.toolCalls && m.toolCalls.length > 0) {
-          const toolNames = m.toolCalls.map(tc => tc.name).join(', ');
+          const toolNames = m.toolCalls.map(tc => {
+            const args = tc.arguments || {};
+            const keyArgsStr = Object.entries(args)
+              .filter(([k]) => KEY_ARGS.has(k))
+              .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+              .join(', ');
+            return keyArgsStr ? `${tc.name}(${keyArgsStr})` : tc.name;
+          }).join(', ');
           items.push(`[${toolNames}]`);
+        } else if (m.role === 'tool') {
+          items.push(`[tool_result: ${(m as any).name || '?'}]`);
         }
       }
       const summary = items.join(' | ');
@@ -1545,6 +1575,4 @@ ${response.content || 'Early conversation compressed'}`,
       };
     }
   }
-
-  // 旧的简单压缩方法（备用）
-  }
+}

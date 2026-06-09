@@ -149,7 +149,7 @@ describe('Compression Integration', () => {
       const finalMessages = mockLLM.setMessages.mock.calls[0][0];
       // Compact应该减少消息数量并生成summary
       expect(finalMessages.length).toBeGreaterThan(0);
-      expect(finalMessages[0].content).toContain('[History Summary]');
+      expect(finalMessages[0].content).toContain('[COMPACTED CONTEXT');
       // 由于context window很小（1000），compact可能移除大部分消息
       // 只验证不会崩溃和产生有效消息
     });
@@ -239,12 +239,12 @@ describe('Compression Integration', () => {
 
       expect(mockLLM.setMessages).toHaveBeenCalled();
       const finalMessages = mockLLM.setMessages.mock.calls[0][0];
-      const summaryMsg = finalMessages.find(m => m.role === 'assistant' && m.content?.includes('[History Summary]'));
+      const summaryMsg = finalMessages.find(m => m.role === 'assistant' && m.content?.includes('[COMPACTED CONTEXT'));
 
       expect(summaryMsg).toBeDefined();
-      expect(summaryMsg!.content).toContain('[History Summary]');
-      // Fallback uses "Task chain:" format
-      expect(summaryMsg!.content).toContain('Task chain:');
+      expect(summaryMsg!.content).toContain('[COMPACTED CONTEXT');
+      // Fallback preserves user message content and tool call names
+      expect(summaryMsg!.content).toContain('First task description here');
     });
   });
 

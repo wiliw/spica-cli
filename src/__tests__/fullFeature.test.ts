@@ -355,10 +355,12 @@ describe('TUI Features', () => {
       });
 
       let output = '';
+      let inputSent = false;
       p.onData(d => {
         output += d;
-        // 等待脚本准备好后发送输入
-        if (output.includes('=== TUI State Test Start ===') && !output.includes(input)) {
+        // 等待脚本准备好后发送输入（使用 guard 防止 onData 多次触发导致重复写入）
+        if (!inputSent && output.includes('=== TUI State Test Start ===') && !output.includes(input)) {
+          inputSent = true;
           setTimeout(() => {
             p.write(input);
             setTimeout(() => {
