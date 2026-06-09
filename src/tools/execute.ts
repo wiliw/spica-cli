@@ -31,6 +31,15 @@ import {
 import type { ToolResult, ToolEventCallback } from "./helpers";
 
 import { mcpToolNameMap } from "./registry";
+import { executeWorkspace } from "./impl/workspace";
+import { executeDirectoryCreate, executeDirectoryList } from "./impl/directory";
+import { executeQuestion } from "./impl/question";
+import { executeTodoRead, executeTodoWrite } from "./impl/todo";
+import { executeSkill } from "./impl/skill";
+import { executeFileRead } from "./impl/file_read";
+import { executeFileExists, executeFileDelete, executeFileCopy, executeFileMove } from "./impl/file_manage";
+import { executeGlob } from "./impl/glob";
+import { executeGrep } from "./impl/grep";
 
 export async function executeTool(
   name: string,
@@ -44,40 +53,10 @@ export async function executeTool(
   try {
     switch (name) {
       case 'workspace':
-        if (safeArgs.path) {
-          const newPath = pathResolve(safeArgs.path);
-          if (!await fs.pathExists(newPath)) {
-            return { success: false, error: `Path does not exist: ${newPath}` };
-          }
-          setWorkspace(newPath);
-          return { success: true, output: `Workspace: ${getWorkspace()}` };
-        }
-        return { success: true, output: `Workspace: ${getWorkspace()}` };
+        return await executeWorkspace(safeArgs);
 
-      case 'file_read': {
-        const readPath = resolvePath(safeArgs.path);
-        const content = await fs.readFile(readPath, 'utf-8');
-        const lines = content.split('\n');
-        const lineCount = lines.length;
-
-        // 简化输出：只显示文件路径和基本信息，内容放在 content 字段供 AI 使用
-        if (safeArgs.offset || safeArgs.limit) {
-          const start = safeArgs.offset ? safeArgs.offset - 1 : 0;
-          const end = safeArgs.limit ? start + safeArgs.limit : lines.length;
-          const selectedLines = lines.slice(start, end);
-          return {
-            success: true,
-            output: `[${readPath}:${start + 1}-${end}] (${selectedLines.length} lines)`,
-            content: selectedLines.join('\n')
-          };
-        }
-
-        return {
-          success: true,
-          output: `[${readPath}] (${lineCount} lines)`,
-          content: content
-        };
-      }
+      case 'file_read':
+        return await executeFileRead(safeArgs);
 
       case 'file_write': {
         const writePath = resolvePath(safeArgs.path);
@@ -381,113 +360,29 @@ export async function executeTool(
         };
       }
 
-      case 'file_exists': {
-        const existsPath = resolvePath(safeArgs.path);
-        const exists = await fs.pathExists(existsPath);
-        return { success: true, output: exists ? 'exists' : 'not found' };
-      }
+      case 'file_exists':
+        return await executeFileExists(safeArgs);
 
-      case 'file_delete': {
-        const deletePath = resolvePath(safeArgs.path);
-        await fs.remove(deletePath);
-        return { success: true, output: `Deleted ${deletePath}` };
-      }
+      case 'file_delete':
+        return await executeFileDelete(safeArgs);
 
-      case 'file_copy': {
-        const srcPath = resolvePath(safeArgs.source);
-        const dstPath = resolvePath(safeArgs.destination);
-        await fs.copy(srcPath, dstPath);
-        return { success: true, output: `Copied ${srcPath} → ${dstPath}` };
-      }
+      case 'file_copy':
+        return await executeFileCopy(safeArgs);
 
-      case 'file_move': {
-        const moveSrc = resolvePath(safeArgs.source);
-        const moveDst = resolvePath(safeArgs.destination);
-        await fs.move(moveSrc, moveDst);
-        return { success: true, output: `Moved ${moveSrc} → ${moveDst}` };
-      }
+      case 'file_move':
+        return await executeFileMove(safeArgs);
 
-      case 'directory_create': {
-        const dirPath = resolvePath(safeArgs.path);
-        await fs.ensureDir(dirPath);
-        return { success: true, output: `Created directory ${dirPath}` };
-      }
+      case 'directory_create':
+        return await executeDirectoryCreate(safeArgs);
 
-      case 'directory_list': {
-        const listPath = safeArgs.path ? resolvePath(safeArgs.path) : WORKSPACE;
-        const items = await fs.readdir(listPath);
-        return { success: true, output: items.join('\n') };
-      }
+      case 'directory_list':
+        return await executeDirectoryList(safeArgs);
 
-      case 'glob': {
-        const ignorePatterns = (safeArgs.ignore as string[]) || ['node_modules', '.git', 'dist', 'build', '*.lock'];
-        const maxFiles = (safeArgs.maxFiles as number) || 100;
-        
-        const files = await fastGlob(safeArgs.pattern, {
-          cwd: WORKSPACE,
-          absolute: true,
-          ignore: ignorePatterns,
-        });
-        
-        const truncated = files.slice(0, maxFiles);
-        return { 
-          success: true, 
-          output: files.length > 0 
-            ? `Found ${files.length} files (showing ${truncated.length}):\n${truncated.join('\n')}`
-            : 'No files found',
-          content: truncated.join('\n'),
-        };
-      }
+      case 'glob':
+        return await executeGlob(safeArgs);
 
-      case 'grep': {
-        const grepPath = safeArgs.path ? resolvePath(safeArgs.path) : WORKSPACE;
-        const includePattern = safeArgs.include || '*';
-        const maxLines = (safeArgs.maxLines as number) || 100;
-        
-        try {
-          const files = await fastGlob(includePattern, {
-            cwd: grepPath,
-            absolute: true,
-            ignore: ['node_modules', '.git', 'dist', 'build', '*.lock'],
-          });
-          
-          const regex = new RegExp(safeArgs.pattern, 'g');
-          const matches: string[] = [];
-          
-          for (const file of files) {
-            if (matches.length >= maxLines) break;
-            
-            try {
-              const content = await fs.readFile(file, 'utf-8');
-              const lines = content.split('\n');
-              
-              for (let i = 0; i < lines.length; i++) {
-                if (matches.length >= maxLines) break;
-                
-                if (regex.test(lines[i])) {
-                  const relativePath = file.replace(WORKSPACE, '').replace(/^\//, '');
-                  matches.push(`${relativePath}:${i + 1}: ${lines[i].trim()}`);
-                }
-              }
-            } catch {
-              // Skip unreadable files
-            }
-          }
-          
-          return {
-            success: true,
-            output: matches.length > 0 
-              ? `Found ${matches.length} matches:\n${matches.join('\n')}`
-              : 'No matches found',
-            content: matches.join('\n'),
-          };
-        } catch (error: any) {
-          return {
-            success: false,
-            error: `Grep failed: ${error.message}`,
-          };
-        }
-      }
+      case 'grep':
+        return await executeGrep(safeArgs);
 
       case 'bash': {
         const command = String(safeArgs.command || '');
@@ -1310,12 +1205,8 @@ Write-Output $proc.Id;
         }
       }
 
-      case 'question': {
-        return {
-          success: true,
-          output: `QUESTION: ${safeArgs.text}\nWaiting for user response...`
-        };
-      }
+      case 'question':
+        return await executeQuestion(safeArgs);
 
       case 'gh': {
         const action = safeArgs.action as string;
@@ -1429,117 +1320,14 @@ Write-Output $proc.Id;
         }
       }
 
-      case 'skill': {
-        const { loadSkills } = await import('../skills/index');
-        const skills = loadSkills(WORKSPACE);
-        const skillName = String(safeArgs.name || '');
+      case 'skill':
+        return await executeSkill(safeArgs);
 
-        if (!skillName) {
-          return {
-            success: false,
-            error: `Skill name required. Available skills: ${Array.from(skills.keys()).join(', ')}`,
-          };
-        }
+      case 'todo_read':
+        return await executeTodoRead(safeArgs);
 
-        const skill = skills.get(skillName);
-        if (!skill) {
-          return {
-            success: false,
-            error: `Skill "${skillName}" not found. Available skills: ${Array.from(skills.keys()).join(', ')}`,
-          };
-        }
-
-        const skillContent = skill.promptTemplate || '';
-
-        // Find skill references in loaded skill content
-        const allSkillNames = Array.from(skills.keys());
-        const referencedSkills: string[] = [];
-        const lowerContent = skillContent.toLowerCase();
-
-        for (const name of allSkillNames) {
-          if (name === skillName) continue;
-          if (
-            lowerContent.includes(`superpowers:${name}`) ||
-            lowerContent.includes(`skill(name="${name}")`) ||
-            lowerContent.includes(`skill(name='${name}')`) ||
-            lowerContent.includes(`use the \`${name}\` skill`) ||
-            lowerContent.includes(`use ${name}`) ||
-            lowerContent.includes(`invoke ${name}`)
-          ) {
-            referencedSkills.push(name);
-          }
-        }
-
-        return {
-          success: true,
-          output: `Skill: ${skill.name}\nDescription: ${skill.description}\n\n${skillContent}`,
-          referencedSkills: [...new Set(referencedSkills)],
-        };
-      }
-
-      case 'todo_read': {
-        const { loadPersistedTasks, getTaskStats } = await import('../storage/taskPersistence');
-        const tasks = loadPersistedTasks(WORKSPACE);
-        const stats = getTaskStats(WORKSPACE);
-
-        if (tasks.length === 0) {
-          return { success: true, output: 'No persisted tasks found. Use todo_write to create tasks.' };
-        }
-
-        const statusLabels: Record<string, string> = {
-          'completed': '[DONE]',
-          'in_progress': '[ACTV]',
-          'pending': '[PEND]',
-        };
-
-        const lines = [`\nPersisted Tasks (${stats.completed}/${stats.total} done)`];
-        lines.push('---------------------------------');
-        tasks.forEach((t: PersistedTask, i: number) => {
-          const label = statusLabels[t.status] || '[PEND]';
-          lines.push(`${label} ${i+1}. ${t.subject}`);
-        });
-        lines.push('---------------------------------');
-        lines.push('Use todo_write to update or add new tasks.');
-
-        return { success: true, output: lines.join('\n') };
-      }
-
-      case 'todo_write': {
-        const todos = safeArgs.todos || [];
-        const total = todos.length;
-        const completed = todos.filter((t: Todo) => t.status === 'completed').length;
-        const inProgress = todos.filter((t: Todo) => t.status === 'in_progress').length;
-        const pending = todos.filter((t: Todo) => t.status === 'pending').length;
-
-        // Persist todos to .spica/tasks.json
-        const { savePersistedTasks } = await import('../storage/taskPersistence');
-        const persistedTasks = todos.map((t: Todo, i: number) => ({
-          id: `task_${i + 1}`,
-          subject: t.content,
-          description: t.content,
-          status: t.status,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }));
-        savePersistedTasks(WORKSPACE, persistedTasks);
-
-        const statusLabels: Record<string, string> = {
-          'completed': '[DONE]',
-          'in_progress': '[ACTV]',
-          'pending': '[PEND]',
-        };
-
-        const lines = [`\nTask List (${completed}/${total} done, ${inProgress} active, ${pending} pending)`];
-        lines.push('---------------------------------');
-        todos.forEach((t: any, i: number) => {
-          const label = statusLabels[t.status] || '[PEND]';
-          lines.push(`${label} ${i+1}. ${t.content}`);
-        });
-        lines.push('---------------------------------');
-        lines.push('(Saved to .spica/tasks.json)');
-
-        return { success: true, output: lines.join('\n') };
-      }
+      case 'todo_write':
+        return await executeTodoWrite(safeArgs);
 
       case 'task': {
         const tasks = safeArgs.tasks as SubAgentTask[];
