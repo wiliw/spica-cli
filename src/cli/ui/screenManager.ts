@@ -1,6 +1,7 @@
 import { isFullWidth } from './stringWidth';
 import { COLORS } from './colors';
 import { getScrollbackBuffer, ScrollbackBuffer } from './scrollbackBuffer';
+import { renderMarkdownTables } from './tableRenderer';
 
 const ESC = '\x1b';
 
@@ -199,8 +200,11 @@ export class ScreenManager {
 
   // 直接输出（用于工具调用、thinking等非流式内容）
   appendScroll(text: string): void {
-    // 保存到历史缓冲区
+    // 保存原始文本到历史缓冲区
     this.state.scrollbackBuffer.append(text);
+
+    // 渲染 markdown 表格为 ANSI 对齐列
+    const displayText = renderMarkdownTables(text);
 
     // 直接输出
     if (!this.state.cursorInScrollArea) {
@@ -208,7 +212,7 @@ export class ScreenManager {
       writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
       this.state.cursorInScrollArea = true;
     }
-    writeStdout(text);
+    writeStdout(displayText);
 
     // 如果有换行符，刷新输入框
     if (text.includes('\n')) {
@@ -218,9 +222,11 @@ export class ScreenManager {
 
   // 行缓冲输出（用于AI流式输出）
   private streamBuffer: string = '';
+  // 表格行缓冲 — 延迟输出表格行直到表格完整，以便 ANSI 对齐渲染
+  private tableLineBuffer: string[] = [];
 
   appendStreamChunk(text: string): void {
-    // 保存到历史缓冲区
+    // 保存原始文本到历史缓冲区
     this.state.scrollbackBuffer.append(text);
 
     // 添加到流式缓冲
@@ -229,25 +235,78 @@ export class ScreenManager {
     // 检查是否有完整行
     if (this.streamBuffer.includes('\n')) {
       const lines = this.streamBuffer.split('\n');
-      // 输出所有完整行
+      // 处理所有完整行
       for (let i = 0; i < lines.length - 1; i++) {
-        if (!this.state.cursorInScrollArea) {
-          writeStdout(`${ESC}[?25l`);
-          writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
-          this.state.cursorInScrollArea = true;
-        }
-        writeStdout(lines[i] + '\n');
+        this.processStreamLine(lines[i]);
       }
       // 保留最后一行在缓冲中
       this.streamBuffer = lines[lines.length - 1] || '';
-
-      // 每行输出后刷新输入框
-      this.refreshInputDuringStreaming();
     }
+  }
+
+  // 表格行检测：以 | 开头且包含 |
+  private isTableDataLine(line: string): boolean {
+    const trimmed = line.trim();
+    return /^\|.+\|/.test(trimmed);
+  }
+
+  // 分隔行检测：|---|---|
+  private isTableSepLine(line: string): boolean {
+    const trimmed = line.trim();
+    return /^\|[\s:]*-{3,}[\s:]*\|/.test(trimmed) ||
+           /^\|[\s:]*-{3,}[\s:]*[\|:]/.test(trimmed);
+  }
+
+  private processStreamLine(line: string): void {
+    if (this.tableLineBuffer.length > 0) {
+      // 正在缓冲表格
+      if (this.isTableDataLine(line) || this.isTableSepLine(line)) {
+        this.tableLineBuffer.push(line);
+        return;
+      }
+      // 表格结束 — 渲染并输出
+      this.flushTableBuffer();
+    }
+
+    // 检测表格开始：当前行是表格数据行，下一行可能是分隔行
+    if (this.isTableDataLine(line)) {
+      // 可能是表头，先缓冲
+      this.tableLineBuffer.push(line);
+      return;
+    }
+
+    // 普通行 — 直接输出
+    this.writeStreamLine(line);
+  }
+
+  private flushTableBuffer(): void {
+    if (this.tableLineBuffer.length === 0) return;
+
+    const text = this.tableLineBuffer.join('\n');
+    const rendered = renderMarkdownTables(text);
+
+    for (const renderedLine of rendered.split('\n')) {
+      this.writeStreamLine(renderedLine);
+    }
+
+    this.tableLineBuffer = [];
+  }
+
+  private writeStreamLine(line: string): void {
+    if (!this.state.cursorInScrollArea) {
+      writeStdout(`${ESC}[?25l`);
+      writeStdout(`${ESC}[${this.state.scrollBottom};1H`);
+      this.state.cursorInScrollArea = true;
+    }
+    writeStdout(line + '\n');
+    this.refreshInputDuringStreaming();
   }
 
   // 刷新流式缓冲（流式结束时调用）
   flushStreamBuffer(): void {
+    // 先刷新待处理的表格缓冲
+    this.flushTableBuffer();
+
     if (this.streamBuffer) {
       if (!this.state.cursorInScrollArea) {
         writeStdout(`${ESC}[?25l`);
