@@ -110,10 +110,13 @@ export class ScreenManager {
     if (char === '\t') return 8;
     const codePoint = char.codePointAt(0);
     if (!codePoint) return 1;
-    
+
+    // Control characters (C0: 0-31, DEL: 127, C1: 128-159) have zero width
+    if (codePoint < 32 || codePoint === 127 || (codePoint >= 128 && codePoint <= 159)) return 0;
+
     // Emoji 和其他复杂 grapheme cluster 宽度为 2
     if (char.length > 1 || codePoint > 0xFFFF) return 2;
-    
+
     if (isFullWidth(char)) return 2;
     return 1;
   }
@@ -568,8 +571,7 @@ export class ScreenManager {
 
       // 粘贴
       if (data.includes(`${ESC}[200~`)) {
-        // eslint-disable-next-line no-control-regex -- ANSI escape codes for bracketed paste
-        const content = data.replace(/\x1b\[200~/g, '').replace(/\x1b\[201~/g, '');
+        const content = this.cleanPastedContent(data);
         const graphemes = content.match(/\P{M}\p{M}*/gu) || [];
         const line = this.state.inputBuffer[0];
         const lineGraphemes = line.match(/\P{M}\p{M}*/gu) || [];
@@ -718,18 +720,32 @@ export class ScreenManager {
     }
 
     // eslint-disable-next-line no-control-regex -- ANSI escape codes for bracketed paste
-    const content = data.replace(/\x1b\[200~/g, '').replace(/\x1b\[201~/g, '');
+    const content = this.cleanPastedContent(data);
     const graphemes = content.match(/\P{M}\p{M}*/gu) || [];
     const line = this.state.inputBuffer[0];
     const lineGraphemes = line.match(/\P{M}\p{M}*/gu) || [];
-    this.state.inputBuffer[0] = 
-      lineGraphemes.slice(0, this.state.cursorCol).join('') + 
-      content + 
+    this.state.inputBuffer[0] =
+      lineGraphemes.slice(0, this.state.cursorCol).join('') +
+      content +
       lineGraphemes.slice(this.state.cursorCol).join('');
     this.state.cursorCol += graphemes.length;
     this.updateLayout();
     this.refreshInput();
     this.restoreCursor();
+  }
+
+  // Strip bracketed paste markers AND any embedded ANSI escape sequences
+  // from pasted content. ANSI codes (CSI/OSC) can end up in clipboard when
+  // copying from terminals or IDEs; if not stripped they introduce invisible
+  // characters that throw off cursor positioning.
+  private cleanPastedContent(data: string): string {
+    // eslint-disable-next-line no-control-regex
+    return data
+      .replace(/\x1b\[200~/g, '')   // bracketed paste start
+      .replace(/\x1b\[201~/g, '')   // bracketed paste end
+      .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')  // CSI: colors, cursor moves, etc.
+      .replace(/\x1b\][^\x07]*\x07/g, '')     // OSC: title, link, etc.
+      .replace(/\x1b[PX^_][^\x1b]*\x1b\\/g, ''); // Other escape sequences
   }
 
   getContent(): string {
