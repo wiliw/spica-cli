@@ -618,24 +618,32 @@ program
 
                   const { archiveSessionWithSummary, generateSessionSummary } = await import("./utils/session");
                   let summary = '';
+                  let fallbackReason = '';
 
                   // 尝试 LLM 摘要
                   try {
                     const llm = agent.getLLM();
-                    if (llm) {
+                    if (!llm) {
+                      fallbackReason = 'LLM not initialized';
+                    } else {
                       const userMessages = currentMessages
                         .filter(m => m.role === 'user')
                         .map(m => m.content || '')
                         .slice(0, 5);
 
-                      if (userMessages.length > 0) {
+                      if (userMessages.length === 0) {
+                        fallbackReason = 'no user messages found';
+                      } else {
                         const prompt = `Summarize this coding session in 50-100 words (Chinese or English). Focus on main tasks and files:\n\n${userMessages.join('\n')}`;
                         const response = await llm.generateDirect(prompt);
                         summary = response.content || '';
+                        if (!summary) {
+                          fallbackReason = 'LLM returned empty summary';
+                        }
                       }
                     }
-                  } catch {
-                    // Fallback
+                  } catch (err: any) {
+                    fallbackReason = err?.message || String(err);
                   }
 
                   if (!summary) {
@@ -650,7 +658,13 @@ program
                   );
                   screen.appendScroll(COLORS.muted(`  ID: ${session.id}\n`));
                   if (summary) {
-                    screen.appendScroll(COLORS.muted(`  Summary: ${summary}\n`));
+                    if (fallbackReason) {
+                      screen.appendScroll(COLORS.muted(`  Summary: ${summary}\n`));
+                      screen.appendScroll(COLORS.warning(`  ⚠ LLM summarization failed: ${fallbackReason}\n`));
+                      screen.appendScroll(COLORS.muted(`  Using local fallback instead.\n`));
+                    } else {
+                      screen.appendScroll(COLORS.muted(`  Summary: ${summary}\n`));
+                    }
                   }
                 }
               }

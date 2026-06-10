@@ -84,21 +84,23 @@ export class LLMClient extends EventEmitter {
   }
 
   async generate(prompt: string, tools?: ToolDefinition[], externalSignal?: AbortSignal): Promise<LLMResponse> {
-    // 提前创建AbortController，支持中断rate limiter等待
-    // 如果有旧的 controller，先 abort 避免竞态
+    // Abort previous controller and create a new one.
+    // Capture in a local variable — `finally` blocks from concurrent calls
+    // can overwrite `this.abortController` across await points.
     if (this.abortController) {
       this.abortController.abort();
     }
-    this.abortController = new AbortController();
+    const controller = new AbortController();
+    this.abortController = controller;
 
     // 🔴 关键：链接外部 signal（来自 agent 的 currentAbortController）
     if (externalSignal) {
       if (externalSignal.aborted) {
-        this.abortController.abort();
+        controller.abort();
       } else {
         const onAbort = () => {
           externalSignal.removeEventListener('abort', onAbort);
-          this.abortController?.abort();
+          controller.abort();
         };
         externalSignal.addEventListener('abort', onAbort);
       }
@@ -108,14 +110,14 @@ export class LLMClient extends EventEmitter {
 
     try {
       // 等待rate limiter（可被中断）
-      await this.rateLimiter.waitForAvailability(this.abortController.signal);
+      await this.rateLimiter.waitForAvailability(controller.signal);
 
-      if (this.abortController.signal.aborted) {
+      if (controller.signal.aborted) {
         throw new Error('Interrupted during rate limit wait');
       }
 
       this.rateLimiter.recordRequest();
-      const response = await this.provider.generate(prompt, toolsToUse, this.abortController.signal);
+      const response = await this.provider.generate(prompt, toolsToUse, controller.signal);
 
       if (response.content) {
         const tokens = this.tokenCounter.estimateTokens(response.content);
@@ -124,7 +126,10 @@ export class LLMClient extends EventEmitter {
 
       return response;
     } finally {
-      this.abortController = null;
+      // Only clear if no new controller was created by a concurrent call
+      if (this.abortController === controller) {
+        this.abortController = null;
+      }
     }
   }
 
@@ -137,34 +142,38 @@ export class LLMClient extends EventEmitter {
 
   // 直接生成（不使用历史消息，用于摘要等）
   async generateDirect(prompt: string, externalSignal?: AbortSignal): Promise<LLMResponse> {
+    // Abort previous controller and create a new one.
+    // Capture in a local variable — `finally` blocks from concurrent calls
+    // can overwrite `this.abortController` across await points.
     if (this.abortController) {
       this.abortController.abort();
     }
-    this.abortController = new AbortController();
+    const controller = new AbortController();
+    this.abortController = controller;
 
     // 链接外部 signal（来自 agent 的 AbortController，支持中断传播）
     if (externalSignal) {
       if (externalSignal.aborted) {
-        this.abortController.abort();
+        controller.abort();
       } else {
         const onAbort = () => {
           externalSignal.removeEventListener('abort', onAbort);
-          this.abortController?.abort();
+          controller.abort();
         };
         externalSignal.addEventListener('abort', onAbort);
       }
     }
 
     try {
-      await this.rateLimiter.waitForAvailability(this.abortController.signal);
+      await this.rateLimiter.waitForAvailability(controller.signal);
 
-      if (this.abortController.signal.aborted) {
+      if (controller.signal.aborted) {
         throw new Error('Interrupted during rate limit wait');
       }
 
       this.rateLimiter.recordRequest();
       // 使用 provider 的 generateDirect 方法（不添加到历史）
-      const response = await this.provider.generateDirect(prompt, this.abortController.signal);
+      const response = await this.provider.generateDirect(prompt, controller.signal);
 
       if (response.content) {
         const tokens = this.tokenCounter.estimateTokens(response.content);
@@ -173,7 +182,10 @@ export class LLMClient extends EventEmitter {
 
       return response;
     } finally {
-      this.abortController = null;
+      // Only clear if no new controller was created by a concurrent call
+      if (this.abortController === controller) {
+        this.abortController = null;
+      }
     }
   }
 
@@ -186,18 +198,22 @@ export class LLMClient extends EventEmitter {
     // 添加tool结果消息
     this.provider.addToolMessage(toolCallId, result);
 
-    // 提前创建AbortController
-    this.abortController = new AbortController();
+    // Abort previous and create new controller
+    if (this.abortController) {
+      this.abortController.abort();
+    }
+    const controller = new AbortController();
+    this.abortController = controller;
 
     try {
-      await this.rateLimiter.waitForAvailability(this.abortController.signal);
+      await this.rateLimiter.waitForAvailability(controller.signal);
 
-      if (this.abortController.signal.aborted) {
+      if (controller.signal.aborted) {
         throw new Error('Interrupted during rate limit wait');
       }
 
       this.rateLimiter.recordRequest();
-      const response = await this.provider.generateFromHistory(toolsToUse, this.abortController.signal);
+      const response = await this.provider.generateFromHistory(toolsToUse, controller.signal);
 
       if (response.content) {
         const tokens = this.tokenCounter.estimateTokens(response.content);
@@ -206,7 +222,9 @@ export class LLMClient extends EventEmitter {
 
       return response;
     } finally {
-      this.abortController = null;
+      if (this.abortController === controller) {
+        this.abortController = null;
+      }
     }
   }
 
@@ -232,31 +250,35 @@ export class LLMClient extends EventEmitter {
       }
     }
 
-    // 提前创建AbortController
-    this.abortController = new AbortController();
+    // Abort previous and create new controller
+    if (this.abortController) {
+      this.abortController.abort();
+    }
+    const controller = new AbortController();
+    this.abortController = controller;
 
     // 🔴 链接外部 signal
     if (externalSignal) {
       if (externalSignal.aborted) {
-        this.abortController?.abort();
+        controller.abort();
       } else {
         const onAbort = () => {
           externalSignal.removeEventListener('abort', onAbort);
-          this.abortController?.abort();
+          controller.abort();
         };
         externalSignal.addEventListener('abort', onAbort);
       }
     }
 
     try {
-      await this.rateLimiter.waitForAvailability(this.abortController.signal);
+      await this.rateLimiter.waitForAvailability(controller.signal);
 
-      if (this.abortController.signal.aborted) {
+      if (controller.signal.aborted) {
         throw new Error('Interrupted during rate limit wait');
       }
 
       this.rateLimiter.recordRequest();
-      const response = await this.provider.generateFromHistory(toolsToUse, this.abortController.signal);
+      const response = await this.provider.generateFromHistory(toolsToUse, controller.signal);
 
       if (response.content) {
         const tokens = this.tokenCounter.estimateTokens(response.content);
@@ -265,7 +287,9 @@ export class LLMClient extends EventEmitter {
 
       return response;
     } finally {
-      this.abortController = null;
+      if (this.abortController === controller) {
+        this.abortController = null;
+      }
     }
   }
 
@@ -338,30 +362,36 @@ export class LLMClient extends EventEmitter {
   // 从历史消息继续生成（不添加新的user消息）
   async generateFromHistory(tools?: ToolDefinition[], externalSignal?: AbortSignal): Promise<LLMResponse> {
     const toolsToUse = tools || this.tools;
-    this.abortController = new AbortController();
+
+    // Abort previous and create new controller
+    if (this.abortController) {
+      this.abortController.abort();
+    }
+    const controller = new AbortController();
+    this.abortController = controller;
 
     // 🔴 链接外部 signal
     if (externalSignal) {
       if (externalSignal.aborted) {
-        this.abortController?.abort();
+        controller.abort();
       } else {
         const onAbort = () => {
           externalSignal.removeEventListener('abort', onAbort);
-          this.abortController?.abort();
+          controller.abort();
         };
         externalSignal.addEventListener('abort', onAbort);
       }
     }
 
     try {
-      await this.rateLimiter.waitForAvailability(this.abortController.signal);
+      await this.rateLimiter.waitForAvailability(controller.signal);
 
-      if (this.abortController.signal.aborted) {
+      if (controller.signal.aborted) {
         throw new Error('Interrupted during rate limit wait');
       }
 
       this.rateLimiter.recordRequest();
-      const response = await this.provider.generateFromHistory(toolsToUse, this.abortController.signal);
+      const response = await this.provider.generateFromHistory(toolsToUse, controller.signal);
 
       if (response.content) {
         const tokens = this.tokenCounter.estimateTokens(response.content);
@@ -370,7 +400,9 @@ export class LLMClient extends EventEmitter {
 
       return response;
     } finally {
-      this.abortController = null;
+      if (this.abortController === controller) {
+        this.abortController = null;
+      }
     }
   }
 }

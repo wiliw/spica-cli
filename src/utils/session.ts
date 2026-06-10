@@ -165,14 +165,44 @@ export function generateSessionSummary(messages: ChatMessage[]): string {
 
   const parts: string[] = [];
 
-  // Extract user messages (first 3)
+  // Extract user messages (first 5, up to 120 chars each)
   const userMessages = messages
     .filter(m => m.role === 'user')
-    .slice(0, 3)
-    .map(m => (m.content || '').slice(0, 100));
+    .slice(0, 5)
+    .map(m => (m.content || '').slice(0, 120).replace(/\n/g, ' '));
 
   if (userMessages.length > 0) {
     parts.push('Tasks: ' + userMessages.join(' | '));
+  }
+
+  // Extract key assistant text (non-tool-call, first sentence from each)
+  const assistantTexts = messages
+    .filter(m => m.role === 'assistant' && !m.toolCalls && m.content)
+    .slice(0, 3)
+    .map(m => {
+      const text = (m.content || '').replace(/\n/g, ' ');
+      return text.slice(0, 150);
+    })
+    .filter(t => t.length > 10);
+
+  if (assistantTexts.length > 0) {
+    parts.push('Key outputs: ' + assistantTexts.join(' | '));
+  }
+
+  // Extract file paths modified by write/edit tools
+  const filePaths = new Set<string>();
+  for (const m of messages) {
+    if (m.toolCalls) {
+      for (const tc of m.toolCalls) {
+        const args = tc.arguments || {};
+        if (['file_write', 'file_edit', 'file_multi_edit', 'file_patch', 'file_replace', 'file_insert'].includes(tc.name)) {
+          if (args.path) filePaths.add(args.path as string);
+        }
+      }
+    }
+  }
+  if (filePaths.size > 0) {
+    parts.push('Files: ' + Array.from(filePaths).slice(0, 10).join(', '));
   }
 
   // Extract tool names used
@@ -184,7 +214,6 @@ export function generateSessionSummary(messages: ChatMessage[]): string {
       }
     }
   }
-
   if (toolNames.size > 0) {
     const toolsList = Array.from(toolNames).slice(0, 10).join(', ');
     parts.push('Tools: ' + toolsList);
