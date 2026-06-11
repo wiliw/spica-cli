@@ -405,4 +405,7 @@ export class LLMClient extends EventEmitter {
       }
     }
   }
+  setToolResultMaxChars(maxChars: number): void {
+    this.provider.setToolResultMaxChars(maxChars);
+  }
 }

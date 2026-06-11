@@ -96,6 +96,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
   private client: OpenAI;
   private providerName: string;
   private onChunk?: (chunk: string) => void;
+  private toolResultMaxChars: number = 8000; // chars, ~2000 tokens
   private contextWindow: number = DEFAULT_CONTEXT_WINDOW;
 
   constructor(config: LLMProviderConfig) {
@@ -475,16 +476,27 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
 
   // 添加tool结果消息
   addToolMessage(toolCallId: string, result: string): void {
-    const exists = this.messages.some(m => 
+    const exists = this.messages.some(m =>
       m.role === 'tool' && m.toolCallId === toolCallId
     );
-    if (!exists) {
-      this.messages.push({
-        role: 'tool',
-        content: result,
-        toolCallId: toolCallId,
-      });
+    if (exists) return;
+
+    let trimmedResult = result;
+    if (result.length > this.toolResultMaxChars) {
+      const truncated = result.slice(0, this.toolResultMaxChars);
+      const omitted = result.length - this.toolResultMaxChars;
+      trimmedResult = truncated + `\n\n[TRUNCATED: ${omitted} chars omitted from tool result. Request the full output if needed with a more specific query.]`;
     }
+
+    this.messages.push({
+      role: 'tool',
+      content: trimmedResult,
+      toolCallId: toolCallId,
+    });
+  }
+
+  setToolResultMaxChars(maxChars: number): void {
+    this.toolResultMaxChars = maxChars;
   }
 
   // 添加用户消息（不立即生成）
