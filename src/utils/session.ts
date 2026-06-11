@@ -270,13 +270,31 @@ export function archiveSession(workspacePath: string, session: SessionState): vo
     const sessionsDir = join(workspacePath, SESSIONS_DIR);
     fs.ensureDirSync(sessionsDir);
 
+    const sessionPath = join(sessionsDir, `${session.id}.json`);
+
+    // Don't overwrite an existing archive with fewer messages
+    // (prevents saveSession from wiping /archive's LLM summary after clear)
+    if (fs.existsSync(sessionPath)) {
+      const existing = fs.readJsonSync(sessionPath);
+      const existingMsgs = existing.messages?.length || 0;
+      const newMsgs = session.messages?.length || 0;
+      if (existingMsgs > newMsgs) {
+        // Keep the richer archive — only update lastActivity
+        existing.lastActivity = session.lastActivity;
+        fs.writeJsonSync(sessionPath, existing, { spaces: 2 });
+        return;
+      }
+      // Preserve existing LLM summary if new one is empty
+      if (!session.summary && existing.summary) {
+        session.summary = existing.summary;
+      }
+    }
+
     // Only generate simple summary if no LLM summary exists yet
-    if (!session.summary) {
+    if (!session.summary && session.messages?.length > 0) {
       session.summary = generateSessionSummary(session.messages);
     }
 
-    // Save with session ID as filename
-    const sessionPath = join(sessionsDir, `${session.id}.json`);
     fs.writeJsonSync(sessionPath, session, { spaces: 2 });
   } catch {
     // 忽略归档错误
