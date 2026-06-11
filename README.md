@@ -22,18 +22,19 @@ A command-line tool for coding with LLMs. Works with any OpenAI-compatible API.
 
 ## Installation
 
-```bash
-npm install -g spica-cli
-```
+> **Note:** spica-cli is not yet published on npm. Install from source for now.
 
-Or build from source:
+Build from source:
 
 ```bash
 git clone https://github.com/zison/spica-cli
 cd spica-cli
 npm install
 npm run build
+npm link
 ```
+
+This makes the `spica` command available globally. Alternatively, add `bin/` to your PATH.
 
 ## Usage
 

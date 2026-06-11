@@ -10,37 +10,53 @@ const cmdPath = join(binDir, 'spica.cmd');
 
 mkdirSync(binDir, { recursive: true });
 
-// Linux/macOS: Use bash wrapper to dynamically resolve tsconfig path
-// This avoids project-specific tsconfig interference when running in Bun projects
-const unixContent = `#!/bin/bash
-# Resolve spica-cli directory (handles npm link scenarios)
-SCRIPT_DIR="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "\$SCRIPT_DIR/../tsconfig.json" ]; then
-  # Development mode
-  TSCONFIG="\$SCRIPT_DIR/../tsconfig.json"
-  SRC="\$SCRIPT_DIR/../src/index.ts"
-elif [ -f "\$SCRIPT_DIR/../lib/node_modules/spica-cli/tsconfig.json" ]; then
-  # Global npm install mode
-  TSCONFIG="\$SCRIPT_DIR/../lib/node_modules/spica-cli/tsconfig.json"
-  SRC="\$SCRIPT_DIR/../lib/node_modules/spica-cli/src/index.ts"
-else
-  # Fallback: use npx tsx without tsconfig (may have issues in Bun projects)
-  exec npx tsx "\$SCRIPT_DIR/../src/index.ts" "\$@"
-fi
-exec npx tsx --tsconfig "\$TSCONFIG" "\$SRC" "\$@"
+// Cross-platform Node.js script (replaces bash - works on Windows, macOS, Linux)
+const nodeContent = `#!/usr/bin/env node
+import { existsSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const projectDir = resolve(__dirname, '..');
+
+let tsconfig = resolve(projectDir, 'tsconfig.json');
+let src = resolve(projectDir, 'src', 'index.ts');
+
+// Check if running from global npm install/link
+const globalPath = resolve(projectDir, 'node_modules', 'spica-cli', 'tsconfig.json');
+if (existsSync(globalPath)) {
+  tsconfig = globalPath;
+  src = resolve(projectDir, 'node_modules', 'spica-cli', 'src', 'index.ts');
+}
+
+const tsxPath = resolve(projectDir, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+const { spawn } = await import('child_process');
+const proc = spawn(process.execPath, [tsxPath, '--tsconfig', tsconfig, src, ...process.argv.slice(2)], { stdio: 'inherit' });
+proc.on('exit', (code) => process.exit(code ?? 1));
 `;
 
-writeFileSync(binPath, unixContent, 'utf-8');
+writeFileSync(binPath, nodeContent, 'utf-8');
 
-// Windows .cmd wrapper - use relative path for tsconfig
+// Windows .cmd wrapper for direct invocation
 const winContent = `@echo off
-set TSCONFIG=%~dp0..\\tsconfig.json
-set SRC=%~dp0..\\src\\index.ts
-if exist "%~dp0..\\lib\\node_modules\\spica-cli\\tsconfig.json" (
-  set TSCONFIG=%~dp0..\\lib\\node_modules\\spica-cli\\tsconfig.json
-  set SRC=%~dp0..\\lib\\node_modules\\spica-cli\\src\\index.ts
+setlocal
+set "SCRIPT_DIR=%~dp0"
+if exist "%SCRIPT_DIR%..\\tsconfig.json" (
+  rem Development mode
+  set "TSCONFIG=%SCRIPT_DIR%..\\tsconfig.json"
+  set "SRC=%SCRIPT_DIR%..\\src\\index.ts"
+  set "TSX=%SCRIPT_DIR%..\\node_modules\\tsx\\dist\\cli.mjs"
+) else if exist "%SCRIPT_DIR%node_modules\\spica-cli\\tsconfig.json" (
+  rem Global npm install/link mode
+  set "TSCONFIG=%SCRIPT_DIR%node_modules\\spica-cli\\tsconfig.json"
+  set "SRC=%SCRIPT_DIR%node_modules\\spica-cli\\src\\index.ts"
+  set "TSX=%SCRIPT_DIR%node_modules\\spica-cli\\node_modules\\tsx\\dist\\cli.mjs"
 )
-node "%~dp0..\\node_modules\\tsx\\dist\\cli.mjs" --tsconfig "%TSCONFIG%" "%SRC%" %*
+if not defined TSX (
+  echo Error: Could not locate spica-cli installation.
+  exit /b 1
+)
+node "%TSX%" --tsconfig "%TSCONFIG%" "%SRC%" %*
 `;
 
 writeFileSync(cmdPath, winContent, 'utf-8');

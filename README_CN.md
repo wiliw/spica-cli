@@ -22,18 +22,19 @@
 
 ## 安装
 
-```bash
-npm install -g spica-cli
-```
+> **注意：** spica-cli 尚未发布到 npm，目前需要从源码安装。
 
-或从源码构建：
+从源码构建：
 
 ```bash
 git clone https://github.com/zison/spica-cli
 cd spica-cli
 npm install
 npm run build
+npm link
 ```
+
+这会将 `spica` 命令全局注册到 PATH 中。也可以手动将 `bin/` 目录加入 PATH。
 
 ## 使用
 

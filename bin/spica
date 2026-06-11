@@ -1,16 +1,22 @@
-#!/bin/bash
-# Resolve spica-cli directory (handles npm link scenarios)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$SCRIPT_DIR/../tsconfig.json" ]; then
-  # Development mode
-  TSCONFIG="$SCRIPT_DIR/../tsconfig.json"
-  SRC="$SCRIPT_DIR/../src/index.ts"
-elif [ -f "$SCRIPT_DIR/../lib/node_modules/spica-cli/tsconfig.json" ]; then
-  # Global npm install mode
-  TSCONFIG="$SCRIPT_DIR/../lib/node_modules/spica-cli/tsconfig.json"
-  SRC="$SCRIPT_DIR/../lib/node_modules/spica-cli/src/index.ts"
-else
-  # Fallback: use npx tsx without tsconfig (may have issues in Bun projects)
-  exec npx tsx "$SCRIPT_DIR/../src/index.ts" "$@"
-fi
-exec npx tsx --tsconfig "$TSCONFIG" "$SRC" "$@"
+#!/usr/bin/env node
+import { existsSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const projectDir = resolve(__dirname, '..');
+
+let tsconfig = resolve(projectDir, 'tsconfig.json');
+let src = resolve(projectDir, 'src', 'index.ts');
+
+// Check if running from global npm install/link
+const globalPath = resolve(projectDir, 'node_modules', 'spica-cli', 'tsconfig.json');
+if (existsSync(globalPath)) {
+  tsconfig = globalPath;
+  src = resolve(projectDir, 'node_modules', 'spica-cli', 'src', 'index.ts');
+}
+
+const tsxPath = resolve(projectDir, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+const { spawn } = await import('child_process');
+const proc = spawn(process.execPath, [tsxPath, '--tsconfig', tsconfig, src, ...process.argv.slice(2)], { stdio: 'inherit' });
+proc.on('exit', (code) => process.exit(code ?? 1));
