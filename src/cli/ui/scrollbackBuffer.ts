@@ -8,6 +8,10 @@
 export class ScrollbackBuffer {
   private buffer: string[] = [];
   private maxLines: number;
+  // 上一次 append 的文本是否以 \n 结尾
+  // true  → 下一个 chunk 开启新行（独立 appendScroll 调用）
+  // false → 下一个 chunk 追加到当前行（流式输出续写）
+  private lastEndedWithNewline: boolean = true;
 
   constructor(maxLines: number = 500) {
     this.maxLines = maxLines;
@@ -15,17 +19,28 @@ export class ScrollbackBuffer {
 
   /**
    * 添加文本到缓冲区
-   * 按行分割，每行单独保存
+   *
+   * 关键设计：
+   * - 独立调用（appendScroll）通常以 \n 结尾 → lastEndedWithNewline=true
+   * - 流式 chunk（appendStreamChunk）通常不以 \n 结尾 → 追加到上一行
+   * - resize 重放时每行一个 \n，所以 buffer 必须按逻辑行存储
    */
   append(text: string): void {
     const lines = text.split('\n');
-    for (const line of lines) {
-      this.buffer.push(line);
-      // 超过限制时删除最旧的行
-      if (this.buffer.length > this.maxLines) {
+
+    for (let i = 0; i < lines.length; i++) {
+      if (i === 0 && !this.lastEndedWithNewline && this.buffer.length > 0) {
+        // 续写到上一行末尾（流式 chunk 续写）
+        this.buffer[this.buffer.length - 1] += lines[i];
+      } else {
+        this.buffer.push(lines[i]);
+      }
+      while (this.buffer.length > this.maxLines) {
         this.buffer.shift();
       }
     }
+
+    this.lastEndedWithNewline = text.endsWith('\n');
   }
 
   /**
