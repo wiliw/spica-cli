@@ -165,31 +165,41 @@ export function generateSessionSummary(messages: ChatMessage[]): string {
 
   const parts: string[] = [];
 
-  // Extract user messages (first 5, up to 120 chars each)
+  // Extract actual user requests — skip skill prompts and system-like messages
   const userMessages = messages
     .filter(m => m.role === 'user')
-    .slice(0, 5)
-    .map(m => (m.content || '').slice(0, 120).replace(/\n/g, ' '));
+    .map(m => (m.content || '').replace(/\n/g, ' ').trim())
+    .filter(m => {
+      // Skip skill prompts (long markdown starting with # or containing "## ")
+      if (m.startsWith('#') || m.includes('## Overview') || m.includes('## Core')) return false;
+      // Skip system-like injected messages
+      if (m.startsWith('[QUEUED') || m.startsWith('[SYSTEM]')) return false;
+      return m.length > 0;
+    })
+    .slice(0, 3)
+    .map(m => m.slice(0, 100));
 
   if (userMessages.length > 0) {
-    parts.push('Tasks: ' + userMessages.join(' | '));
+    parts.push(userMessages.join(' | '));
   }
 
-  // Extract key assistant text (non-tool-call, first sentence from each)
+  // Extract key assistant summaries (non-tool-call, first sentence)
   const assistantTexts = messages
     .filter(m => m.role === 'assistant' && !m.toolCalls && m.content)
-    .slice(0, 3)
     .map(m => {
       const text = (m.content || '').replace(/\n/g, ' ');
+      // Skip compression summaries
+      if (text.startsWith('[COMPACTED') || text.startsWith('[History Summary]')) return '';
       return text.slice(0, 150);
     })
-    .filter(t => t.length > 10);
+    .filter(t => t.length > 10)
+    .slice(0, 2);
 
   if (assistantTexts.length > 0) {
-    parts.push('Key outputs: ' + assistantTexts.join(' | '));
+    parts.push(assistantTexts.join(' | '));
   }
 
-  // Extract file paths modified by write/edit tools
+  // Extract file paths modified
   const filePaths = new Set<string>();
   for (const m of messages) {
     if (m.toolCalls) {
@@ -202,24 +212,10 @@ export function generateSessionSummary(messages: ChatMessage[]): string {
     }
   }
   if (filePaths.size > 0) {
-    parts.push('Files: ' + Array.from(filePaths).slice(0, 10).join(', '));
+    parts.push('Files: ' + Array.from(filePaths).slice(0, 8).join(', '));
   }
 
-  // Extract tool names used
-  const toolNames = new Set<string>();
-  for (const m of messages) {
-    if (m.toolCalls) {
-      for (const tc of m.toolCalls) {
-        toolNames.add(tc.name);
-      }
-    }
-  }
-  if (toolNames.size > 0) {
-    const toolsList = Array.from(toolNames).slice(0, 10).join(', ');
-    parts.push('Tools: ' + toolsList);
-  }
-
-  return parts.join('. ').slice(0, 500);  // Max 500 chars
+  return parts.join('. ').slice(0, 400);
 }
 
 // Archive session to sessions directory
@@ -275,8 +271,10 @@ export function archiveSession(workspacePath: string, session: SessionState): vo
     const sessionsDir = join(workspacePath, SESSIONS_DIR);
     fs.ensureDirSync(sessionsDir);
 
-    // Generate simple summary
-    session.summary = generateSessionSummary(session.messages);
+    // Only generate simple summary if no LLM summary exists yet
+    if (!session.summary) {
+      session.summary = generateSessionSummary(session.messages);
+    }
 
     // Save with session ID as filename
     const sessionPath = join(sessionsDir, `${session.id}.json`);
@@ -352,17 +350,33 @@ export function listSessions(workspacePath: string): SessionMeta[] {
   }
 }
 
-// Load specific session by ID
+// Load specific session by ID (supports partial ID matching)
 export function loadSessionById(workspacePath: string, sessionId: string): SessionState | null {
-  const sessionPath = join(workspacePath, SESSIONS_DIR, `${sessionId}.json`);
+  const sessionsDir = join(workspacePath, SESSIONS_DIR);
 
   try {
-    if (fs.existsSync(sessionPath)) {
-      const session = fs.readJsonSync(sessionPath);
+    // Exact match first
+    const exactPath = join(sessionsDir, `${sessionId}.json`);
+    if (fs.existsSync(exactPath)) {
+      const session = fs.readJsonSync(exactPath);
       if (session.messages) {
         session.messages = cleanMessages(session.messages);
       }
       return session;
+    }
+
+    // Partial match: find file ending with the given ID
+    if (fs.existsSync(sessionsDir)) {
+      const files = fs.readdirSync(sessionsDir)
+        .filter(f => f.endsWith('.json') && f.startsWith('sess_'));
+      const match = files.find(f => f.replace('.json', '').endsWith(sessionId));
+      if (match) {
+        const session = fs.readJsonSync(join(sessionsDir, match));
+        if (session.messages) {
+          session.messages = cleanMessages(session.messages);
+        }
+        return session;
+      }
     }
   } catch {}
 
