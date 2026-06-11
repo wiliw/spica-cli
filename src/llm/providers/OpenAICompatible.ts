@@ -24,23 +24,66 @@ const ERROR_MESSAGES: Record<string, { type: string; hint: string }> = {
   '503': { type: 'Service unavailable', hint: 'API service maintenance or overload, try again later' },
 };
 
-// 模型上下文窗口大小（默认值，可从API获取）
+// Default context window when model is unknown
 const DEFAULT_CONTEXT_WINDOW = 128000;
 
-// 常见模型的上下文窗口
+// Known model context windows — exact match first, then prefix match.
+// Sorted by prefix length descending for best-match-first resolution.
 const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
-  'gpt-4': 8192,
-  'gpt-4-turbo': 128000,
+  // OpenAI
+  'gpt-4.1': 1000000,
+  'gpt-4.1-mini': 1000000,
+  'gpt-4.1-nano': 1000000,
   'gpt-4o': 128000,
   'gpt-4o-mini': 128000,
-  'gpt-3.5-turbo': 4096,
+  'gpt-4-turbo': 128000,
+  'gpt-4': 8192,
+  'gpt-3.5-turbo': 16385,
+  'o4-mini': 200000,
+  'o3': 200000,
+  'o3-mini': 200000,
+  'o1': 200000,
+  'o1-mini': 128000,
+  // Anthropic
+  'claude-4': 200000,
+  'claude-4-opus': 200000,
+  'claude-4-sonnet': 200000,
+  'claude-3.5-sonnet': 200000,
+  'claude-3.5-haiku': 200000,
   'claude-3-opus': 200000,
   'claude-3-sonnet': 200000,
   'claude-3-haiku': 200000,
-  'claude-3-5-sonnet': 200000,
+  // DeepSeek
+  'deepseek-chat': 128000,
+  'deepseek-v3': 128000,
+  'deepseek-r1': 128000,
+  'deepseek-v4': 128000,
+  // Gemini
+  'gemini-2.5': 1000000,
+  'gemini-2.0': 1000000,
+  'gemini-1.5': 1000000,
+  // GLM / Zhipu
+  'glm-5': 190000,
   'glm-4': 128000,
-  'glm-5': 190000,  // 智谱 GLM-5 API限制202745，保守设置留余量
+  // Groq
+  'llama-4': 128000,
+  'llama-3': 128000,
+  'mixtral': 32000,
+  // Qwen
+  'qwen3': 128000,
+  'qwen-max': 128000,
+  'qwen-plus': 128000,
 };
+
+// Resolve context window: exact match → prefix match → default
+function resolveContextWindow(model: string): number {
+  if (MODEL_CONTEXT_WINDOWS[model]) return MODEL_CONTEXT_WINDOWS[model];
+  // Prefix match: e.g. "gpt-4o-2024-08-06" matches "gpt-4o"
+  for (const [prefix, window] of Object.entries(MODEL_CONTEXT_WINDOWS)) {
+    if (model.startsWith(prefix)) return window;
+  }
+  return DEFAULT_CONTEXT_WINDOW;
+}
 
 // 解析错误并返回友好提示
 function parseError(error: unknown): { type: string; message: string; hint: string } {
@@ -103,8 +146,8 @@ export class OpenAICompatibleProvider extends BaseProvider {
     super(config);
     this.providerName = config.name || 'OpenAI-compatible';
 
-    // 从预设表获取上下文窗口，或使用默认值
-    this.contextWindow = MODEL_CONTEXT_WINDOWS[config.model] || DEFAULT_CONTEXT_WINDOW;
+    // Resolve context window: exact match → prefix match → default
+    this.contextWindow = resolveContextWindow(config.model);
 
     this.client = new OpenAI({
       apiKey: config.apiKey,
@@ -369,95 +412,6 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
     }
 
     return { finished: true };
-  }
-
-  async continueWithToolResult(toolCallId: string, result: string, tools?: ToolDefinition[], signal?: AbortSignal): Promise<LLMResponse> {
-    this.messages.push({
-      role: 'tool',
-      content: result,
-      toolCallId: toolCallId,
-    });
-
-    try {
-      const stream = await this.client.chat.completions.create({
-        model: this.config.model,
-        messages: this.convertMessages(),
-        tools: tools?.map(t => ({
-          type: 'function',
-          function: {
-            name: t.name,
-            description: t.description,
-            parameters: t.parameters,
-          },
-        })),
-        stream: true,
-        temperature: 0.3,  // 低温度加速响应
-      }, { signal });
-
-      let fullContent = '';
-      const toolCalls: any[] = [];
-      let hasToolCalls = false;
-
-      for await (const chunk of stream) {
-        if (signal?.aborted) break;
-        
-        const delta = chunk.choices[0]?.delta;
-        
-        if (delta?.content) {
-          fullContent += delta.content;
-          this.emit('chunk', delta.content);
-        }
-        
-        if ((delta as any)?.reasoning_content) {
-          this.emit('reasoning', (delta as any).reasoning_content);
-        }
-        
-        if (delta?.tool_calls) {
-          hasToolCalls = true;
-          delta.tool_calls.forEach((tc: any) => {
-            if (tc.index !== undefined) {
-              if (!toolCalls[tc.index]) {
-                toolCalls[tc.index] = { id: tc.id, name: '', arguments: '' };
-              }
-              if (tc.function?.name) {
-                toolCalls[tc.index].name += tc.function.name;
-              }
-              if (tc.function?.arguments) {
-                toolCalls[tc.index].arguments += tc.function.arguments;
-              }
-            }
-          });
-        }
-      }
-
-      if (hasToolCalls && toolCalls.length > 0) {
-        const parsedToolCalls: ToolCall[] = toolCalls.map(tc => ({
-          id: tc.id,
-          name: tc.name || '',
-          arguments: tc.arguments ? ((): Record<string, any> => { try { return JSON.parse(tc.arguments); } catch { return {}; } })() : {},
-        }));
-
-        this.messages.push({
-          role: 'assistant',
-          content: fullContent || '',
-          toolCalls: parsedToolCalls,
-        });
-        
-        return { toolCalls: parsedToolCalls, finished: false };
-      }
-
-      if (fullContent) {
-        this.messages.push({ role: 'assistant', content: fullContent });
-        return { content: fullContent, finished: true };
-      }
-
-      return { finished: true };
-    } catch (error: any) {
-      if (signal?.aborted) {
-        return { finished: true };
-      }
-      throw new Error(`${this.providerName} API error: ${error.message}`);
-    }
   }
 
   private convertMessages(): ChatCompletionMessageParam[] {

@@ -1,5 +1,4 @@
 import { LLMClient } from './llm/LLMClient';
-import { TokenCounter } from './llm/TokenCounter';
 import { executeTool, getAllToolDefinitions, setWorkspace, getToolBatchHint } from './tools/index';
 import { initMCP } from './mcp/client';
 import { initSkills, listSkills } from './skills/index';
@@ -166,6 +165,11 @@ export class SpicaAgent extends EventEmitter {
     { pattern: /:\(\)\s*\{\s*:\|:&\s*\};:/, label: 'Fork bomb' },
     { pattern: /sudo\s+su\b/, label: 'Switch to root' },
   ];
+
+  // Summary key args — tool arguments worth preserving in compressed summaries
+  private static readonly SUMMARY_KEY_ARGS = new Set([
+    'path', 'command', 'action', 'pattern', 'query', 'url', 'question', 'prompt',
+  ]);
 
   // 检查是否为极危险操作
   isDangerousOperation(command: string): boolean {
@@ -778,7 +782,7 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
 
     // Pre-request: 基于token数判断是否需要压缩
     const existingMessages = this.llm.getMessages();
-    const tokenCounter = new TokenCounter();
+    const tokenCounter = this.llm.getTokenCounter();
 
     // 从provider获取上下文窗口大小
     const provider = this.llm.getProvider();
@@ -1359,7 +1363,7 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
         return;
       }
 
-      const tokenCounter = new TokenCounter();
+      const tokenCounter = this.llm.getTokenCounter();
       const provider = this.llm.getProvider();
       tokenCounter.setContextWindow(provider.getContextWindow());
       const contextWindow = provider.getContextWindow();
@@ -1593,8 +1597,6 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
    * Used by non-blocking compression to create the prompt for background summarization.
    */
   private buildSummaryPrompt(messages: ChatMessage[]): string {
-    const KEY_ARGS = new Set(['path', 'command', 'action', 'pattern', 'query', 'url', 'question', 'prompt']);
-
     const messagesText = messages.map(m => {
       if (m.role === 'system') {
         return `system: ${m.content || ''}`;
@@ -1614,7 +1616,7 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
         const toolInfo = m.toolCalls.map(tc => {
           const args = tc.arguments || {};
           const keyArgsStr = Object.entries(args)
-            .filter(([k]) => KEY_ARGS.has(k))
+            .filter(([k]) => SpicaAgent.SUMMARY_KEY_ARGS.has(k))
             .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
             .join(', ');
           return keyArgsStr ? `${tc.name}(${keyArgsStr})` : tc.name;
@@ -1646,7 +1648,6 @@ ${response.content || 'Early conversation compressed'}`,
       };
     } catch {
       // Fallback: preserve user messages in full, tool calls with names + key args
-      const KEY_ARGS = new Set(['path', 'command', 'action', 'pattern', 'query', 'url', 'question', 'prompt']);
       const items: string[] = [];
       for (const m of messages) {
         if (m.role === 'user') {
@@ -1655,7 +1656,7 @@ ${response.content || 'Early conversation compressed'}`,
           const toolNames = m.toolCalls.map(tc => {
             const args = tc.arguments || {};
             const keyArgsStr = Object.entries(args)
-              .filter(([k]) => KEY_ARGS.has(k))
+              .filter(([k]) => SpicaAgent.SUMMARY_KEY_ARGS.has(k))
               .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
               .join(', ');
             return keyArgsStr ? `${tc.name}(${keyArgsStr})` : tc.name;

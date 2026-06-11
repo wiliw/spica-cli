@@ -1,27 +1,27 @@
-// spica System Prompt - English only
+// spica System Prompt
 import fs from 'fs-extra';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import type { ProjectConfig } from '../utils/projectConfig';
 
-// ES module 中获取 __dirname
+// Get __dirname in ES module
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// 内置 skills 目录 - 支持开发模式 (src/) 和编译模式 (dist/)
+// Builtin skills dir — supports dev mode (src/) and compiled mode (dist/)
 function getBuiltinSkillsDir(): string {
-  // 开发模式: src/prompts/system.ts -> src/builtin-skills
+  // Dev mode: src/prompts/system.ts -> src/builtin-skills
   const devPath = path.join(__dirname, '..', 'builtin-skills');
   if (fs.existsSync(devPath)) {
     return devPath;
   }
-  // 编译模式: dist/prompts/system.js -> ../../src/builtin-skills
+  // Compiled mode: dist/prompts/system.js -> ../../src/builtin-skills
   const distPath = path.join(__dirname, '..', '..', 'src', 'builtin-skills');
   if (fs.existsSync(distPath)) {
     return distPath;
   }
-  // 回退到当前目录
+  // Fallback to dev path
   return devPath;
 }
 
@@ -58,13 +58,13 @@ export const SYSTEM_PROMPT = `You are spica, a coding agent CLI. You edit files,
 - Continue working until the task is done or the user explicitly stops you.
 `;
 
-// 加载 using-superpowers bootstrap skill
+// Load using-superpowers bootstrap skill
 function loadBootstrapSkill(): string {
   try {
     const bootstrapPath = path.join(BUILTIN_SKILLS_DIR, 'superpowers', 'using-superpowers', 'SKILL.md');
     if (fs.existsSync(bootstrapPath)) {
       const content = fs.readFileSync(bootstrapPath, 'utf-8');
-      // 移除 YAML frontmatter
+      // Remove YAML frontmatter
       let body = content;
       if (content.startsWith('---')) {
         const endIdx = content.indexOf('---', 3);

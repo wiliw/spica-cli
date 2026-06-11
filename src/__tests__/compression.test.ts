@@ -22,6 +22,11 @@ describe('Compression Integration', () => {
       getProvider: vi.fn(() => ({
         getContextWindow: () => SMALL_CONTEXT_WINDOW
       })),
+      getTokenCounter: vi.fn(() => {
+        const counter = new TokenCounter();
+        counter.setContextWindow(SMALL_CONTEXT_WINDOW);
+        return counter;
+      }),
       generateDirect: vi.fn().mockResolvedValue({ content: 'Mock summary of conversation' })
     };
 

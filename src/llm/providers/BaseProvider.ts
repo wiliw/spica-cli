@@ -49,7 +49,6 @@ export abstract class BaseProvider extends EventEmitter {
   }
 
   abstract generate(prompt: string, tools?: ToolDefinition[]): Promise<LLMResponse>;
-  abstract continueWithToolResult(toolCallId: string, result: string, tools?: ToolDefinition[]): Promise<LLMResponse>;
   abstract checkConnection(signal?: AbortSignal): Promise<{ success: boolean; type?: string; error?: string; hint?: string }>;
 
   setSystemPrompt(prompt: string) {
