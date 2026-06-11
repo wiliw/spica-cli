@@ -368,7 +368,7 @@ export function formatTestQualityResult(result: TestQualityResult): string {
   const lines: string[] = [];
   
   lines.push(`Test Quality Score: ${result.score}/10 (target: >= 7.0)`);
-  lines.push(`Status: ${result.passed ? '✓ PASS' : '✗ FAIL'}`);
+  lines.push(`Status: ${result.passed ? '[PASS]' : '[FAIL]'}`);
   lines.push('');
   lines.push('Stats:');
   lines.push(`  Total tests: ${result.stats.totalTests}`);
@@ -382,7 +382,7 @@ export function formatTestQualityResult(result: TestQualityResult): string {
     lines.push('');
     lines.push('Issues (Anti-Patterns):');
     for (const issue of result.issues) {
-      const severityIcon = issue.severity === 'high' ? '🔴' : issue.severity === 'medium' ? '🟡' : '🟢';
+      const severityIcon = issue.severity === 'high' ? '[HIGH]' : issue.severity === 'medium' ? '[MED]' : '[LOW]';
       const typeLabel = {
         'over-mocking': 'TST-004',
         'happy-path-only': 'TST-005',

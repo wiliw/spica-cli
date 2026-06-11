@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
 
 describe('compact loop safety', () => {
-  it('should have MAX_COMPACT_ITERATIONS in source', async () => {
+  it('should have _compacting guard in source', async () => {
     const fs = await import('fs-extra');
     const source = await fs.readFile('src/agent.ts', 'utf-8');
-    expect(source).toContain('MAX_COMPACT_ITERATIONS');
+    // Non-blocking compression uses _compacting flag to prevent re-entry
+    expect(source).toContain('_compacting');
   });
 
   it('should have context_warning in source', async () => {
@@ -13,11 +14,12 @@ describe('compact loop safety', () => {
     expect(source).toContain('context_warning');
   });
 
-  it('should have break statement after max iterations', async () => {
+  it('should have startNonBlockingCompression in source', async () => {
     const fs = await import('fs-extra');
     const source = await fs.readFile('src/agent.ts', 'utf-8');
-    // The guard should contain a break inside the loop when iterations exceed MAX
-    expect(source).toContain('compactIterations');
-    expect(source).toContain('MAX_COMPACT_ITERATIONS');
+    // Non-blocking compression is the new mechanism
+    expect(source).toContain('startNonBlockingCompression');
+    // Guard prevents re-entry during active compression
+    expect(source).toContain('if (!this.llm || this._compacting)');
   });
 });

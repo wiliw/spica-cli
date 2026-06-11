@@ -116,7 +116,7 @@ describe('formatCodeHealthResult', () => {
     const output = formatCodeHealthResult(result);
     
     expect(output).toContain('8.5/10');
-    expect(output).toContain('✗ FAIL');
+    expect(output).toContain('[FAIL]');
     expect(output).toContain('Total lines: 100');
     expect(output).toContain('complexity');
   });

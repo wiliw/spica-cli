@@ -2,6 +2,7 @@
 // These tests require API provider configuration - skip if CI environment
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SpicaAgent } from '../agent';
+import { TokenCounter } from '../llm/TokenCounter';
 import type { ChatMessage } from '../llm/providers/BaseProvider';
 
 const shouldSkip = process.env.CI === 'true' || process.env.SKIP_API_TESTS === 'true';
@@ -34,6 +35,11 @@ describe.skipIf(shouldSkip)('LLM Error Handling', () => {
       getProvider: vi.fn(() => ({
         getContextWindow: () => 10000
       })),
+      getTokenCounter: vi.fn(() => {
+        const counter = new TokenCounter();
+        counter.setContextWindow(10000);
+        return counter;
+      }),
       generate: vi.fn().mockResolvedValue({ content: 'Mock response', finished: true }),
       continueWithAllToolResults: vi.fn().mockResolvedValue({ content: 'Mock continuation', finished: true })
     };

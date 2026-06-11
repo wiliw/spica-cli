@@ -343,7 +343,7 @@ export function formatCodeHealthResult(result: CodeHealthResult): string {
   const lines: string[] = [];
   
   lines.push(`Code Health Score: ${result.score}/10 (target: >= 9.5)`);
-  lines.push(`Status: ${result.passed ? '✓ PASS' : '✗ FAIL'}`);
+  lines.push(`Status: ${result.passed ? '[PASS]' : '[FAIL]'}`);
   lines.push('');
   lines.push('Stats:');
   lines.push(`  Total lines: ${result.stats.totalLines}`);
@@ -357,7 +357,7 @@ export function formatCodeHealthResult(result: CodeHealthResult): string {
     lines.push('');
     lines.push('Issues:');
     for (const issue of result.issues) {
-      const severityIcon = issue.severity === 'high' ? '🔴' : issue.severity === 'medium' ? '🟡' : '🟢';
+      const severityIcon = issue.severity === 'high' ? '[HIGH]' : issue.severity === 'medium' ? '[MED]' : '[LOW]';
       lines.push(`  ${severityIcon} [${issue.type}] ${issue.location}`);
       lines.push(`     ${issue.message}`);
       lines.push(`     Suggestion: ${issue.suggestion}`);

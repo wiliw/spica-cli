@@ -453,43 +453,52 @@ program
               return;
             }
 
-            // 历史阅读界面（只读，不可继续对话）
+            // History browser — archived sessions (read-only)
             if (cmd === "sessions" || cmd === "history" || cmd === "h") {
-              const { listSessions, loadSessionById } = await import("./utils/session");
+              const { listSessions } = await import("./utils/session");
               const sessions = listSessions(agent.getWorkspacePath());
 
-              screen.appendScroll(COLORS.primary.bold("\n📚 History Browser (Read Only)\n"));
-              screen.appendScroll(COLORS.muted("  Archived chats for review only (cannot continue)\n\n"));
+              screen.appendScroll(COLORS.primary.bold("\nSessions\n"));
+              screen.appendScroll(COLORS.muted("─".repeat(60) + "\n"));
+
+              // Current session
+              const currentMsgs = agent.getMessages();
+              const currentId = loadSession(agent.getWorkspacePath())?.id;
+              screen.appendScroll(COLORS.primary(`* Current: ${currentMsgs.length} messages`) +
+                (currentId ? COLORS.muted(`  (id: ${currentId.slice(-12)})`) : '') + '\n');
+              screen.appendScroll(COLORS.muted("─".repeat(60) + "\n"));
 
               if (sessions.length === 0) {
-                screen.appendScroll(COLORS.muted("  No archived sessions yet.\n"));
-                screen.appendScroll(COLORS.muted("  Use /archive to save current chat and start new.\n\n"));
+                screen.appendScroll(COLORS.muted("  No archived sessions.\n"));
+                screen.appendScroll(COLORS.muted("  /archive to save current and start new.\n\n"));
                 return;
               }
 
-              // 显示历史列表
-              screen.appendScroll(COLORS.primary.bold("  Recent chats:\n"));
-              sessions.slice(0, 15).forEach((s, i) => {
-                const lastDate = new Date(s.lastActivity).toLocaleDateString();
+              sessions.slice(0, 20).forEach((s, i) => {
+                const isCurrent = s.id === currentId;
+                const prefix = isCurrent ? '*' : ' ';
+                const date = new Date(s.lastActivity).toLocaleDateString();
+                const name = s.name || s.id;
+                const summary = s.summary || '';
+
                 screen.appendScroll(
-                  COLORS.primary(`    ${i + 1}. ${s.id.slice(0, 15)}... (${s.messageCount} msgs, ${lastDate})\n`),
+                  COLORS.primary(`${prefix} ${(i + 1).toString().padStart(2)}. `) +
+                  COLORS.primary.bold(name.slice(0, 50)) + '\n'
                 );
-                if (s.summary) {
-                  screen.appendScroll(
-                    COLORS.muted(`       ${s.summary}\n`),
-                  );
+                screen.appendScroll(
+                  COLORS.muted(`     ${s.messageCount} msgs  ${date}  ${s.id}`) + '\n'
+                );
+                if (summary) {
+                  screen.appendScroll(COLORS.muted(`     ${summary}\n`));
                 }
               });
 
-              if (sessions.length > 15) {
-                screen.appendScroll(COLORS.muted(`    ... and ${sessions.length - 15} more\n`));
+              if (sessions.length > 20) {
+                screen.appendScroll(COLORS.muted(`  ... ${sessions.length - 20} more\n`));
               }
 
-              screen.appendScroll(COLORS.muted("\n  Commands:\n"));
-              screen.appendScroll(COLORS.muted("    /view <id>     Read session content\n"));
-              screen.appendScroll(COLORS.muted("    /rename <id> <name>  Rename session\n"));
-              screen.appendScroll(COLORS.muted("    /delete <id>   Delete session\n"));
-              screen.appendScroll(COLORS.muted("\n  Note: History is read-only. To continue work, stay in current session.\n\n"));
+              screen.appendScroll(COLORS.muted("\n" + "─".repeat(60) + "\n"));
+              screen.appendScroll(COLORS.muted("/view <id>  /rename <id> <name>  /delete <id>\n\n"));
 
               return;
             }
@@ -505,50 +514,34 @@ program
                 return;
               }
 
-              screen.appendScroll(COLORS.primary.bold(`\n📖 Reading: ${session.name || sessionId}\n`));
+              screen.appendScroll(COLORS.primary.bold(`\nReading: ${session.name || sessionId}\n`));
               screen.appendScroll(COLORS.muted(`  Created: ${new Date(session.createdAt).toLocaleString()}\n`));
               screen.appendScroll(COLORS.muted(`  Last: ${new Date(session.lastActivity).toLocaleString()}\n`));
               screen.appendScroll(COLORS.muted(`  Messages: ${session.messages?.length || 0}\n`));
               if (session.summary) {
                 screen.appendScroll(COLORS.muted(`  Summary: ${session.summary}\n`));
               }
-              screen.appendScroll(COLORS.muted("\n  --- Content (press Enter to scroll, ESC/q to exit) ---\n\n"));
-
-              // 显示消息内容（只读）
+              // Show all messages (each truncated to 500 chars)
               const messages = session.messages || [];
-              let displayed = 0;
-              const BATCH_SIZE = 10;
+              const MAX_TO_SHOW = 50;  // protect against huge sessions
 
-              const showBatch = (start: number) => {
-                const end = Math.min(start + BATCH_SIZE, messages.length);
-                for (let i = start; i < end; i++) {
-                  const m = messages[i];
-                  const role = m.role === 'user' ? '👤 User' : m.role === 'assistant' ? '🤖 AI' : m.role === 'tool' ? '🔧 Tool' : '📋 System';
-                  screen.appendScroll(COLORS.primary(`\n${role}:\n`));
+              messages.slice(0, MAX_TO_SHOW).forEach((m, i) => {
+                const role = m.role === 'user' ? '[user]' : m.role === 'assistant' ? '[ai]' : m.role === 'tool' ? '[tool]' : '[sys]';
+                const content = (m.content || '').slice(0, 500);
+                const preview = content.split('\n').slice(0, 3).join(' ');
 
-                  const content = (m.content || '').slice(0, 500);
-                  content.split('\n').forEach(line => {
-                    screen.appendScroll(COLORS.muted(`  ${line}\n`));
-                  });
+                screen.appendScroll(COLORS.primary(`${role} `));
+                screen.appendScroll(COLORS.muted(`${preview}\n`));
 
-                  if (m.toolCalls && m.toolCalls.length > 0) {
-                    screen.appendScroll(COLORS.muted(`  Tools: ${m.toolCalls.map(tc => tc.name).join(', ')}\n`));
-                  }
+                if (m.toolCalls && m.toolCalls.length > 0) {
+                  screen.appendScroll(COLORS.muted(`  tools: ${m.toolCalls.map(tc => tc.name).join(', ')}\n`));
                 }
-                displayed = end;
-                if (end < messages.length) {
-                  screen.appendScroll(COLORS.muted(`\n  --- [${end}/${messages.length}] Press Enter for more, ESC/q to exit ---\n`));
-                } else {
-                  screen.appendScroll(COLORS.muted(`\n  --- End of session (${messages.length} messages) ---\n`));
-                  screen.appendScroll(COLORS.muted("  This is read-only. Press ESC/q to return to current session.\n\n"));
-                }
-              };
+              });
 
-              showBatch(0);
-
-              // 这里需要暂停当前输入处理，等待用户按键...
-              // 由于当前架构的限制，我们先简单显示全部内容
-              // 完整的交互式阅读界面需要更复杂的重构
+              if (messages.length > MAX_TO_SHOW) {
+                screen.appendScroll(COLORS.muted(`\n  ... and ${messages.length - MAX_TO_SHOW} more messages\n`));
+              }
+              screen.appendScroll(COLORS.muted(`\n  -- End of session (${messages.length} messages) --\n\n`));
 
               return;
             }
@@ -660,7 +653,7 @@ program
                   if (summary) {
                     if (fallbackReason) {
                       screen.appendScroll(COLORS.muted(`  Summary: ${summary}\n`));
-                      screen.appendScroll(COLORS.warning(`  ⚠ LLM summarization failed: ${fallbackReason}\n`));
+                      screen.appendScroll(COLORS.warning(`  [!] LLM summarization failed: ${fallbackReason}\n`));
                       screen.appendScroll(COLORS.muted(`  Using local fallback instead.\n`));
                     } else {
                       screen.appendScroll(COLORS.muted(`  Summary: ${summary}\n`));
@@ -795,7 +788,7 @@ program
                   screen.appendScroll(COLORS.muted("  (none)\n"));
                 } else {
                   packages.forEach((p) => {
-                    screen.appendScroll(`  ${COLORS.success("●")} ${p.name} (${p.skills.length} skills)\n`);
+                    screen.appendScroll(`  ${COLORS.success("*")} ${p.name} (${p.skills.length} skills)\n`);
                   });
                 }
 
@@ -1353,7 +1346,7 @@ program
     const providers = await listProviders();
     const defaultProvider = (await loadGlobalSettings()).defaultProvider;
     providers.forEach((p) => {
-      const mark = p === defaultProvider ? "●" : "○";
+      const mark = p === defaultProvider ? "*" : " ";
       console.log(`${mark} ${p}`);
     });
   });

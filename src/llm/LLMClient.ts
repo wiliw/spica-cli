@@ -2,7 +2,6 @@ import { EventEmitter } from 'events';
 import { OpenAICompatibleProvider } from './providers/OpenAICompatible';
 import { TokenCounter } from './TokenCounter';
 import { RateLimiter } from './RateLimiter';
-import { FunctionCaller, ToolExecutor } from './FunctionCaller';
 import type { ToolDefinition, LLMResponse, ChatMessage } from './providers/BaseProvider';
 
 export interface LLMClientConfig {
@@ -35,7 +34,6 @@ export class LLMClient extends EventEmitter {
   private provider: OpenAICompatibleProvider;
   private tokenCounter: TokenCounter;
   private rateLimiter: RateLimiter;
-  private functionCaller: FunctionCaller;
   private tools: ToolDefinition[] = [];
   private abortController: AbortController | null = null;
   private pendingInterrupt = false;  // 中断标记（用于rate limiter等待期间）
@@ -59,7 +57,6 @@ export class LLMClient extends EventEmitter {
 
     this.tokenCounter = new TokenCounter(config.model);
     this.rateLimiter = new RateLimiter(config.rateLimit || {});
-    this.functionCaller = new FunctionCaller();
   }
 
   // 检查API连接（支持中断）
@@ -73,14 +70,6 @@ export class LLMClient extends EventEmitter {
 
   setSystemPromptSplit(stable: string, variable?: string): void {
     this.provider.setSystemPromptSplit(stable, variable);
-  }
-
-  registerTool(name: string, executor: ToolExecutor): void {
-    this.functionCaller.RegisterTool(name, executor);
-  }
-
-  registerTools(tools: Record<string, ToolExecutor>): void {
-    this.functionCaller.RegisterMultiple(tools);
   }
 
   setToolDefinitions(tools: ToolDefinition[]): void {
@@ -97,7 +86,7 @@ export class LLMClient extends EventEmitter {
     const controller = new AbortController();
     this.abortController = controller;
 
-    // 🔴 关键：链接外部 signal（来自 agent 的 currentAbortController）
+    // Link external signal (from agent's currentAbortController)
     if (externalSignal) {
       if (externalSignal.aborted) {
         controller.abort();
@@ -231,45 +220,6 @@ export class LLMClient extends EventEmitter {
     return response;
   }
 
-  async continueWithToolResult(toolCallName: string, result: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
-    const toolsToUse = tools || this.tools;
-
-    const lastMessage = this.provider.getMessages()[this.provider.getMessages().length - 1];
-    const toolCallId = lastMessage.toolCalls?.find(tc => tc.name === toolCallName)?.id || '';
-
-    // 添加tool结果消息
-    this.provider.addToolMessage(toolCallId, result);
-
-    // Abort previous and create new controller
-    if (this.abortController) {
-      this.abortController.abort();
-    }
-    const controller = new AbortController();
-    this.abortController = controller;
-
-    try {
-      await this.rateLimiter.waitForAvailability(controller.signal);
-
-      if (controller.signal.aborted) {
-        throw new Error('Interrupted during rate limit wait');
-      }
-
-      this.rateLimiter.recordRequest();
-      const response = await this.provider.generateFromHistory(toolsToUse, controller.signal);
-
-      if (response.content) {
-        const tokens = this.tokenCounter.estimateTokens(response.content);
-        this.rateLimiter.recordTokenUsage(tokens);
-      }
-
-      return response;
-    } finally {
-      if (this.abortController === controller) {
-        this.abortController = null;
-      }
-    }
-  }
-
   async continueWithAllToolResults(
     toolResults: Array<{ name: string; result: string; id?: string }>,
     tools?: ToolDefinition[],
@@ -299,7 +249,7 @@ export class LLMClient extends EventEmitter {
     const controller = new AbortController();
     this.abortController = controller;
 
-    // 🔴 链接外部 signal
+    // Link external signal
     if (externalSignal) {
       if (externalSignal.aborted) {
         controller.abort();
@@ -342,36 +292,6 @@ export class LLMClient extends EventEmitter {
     }
   }
 
-  async executeWithTools(prompt: string, maxIterations: number = 10): Promise<string> {
-    let response = await this.generate(prompt);
-    let iterations = 0;
-
-    while (!response.finished && iterations < maxIterations) {
-      if (response.toolCalls) {
-        for (const tc of response.toolCalls) {
-          const result = await this.functionCaller.Execute(tc);
-
-          if (!result.success) {
-            // Tool execution failed - error will be returned to caller
-          }
-
-          await this.rateLimiter.waitForAvailability();
-          this.rateLimiter.recordRequest();
-
-          response = await this.provider.continueWithToolResult(tc.id, result.content || result.output || result.error || '', this.tools);
-
-          if (response.content) {
-            const tokens = this.tokenCounter.estimateTokens(response.content);
-            this.rateLimiter.recordTokenUsage(tokens);
-          }
-        }
-      }
-      iterations++;
-    }
-
-    return response.content || '';
-  }
-
   clearHistory(): void {
     this.provider.clearHistory();
   }
@@ -396,6 +316,10 @@ export class LLMClient extends EventEmitter {
     return this.provider;
   }
 
+  getTokenCounter(): TokenCounter {
+    return this.tokenCounter;
+  }
+
   // 添加用户消息（不立即生成）
   addUserMessage(content: string): void {
     this.provider.addUserMessage(content);
@@ -412,7 +336,7 @@ export class LLMClient extends EventEmitter {
     const controller = new AbortController();
     this.abortController = controller;
 
-    // 🔴 链接外部 signal
+    // Link external signal
     if (externalSignal) {
       if (externalSignal.aborted) {
         controller.abort();

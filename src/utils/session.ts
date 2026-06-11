@@ -159,67 +159,62 @@ export function saveSession(workspacePath: string, messages: ChatMessage[], sess
   }
 }
 
-// Generate simple summary from messages (user messages + tool calls)
+// Generate simple summary from messages — natural language, no template prefixes
 export function generateSessionSummary(messages: ChatMessage[]): string {
   if (messages.length === 0) return '';
 
-  const parts: string[] = [];
-
-  // Extract user messages (first 5, up to 120 chars each)
+  // Extract actual user requests — skip skill prompts and system injections
   const userMessages = messages
     .filter(m => m.role === 'user')
-    .slice(0, 5)
-    .map(m => (m.content || '').slice(0, 120).replace(/\n/g, ' '));
+    .map(m => (m.content || '').replace(/\n/g, ' ').trim())
+    .filter(m => {
+      if (m.length === 0) return false;
+      // Skip skill prompts (long markdown templates)
+      if (m.startsWith('#') || m.includes('## Overview')) return false;
+      // Skip system injections
+      if (m.startsWith('[QUEUED') || m.startsWith('[SYSTEM]')) return false;
+      // Skip pure symbols like ？？？
+      if (/^[？?！!。.…]+$/.test(m)) return false;
+      return true;
+    })
+    .slice(0, 3);
+
+  // Build a natural-language summary
+  const parts: string[] = [];
 
   if (userMessages.length > 0) {
-    parts.push('Tasks: ' + userMessages.join(' | '));
+    const cleaned = userMessages.map(m => m.slice(0, 120));
+    parts.push(cleaned.join('; '));
   }
 
-  // Extract key assistant text (non-tool-call, first sentence from each)
-  const assistantTexts = messages
-    .filter(m => m.role === 'assistant' && !m.toolCalls && m.content)
-    .slice(0, 3)
-    .map(m => {
-      const text = (m.content || '').replace(/\n/g, ' ');
-      return text.slice(0, 150);
-    })
-    .filter(t => t.length > 10);
-
-  if (assistantTexts.length > 0) {
-    parts.push('Key outputs: ' + assistantTexts.join(' | '));
-  }
-
-  // Extract file paths modified by write/edit tools
+  // Add files modified
   const filePaths = new Set<string>();
   for (const m of messages) {
     if (m.toolCalls) {
       for (const tc of m.toolCalls) {
         const args = tc.arguments || {};
-        if (['file_write', 'file_edit', 'file_multi_edit', 'file_patch', 'file_replace', 'file_insert'].includes(tc.name)) {
+        if (['file_write', 'file_edit', 'file_multi_edit'].includes(tc.name)) {
           if (args.path) filePaths.add(args.path as string);
         }
       }
     }
   }
-  if (filePaths.size > 0) {
-    parts.push('Files: ' + Array.from(filePaths).slice(0, 10).join(', '));
+
+  if (parts.length === 0 && filePaths.size === 0) {
+    // Nothing meaningful to summarize
+    return `${messages.length} messages`;
   }
 
-  // Extract tool names used
-  const toolNames = new Set<string>();
-  for (const m of messages) {
-    if (m.toolCalls) {
-      for (const tc of m.toolCalls) {
-        toolNames.add(tc.name);
-      }
+  if (filePaths.size > 0) {
+    const files = Array.from(filePaths).slice(0, 5).map(f => f.replace(/.*\//, ''));
+    if (parts.length > 0) {
+      parts[0] += ` — modified ${files.join(', ')}`;
+    } else {
+      parts.push(`Modified ${files.join(', ')}`);
     }
   }
-  if (toolNames.size > 0) {
-    const toolsList = Array.from(toolNames).slice(0, 10).join(', ');
-    parts.push('Tools: ' + toolsList);
-  }
 
-  return parts.join('. ').slice(0, 500);  // Max 500 chars
+  return parts.join('. ').slice(0, 300);
 }
 
 // Archive session to sessions directory
@@ -275,11 +270,31 @@ export function archiveSession(workspacePath: string, session: SessionState): vo
     const sessionsDir = join(workspacePath, SESSIONS_DIR);
     fs.ensureDirSync(sessionsDir);
 
-    // Generate simple summary
-    session.summary = generateSessionSummary(session.messages);
-
-    // Save with session ID as filename
     const sessionPath = join(sessionsDir, `${session.id}.json`);
+
+    // Don't overwrite an existing archive with fewer messages
+    // (prevents saveSession from wiping /archive's LLM summary after clear)
+    if (fs.existsSync(sessionPath)) {
+      const existing = fs.readJsonSync(sessionPath);
+      const existingMsgs = existing.messages?.length || 0;
+      const newMsgs = session.messages?.length || 0;
+      if (existingMsgs > newMsgs) {
+        // Keep the richer archive — only update lastActivity
+        existing.lastActivity = session.lastActivity;
+        fs.writeJsonSync(sessionPath, existing, { spaces: 2 });
+        return;
+      }
+      // Preserve existing LLM summary if new one is empty
+      if (!session.summary && existing.summary) {
+        session.summary = existing.summary;
+      }
+    }
+
+    // Only generate simple summary if no LLM summary exists yet
+    if (!session.summary && session.messages?.length > 0) {
+      session.summary = generateSessionSummary(session.messages);
+    }
+
     fs.writeJsonSync(sessionPath, session, { spaces: 2 });
   } catch {
     // 忽略归档错误
@@ -324,6 +339,17 @@ export function listSessions(workspacePath: string): SessionMeta[] {
       .filter(f => f.endsWith('.json') && f.startsWith('sess_'))
       .map(f => {
         const session = fs.readJsonSync(join(sessionsDir, f));
+        let summary = session.summary;
+        // Regenerate if missing or old template format ("Tasks:", "Key outputs:")
+        const isOldFormat = summary && /^(Tasks|Key outputs|Files|Tools):/.test(summary);
+        if ((!summary || isOldFormat) && session.messages?.length > 0) {
+          summary = generateSessionSummary(session.messages);
+          // Persist the generated summary so we don't regenerate every time
+          if (summary) {
+            session.summary = summary;
+            try { fs.writeJsonSync(join(sessionsDir, f), session, { spaces: 2 }); } catch {}
+          }
+        }
         return {
           id: session.id,
           name: session.name,
@@ -331,7 +357,7 @@ export function listSessions(workspacePath: string): SessionMeta[] {
           messageCount: session.messages?.length || 0,
           lastActivity: session.lastActivity,
           createdAt: session.createdAt,
-          summary: session.summary,
+          summary,
         };
       })
       .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
@@ -342,17 +368,33 @@ export function listSessions(workspacePath: string): SessionMeta[] {
   }
 }
 
-// Load specific session by ID
+// Load specific session by ID (supports partial ID matching)
 export function loadSessionById(workspacePath: string, sessionId: string): SessionState | null {
-  const sessionPath = join(workspacePath, SESSIONS_DIR, `${sessionId}.json`);
+  const sessionsDir = join(workspacePath, SESSIONS_DIR);
 
   try {
-    if (fs.existsSync(sessionPath)) {
-      const session = fs.readJsonSync(sessionPath);
+    // Exact match first
+    const exactPath = join(sessionsDir, `${sessionId}.json`);
+    if (fs.existsSync(exactPath)) {
+      const session = fs.readJsonSync(exactPath);
       if (session.messages) {
         session.messages = cleanMessages(session.messages);
       }
       return session;
+    }
+
+    // Partial match: find file ending with the given ID
+    if (fs.existsSync(sessionsDir)) {
+      const files = fs.readdirSync(sessionsDir)
+        .filter(f => f.endsWith('.json') && f.startsWith('sess_'));
+      const match = files.find(f => f.replace('.json', '').endsWith(sessionId));
+      if (match) {
+        const session = fs.readJsonSync(join(sessionsDir, match));
+        if (session.messages) {
+          session.messages = cleanMessages(session.messages);
+        }
+        return session;
+      }
     }
   } catch {}
 
