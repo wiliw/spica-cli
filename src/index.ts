@@ -497,7 +497,7 @@ program
                 screen.appendScroll(COLORS.muted(`  ... ${sessions.length - 20} more\n`));
               }
 
-              screen.appendScroll(COLORS.muted("\n─".repeat(60) + "\n"));
+              screen.appendScroll(COLORS.muted("\n" + "─".repeat(60) + "\n"));
               screen.appendScroll(COLORS.muted("/view <id>  /rename <id> <name>  /delete <id>\n\n"));
 
               return;

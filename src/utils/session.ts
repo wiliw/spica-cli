@@ -324,6 +324,16 @@ export function listSessions(workspacePath: string): SessionMeta[] {
       .filter(f => f.endsWith('.json') && f.startsWith('sess_'))
       .map(f => {
         const session = fs.readJsonSync(join(sessionsDir, f));
+        let summary = session.summary;
+        // Generate fallback summary for sessions saved without one
+        if (!summary && session.messages?.length > 0) {
+          summary = generateSessionSummary(session.messages);
+          // Persist the generated summary so we don't regenerate every time
+          if (summary) {
+            session.summary = summary;
+            try { fs.writeJsonSync(join(sessionsDir, f), session, { spaces: 2 }); } catch {}
+          }
+        }
         return {
           id: session.id,
           name: session.name,
@@ -331,7 +341,7 @@ export function listSessions(workspacePath: string): SessionMeta[] {
           messageCount: session.messages?.length || 0,
           lastActivity: session.lastActivity,
           createdAt: session.createdAt,
-          summary: session.summary,
+          summary,
         };
       })
       .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
