@@ -50,6 +50,13 @@ export function getBashOrFallback(): { shell: string; args: string[] } {
   if (bashPath) {
     return { shell: bashPath, args: ['-c'] };
   }
+  // Windows: try PowerShell as better fallback than cmd.exe
+  if (isWindows) {
+    const pwshExe = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    if (fs.existsSync(pwshExe)) {
+      return { shell: pwshExe, args: ['-Command'] };
+    }
+  }
   return { shell: getDefaultShell(), args: getShellArgs() };
 }
 

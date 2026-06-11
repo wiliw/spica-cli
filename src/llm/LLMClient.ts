@@ -57,7 +57,7 @@ export class LLMClient extends EventEmitter {
       this.emit('reasoning', content);
     });
 
-    this.tokenCounter = new TokenCounter();
+    this.tokenCounter = new TokenCounter(config.model);
     this.rateLimiter = new RateLimiter(config.rateLimit || {});
     this.functionCaller = new FunctionCaller();
   }
@@ -69,6 +69,10 @@ export class LLMClient extends EventEmitter {
 
   setSystemPrompt(prompt: string): void {
     this.provider.setSystemPrompt(prompt);
+  }
+
+  setSystemPromptSplit(stable: string, variable?: string): void {
+    this.provider.setSystemPromptSplit(stable, variable);
   }
 
   registerTool(name: string, executor: ToolExecutor): void {
@@ -187,6 +191,44 @@ export class LLMClient extends EventEmitter {
         this.abortController = null;
       }
     }
+  }
+
+  /**
+   * Generate a summary for context compression.
+   * Independent of the main request — does NOT touch this.abortController,
+   * so it can run concurrently with a streaming generate() call.
+   * Still respects rate limiter and interrupt signals.
+   */
+  async generateForCompression(prompt: string, externalSignal?: AbortSignal): Promise<LLMResponse> {
+    const controller = new AbortController();
+
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        controller.abort();
+      } else {
+        const onAbort = () => {
+          externalSignal.removeEventListener("abort", onAbort);
+          controller.abort();
+        };
+        externalSignal.addEventListener("abort", onAbort);
+      }
+    }
+
+    await this.rateLimiter.waitForAvailability(controller.signal);
+
+    if (controller.signal.aborted) {
+      return { content: "", finished: true };
+    }
+
+    this.rateLimiter.recordRequest();
+    const response = await this.provider.generateDirect(prompt, controller.signal);
+
+    if (response.content) {
+      const tokens = this.tokenCounter.estimateTokens(response.content);
+      this.rateLimiter.recordTokenUsage(tokens);
+    }
+
+    return response;
   }
 
   async continueWithToolResult(toolCallName: string, result: string, tools?: ToolDefinition[]): Promise<LLMResponse> {
@@ -404,5 +446,8 @@ export class LLMClient extends EventEmitter {
         this.abortController = null;
       }
     }
+  }
+  setToolResultMaxChars(maxChars: number): void {
+    this.provider.setToolResultMaxChars(maxChars);
   }
 }

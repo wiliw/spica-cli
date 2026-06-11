@@ -403,6 +403,15 @@ export async function executeTool(
         // 卡住检测阈值（默认120秒，可通过 stuckWarning 参数调整）
         const stuckWarningMs = (safeArgs.stuckWarning as number) || 120000;
 
+        // 跨平台进程树杀死: Windows taskkill /F /T, Unix SIGKILL to process group
+        const killProcessTree = async (pid: number): Promise<void> => {
+          if (isWindows) {
+            await execa('taskkill', ['/F', '/T', '/PID', String(pid)], { timeout: 5000, reject: false });
+          } else {
+            try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch {} }
+          }
+        };
+
         // Shell 注入检测 — 只检测真正危险的模式，允许常用操作符 (; && || ${} <<)
         // 注意：bypassPermissions 设置已跳过此检查，此代码为历史遗留，未来可移除
         if (!bypassMode) {
@@ -522,7 +531,7 @@ Write-Output $proc.Id;
             timeout: timeout,
             reject: false,
             cancelSignal: abortController.signal,
-            detached: true,  // 🔴 关键：创建独立进程组，允许杀死整个进程树
+            detached: !isWindows,  // Windows: detached breaks stdout for external commands; Unix: process group for killProcessTree
           });
 
           // 进程启动后，pid 立即可用，现在设置 timer
@@ -541,19 +550,9 @@ Write-Output $proc.Id;
 
               abortController.abort();
 
-              // 强制杀死进程组（detached: true 确保进程组存在）
+              // 强制杀死进程树
               if (bashProcess.pid) {
-                try {
-                  // Linux: 杀死整个进程组（负PID表示进程组）
-                  process.kill(-bashProcess.pid, 'SIGKILL');
-                } catch {
-                  // 进程组杀死失败时，尝试杀死单个进程
-                  try { process.kill(bashProcess.pid, 'SIGKILL'); } catch {}
-                  // Windows 不支持进程组，直接杀死
-                  if (isWindows) {
-                    try { process.kill(bashProcess.pid, 'SIGKILL'); } catch {}
-                  }
-                }
+                killProcessTree(bashProcess.pid);
               }
             }
           }, stuckWarningMs);
@@ -564,11 +563,7 @@ Write-Output $proc.Id;
           const abortCheckInterval = setInterval(() => {
             if (abortController.signal.aborted && bashProcess.pid) {
               clearInterval(abortCheckInterval);
-              try {
-                process.kill(-bashProcess.pid, 'SIGKILL');
-              } catch {
-                try { process.kill(bashProcess.pid, 'SIGKILL'); } catch {}
-              }
+              killProcessTree(bashProcess.pid);
             }
           }, 200);
 
@@ -640,13 +635,9 @@ Write-Output $proc.Id;
 
             // 用户主动中断：立即 kill 进程组并返回
             if (abortController.signal.aborted) {
-              // 🔴 关键：kill 整个进程组（detached: true 创建的）
+              // Kill entire process tree
               if (bashProcess.pid) {
-                try {
-                  process.kill(-bashProcess.pid, 'SIGKILL');
-                } catch {
-                  try { process.kill(bashProcess.pid, 'SIGKILL'); } catch {}
-                }
+                killProcessTree(bashProcess.pid);
               }
               return {
                 success: false,
@@ -657,6 +648,7 @@ Write-Output $proc.Id;
             // 检查是否是被强制杀死（卡住检测触发）
             const wasKilled = bashError.message?.includes('SIGKILL') ||
                               bashError.message?.includes('killed') ||
+                              bashError.message?.includes('terminated') ||
                               bashError.isCanceled;
 
             if (wasKilled) {

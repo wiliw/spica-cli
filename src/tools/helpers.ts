@@ -56,6 +56,7 @@ export interface ToolDefinition {
     properties: Record<string, any>;
     required?: string[];
   };
+  batchHint?: 'read' | 'write' | 'neutral';
 }
 
 export interface ToolResult {
@@ -83,6 +84,12 @@ export function resolvePath(path: string): string {
   const realWorkspace = fs.realpathSync(pathResolve(WORKSPACE));
 
   function isOutside(p: string): boolean {
+    if (isWindows) {
+      const pLower = p.toLowerCase();
+      const wsLower = realWorkspace.toLowerCase();
+      const resolvedWsLower = pathResolve(realWorkspace).toLowerCase();
+      return !pLower.startsWith(wsLower) && !pLower.startsWith(resolvedWsLower);
+    }
     return !p.startsWith(realWorkspace) && !p.startsWith(pathResolve(realWorkspace));
   }
 

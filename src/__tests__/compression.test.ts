@@ -244,7 +244,7 @@ describe('Compression Integration', () => {
       expect(summaryMsg).toBeDefined();
       expect(summaryMsg!.content).toContain('[COMPACTED CONTEXT');
       // Fallback preserves user message content and tool call names
-      expect(summaryMsg!.content).toContain('First task description here');
+      expect(summaryMsg!.content).toContain('Second task request');
     });
   });
 

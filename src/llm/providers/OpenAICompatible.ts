@@ -96,6 +96,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
   private client: OpenAI;
   private providerName: string;
   private onChunk?: (chunk: string) => void;
+  private toolResultMaxChars: number = 8000; // chars, ~2000 tokens
   private contextWindow: number = DEFAULT_CONTEXT_WINDOW;
 
   constructor(config: LLMProviderConfig) {
@@ -168,7 +169,20 @@ export class OpenAICompatibleProvider extends BaseProvider {
 async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): Promise<LLMResponse> {
     // 关键修复：在添加新用户消息前，清理不完整的消息序列
     // 防止出现 assistant toolCalls 没有对应 tool messages 的情况
-    this.messages = cleanMessages(this.messages);
+    // 但保护缓存前缀（system prompt + early stable messages）不被 cleanMessages 破坏
+    if (this.cachePrefixEnd >= 0 && this.cachePrefixEnd < this.messages.length - 1) {
+      const prefixMessages = this.messages.slice(0, this.cachePrefixEnd + 1);
+      const suffixMessages = this.messages.slice(this.cachePrefixEnd + 1);
+      const cleanedSuffix = cleanMessages(suffixMessages);
+      this.messages = [...prefixMessages, ...cleanedSuffix];
+    } else {
+      this.messages = cleanMessages(this.messages);
+    }
+
+    // Mark prefix boundary on first call (system prompt + initial messages are stable)
+    if (this.cachePrefixEnd === -1) {
+      this.cachePrefixEnd = this.messages.length - 1;
+    }
 
     this.messages.push({ role: 'user', content: prompt });
 
@@ -475,16 +489,27 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
 
   // 添加tool结果消息
   addToolMessage(toolCallId: string, result: string): void {
-    const exists = this.messages.some(m => 
+    const exists = this.messages.some(m =>
       m.role === 'tool' && m.toolCallId === toolCallId
     );
-    if (!exists) {
-      this.messages.push({
-        role: 'tool',
-        content: result,
-        toolCallId: toolCallId,
-      });
+    if (exists) return;
+
+    let trimmedResult = result;
+    if (result.length > this.toolResultMaxChars) {
+      const truncated = result.slice(0, this.toolResultMaxChars);
+      const omitted = result.length - this.toolResultMaxChars;
+      trimmedResult = truncated + `\n\n[TRUNCATED: ${omitted} chars omitted from tool result. Request the full output if needed with a more specific query.]`;
     }
+
+    this.messages.push({
+      role: 'tool',
+      content: trimmedResult,
+      toolCallId: toolCallId,
+    });
+  }
+
+  setToolResultMaxChars(maxChars: number): void {
+    this.toolResultMaxChars = maxChars;
   }
 
   // 添加用户消息（不立即生成）
@@ -497,8 +522,15 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
 
   // 从当前历史发起生成请求（不添加新的user消息）
   async generateFromHistory(tools?: ToolDefinition[], signal?: AbortSignal): Promise<LLMResponse> {
-    // 关键修复：清理不完整的消息序列，防止 API 报错
-    this.messages = cleanMessages(this.messages);
+    // 关键修复：清理后缀消息，保护缓存前缀不被破坏
+    if (this.cachePrefixEnd >= 0 && this.cachePrefixEnd < this.messages.length - 1) {
+      const prefixMessages = this.messages.slice(0, this.cachePrefixEnd + 1);
+      const suffixMessages = this.messages.slice(this.cachePrefixEnd + 1);
+      const cleanedSuffix = cleanMessages(suffixMessages);
+      this.messages = [...prefixMessages, ...cleanedSuffix];
+    } else {
+      this.messages = cleanMessages(this.messages);
+    }
 
     try {
       const stream = await this.client.chat.completions.create({

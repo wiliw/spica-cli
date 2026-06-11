@@ -1,8 +1,19 @@
 @echo off
-set TSCONFIG=%~dp0..\tsconfig.json
-set SRC=%~dp0..\src\index.ts
-if exist "%~dp0..\lib\node_modules\spica-cli\tsconfig.json" (
-  set TSCONFIG=%~dp0..\lib\node_modules\spica-cli\tsconfig.json
-  set SRC=%~dp0..\lib\node_modules\spica-cli\src\index.ts
+setlocal
+set "SCRIPT_DIR=%~dp0"
+if exist "%SCRIPT_DIR%..\tsconfig.json" (
+  rem Development mode
+  set "TSCONFIG=%SCRIPT_DIR%..\tsconfig.json"
+  set "SRC=%SCRIPT_DIR%..\src\index.ts"
+  set "TSX=%SCRIPT_DIR%..\node_modules\tsx\dist\cli.mjs"
+) else if exist "%SCRIPT_DIR%node_modules\spica-cli\tsconfig.json" (
+  rem Global npm install/link mode
+  set "TSCONFIG=%SCRIPT_DIR%node_modules\spica-cli\tsconfig.json"
+  set "SRC=%SCRIPT_DIR%node_modules\spica-cli\src\index.ts"
+  set "TSX=%SCRIPT_DIR%node_modules\spica-cli\node_modules\tsx\dist\cli.mjs"
 )
-node "%~dp0..\node_modules\tsx\dist\cli.mjs" --tsconfig "%TSCONFIG%" "%SRC%" %*
+if not defined TSX (
+  echo Error: Could not locate spica-cli installation.
+  exit /b 1
+)
+node "%TSX%" --tsconfig "%TSCONFIG%" "%SRC%" %*

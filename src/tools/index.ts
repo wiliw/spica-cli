@@ -6,7 +6,7 @@ export { setWorkspace, getWorkspace } from './helpers';
 export type { ToolDefinition, ToolResult, ToolEventCallback } from './helpers';
 
 // Tool definitions
-export { TOOLS_DEFINITIONS, getAllToolDefinitions } from './registry';
+export { TOOLS_DEFINITIONS, getAllToolDefinitions, getToolBatchHint } from './registry';
 
 // Tool execution
 export { executeTool } from './execute';
