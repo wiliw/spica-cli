@@ -521,43 +521,27 @@ program
               if (session.summary) {
                 screen.appendScroll(COLORS.muted(`  Summary: ${session.summary}\n`));
               }
-              screen.appendScroll(COLORS.muted("\n  --- Content (press Enter to scroll, ESC/q to exit) ---\n\n"));
-
-              // 显示消息内容（只读）
+              // Show all messages (each truncated to 500 chars)
               const messages = session.messages || [];
-              let displayed = 0;
-              const BATCH_SIZE = 10;
+              const MAX_TO_SHOW = 50;  // protect against huge sessions
 
-              const showBatch = (start: number) => {
-                const end = Math.min(start + BATCH_SIZE, messages.length);
-                for (let i = start; i < end; i++) {
-                  const m = messages[i];
-                  const role = m.role === 'user' ? '👤 User' : m.role === 'assistant' ? '🤖 AI' : m.role === 'tool' ? '🔧 Tool' : '📋 System';
-                  screen.appendScroll(COLORS.primary(`\n${role}:\n`));
+              messages.slice(0, MAX_TO_SHOW).forEach((m, i) => {
+                const role = m.role === 'user' ? '👤' : m.role === 'assistant' ? '🤖' : m.role === 'tool' ? '🔧' : '📋';
+                const content = (m.content || '').slice(0, 500);
+                const preview = content.split('\n').slice(0, 3).join(' ');
 
-                  const content = (m.content || '').slice(0, 500);
-                  content.split('\n').forEach(line => {
-                    screen.appendScroll(COLORS.muted(`  ${line}\n`));
-                  });
+                screen.appendScroll(COLORS.primary(`${role} `));
+                screen.appendScroll(COLORS.muted(`${preview}\n`));
 
-                  if (m.toolCalls && m.toolCalls.length > 0) {
-                    screen.appendScroll(COLORS.muted(`  Tools: ${m.toolCalls.map(tc => tc.name).join(', ')}\n`));
-                  }
+                if (m.toolCalls && m.toolCalls.length > 0) {
+                  screen.appendScroll(COLORS.muted(`  → ${m.toolCalls.map(tc => tc.name).join(', ')}\n`));
                 }
-                displayed = end;
-                if (end < messages.length) {
-                  screen.appendScroll(COLORS.muted(`\n  --- [${end}/${messages.length}] Press Enter for more, ESC/q to exit ---\n`));
-                } else {
-                  screen.appendScroll(COLORS.muted(`\n  --- End of session (${messages.length} messages) ---\n`));
-                  screen.appendScroll(COLORS.muted("  This is read-only. Press ESC/q to return to current session.\n\n"));
-                }
-              };
+              });
 
-              showBatch(0);
-
-              // 这里需要暂停当前输入处理，等待用户按键...
-              // 由于当前架构的限制，我们先简单显示全部内容
-              // 完整的交互式阅读界面需要更复杂的重构
+              if (messages.length > MAX_TO_SHOW) {
+                screen.appendScroll(COLORS.muted(`\n  ... and ${messages.length - MAX_TO_SHOW} more messages\n`));
+              }
+              screen.appendScroll(COLORS.muted(`\n  ── End of session (${messages.length} messages) ──\n\n`));
 
               return;
             }
