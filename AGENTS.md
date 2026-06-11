@@ -18,20 +18,17 @@ spica-cli is an AI coding agent CLI with interactive and single-task modes. It s
 - `src/core/RuntimeState.ts` - Single source of truth for runtime state
 - `src/builtin-skills/superpowers/` - Built-in skills (14 skills)
 
-**Stats:** 52 source files, 61 test files
+**Stats:** 59 source files, 65 test files
 
 ## Build
 
 ```bash
 npm install           # Install dependencies
-npm run build         # Build CLI (generates bin/spica and dist/)
-./bin/spica --version # Verify build (outputs: 1.0.0)
-npx tsc --noEmit      # Type check without building
+npm run build         # Generate bin/spica wrapper scripts (runs scripts/build-bin.js)
+npx tsc --noEmit      # Type check without emitting (primary verification)
 ```
 
-Build outputs:
-- `bin/spica` - Executable CLI script
-- `dist/` - Compiled JavaScript and type declarations
+Build note: There is no TypeScript compilation step. `bin/spica` is a Node.js wrapper that uses `tsx` to execute `src/index.ts` directly at runtime. `npm run build` only generates the bin scripts — not a compiled binary.
 
 ## Test
 
@@ -59,7 +56,7 @@ npm run lint:strict  # Fail on warnings (not used in CI)
 
 ## Code Style
 
-- TypeScript ES2022 target, ESM modules, strict mode
+- TypeScript ES2022 target, ESM modules, strict mode (`noImplicitAny: false`)
 - No comments unless explicitly requested
 - Import style: `import { x } from 'y'` (ESM named imports)
 - Tool results: `{ success, output?, error?, content? }`
@@ -71,20 +68,20 @@ npm run lint:strict  # Fail on warnings (not used in CI)
 
 ```bash
 npx prettier --write <file>   # Format file with prettier
-npx prettier --check <file>   # Check formatting only
+npx prettier --check .        # Check all files for formatting issues
 ```
 
-**Config:** `.prettierrc` — single quotes, 100 char width, ES5 trailing commas, LF line endings.
-Also see `.editorconfig` for editor-agnostic settings.
+**Config:** `.prettierrc` — single quotes, 100 char width, ES5 trailing commas, `arrowParens: avoid`, `bracketSpacing: true`, 2-space indentation, LF line endings.
+Also see `.editorconfig` for editor-agnostic settings (UTF-8, LF, insert_final_newline, trim_trailing_whitespace).
 
 ## PR Workflow
 
 1. Run `npm run lint` and `npm run test:run` before committing
-2. Ensure build succeeds: `npm run build && ./bin/spica --version`
+2. Ensure build succeeds: `npm run build`
 3. Title format: `[spica] <Title>` or `[spica-cli] <Title>`
 4. CI runs on: Node 18, 20, 22 on ubuntu-latest and windows-latest
 
-**CI checks:** type check → lint → test → build (see `.github/workflows/ci.yml`)
+**CI checks:** type check → lint → test → build (see `.github/workflows/ci.yml` — lint only runs on Node >= 20)
 
 ## Skills System
 
@@ -118,12 +115,13 @@ spica skill list                   # List available skills
 
 ## Dev Tips
 
-- Use `npm run dev` for development mode (`tsx src/index.ts` with watch)
+- Use `npm run dev` for development mode (`tsx src/index.ts` — runs once, no watch mode)
 - Agent events via `SpicaAgent` (EventEmitter), UI subscribes in `src/cli/events.ts`
 - spica reads its own AGENTS.md at runtime via `loadProjectConfig()` — keep it parseable
 - Large files needing refactor: `src/agent.ts`, `src/index.ts`, `src/tools/index.ts`
 - Always prefer file-scoped commands over project-wide: `npx tsc --noEmit <file>` instead of `npm run typecheck`
 - Run independent tools in parallel; conflicting tools (same file) are sequenced automatically
+- Set `SKIP_API_TESTS=true` to skip API-dependent tests when running locally or in CI
 
 ## Architecture Notes
 
