@@ -797,12 +797,18 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
       });
     }
 
-    const triggerThreshold = Math.floor(contextWindow * 0.7);  // 触发阈值：70%（现代设计，更早触发避免过满）
+    const triggerThreshold = Math.floor(contextWindow * 0.6);  // 触发阈值：60%（现代设计，更早触发避免过满）
 
     // 当使用超过触发阈值时自动压缩（compact 内部会 emit context_compressed 事件）
     if (usedTokens > triggerThreshold) {
       await this.compact(signal);
     }
+
+    this.emit('token_usage', {
+      used: usedTokens,
+      total: contextWindow,
+      ratio: usagePercent / 100,
+    });
 
     this.emit('message', { role: 'user', content: prompt });
 
@@ -1315,7 +1321,7 @@ public async compact(signal?: AbortSignal): Promise<void> {
     this._compacting = true;
     try {
       const provider = this.llm.getProvider();
-      const targetTokens = Math.floor(provider.getContextWindow() * 0.3);
+      const targetTokens = Math.floor(provider.getContextWindow() * 0.4);
       await this.compactToTarget(targetTokens, signal);
     } finally {
       this._compacting = false;
