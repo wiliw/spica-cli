@@ -1,6 +1,6 @@
 import { LLMClient } from './llm/LLMClient';
 import { TokenCounter } from './llm/TokenCounter';
-import { executeTool, getAllToolDefinitions, setWorkspace } from './tools/index';
+import { executeTool, getAllToolDefinitions, setWorkspace, getToolBatchHint } from './tools/index';
 import { initMCP } from './mcp/client';
 import { initSkills, listSkills } from './skills/index';
 import { getProviderConfig } from './utils/settings';
@@ -947,17 +947,10 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
       }
 
       if (response.toolCalls && response.toolCalls.length > 0) {
-        // 冲突检测：检测同一资源的并发操作
-        const { parallel, sequential, conflicts } = detectToolConflicts(response.toolCalls);
-
-        // 发送冲突警告
-        if (conflicts.length > 0) {
-          this.emit('tool_conflict_warning', {
-            conflicts,
-            message: `Detected ${conflicts.length} resource conflicts. Tools targeting same resources will execute sequentially.`
-          });
-        }
-
+        // Batch by hint: reads first (fully parallel), writes second (with conflict detection), neutrals last
+        const readCalls = response.toolCalls.filter((tc: { name: string }) => getToolBatchHint(tc.name) === 'read');
+        const writeCalls = response.toolCalls.filter((tc: { name: string }) => getToolBatchHint(tc.name) === 'write');
+        const neutralCalls = response.toolCalls.filter((tc: { name: string }) => getToolBatchHint(tc.name) === 'neutral');
         // 执行单个工具的内部函数
         const executeSingleTool = async (tc: { name: string; id: string; arguments: Record<string, unknown> }): Promise<{ name: string; id: string; result: string; isCritical?: boolean; referencedSkills?: string[] }> => {
           if (signal.aborted) return { name: tc.name, id: tc.id, result: 'interrupted' };
@@ -1042,24 +1035,42 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
           }
         };
 
-        // 并行执行无冲突的工具
-        const parallelResults = await Promise.all(parallel.map(tc => executeSingleTool(tc)));
+        const toolResults: Array<{ name: string; id: string; result: string; isCritical?: boolean; referencedSkills?: string[] }> = [];
 
-        // 顺序执行有冲突的工具组
-        const sequentialResults: Array<{ name: string; id: string; result: string; isCritical?: boolean; referencedSkills?: string[] }> = [];
-        for (const conflictGroup of sequential) {
-          for (const tc of conflictGroup) {
-            if (signal.aborted) {
-              sequentialResults.push({ name: tc.name, id: tc.id, result: 'interrupted' });
-              break;
+        // Phase 1: Execute all reads in parallel (no file conflicts possible)
+        if (readCalls.length > 0) {
+          const readResults = await Promise.all(readCalls.map(tc => executeSingleTool(tc)));
+          toolResults.push(...readResults);
+        }
+
+        // Phase 2: Execute writes with conflict detection
+        if (writeCalls.length > 0) {
+          const { parallel, sequential, conflicts } = detectToolConflicts(writeCalls);
+          if (conflicts.length > 0) {
+            this.emit('tool_conflict_warning', {
+              conflicts,
+              message: `Detected ${conflicts.length} resource conflicts. Write tools targeting same resources will execute sequentially.`
+            });
+          }
+          const parallelResults = await Promise.all(parallel.map(tc => executeSingleTool(tc)));
+          toolResults.push(...parallelResults);
+          for (const conflictGroup of sequential) {
+            for (const tc of conflictGroup) {
+              if (signal.aborted) {
+                toolResults.push({ name: tc.name, id: tc.id, result: 'interrupted' });
+                break;
+              }
+              const result = await executeSingleTool(tc);
+              toolResults.push(result);
             }
-            const result = await executeSingleTool(tc);
-            sequentialResults.push(result);
           }
         }
 
-        // 合并所有结果
-        const toolResults = [...parallelResults, ...sequentialResults];
+        // Phase 3: Execute neutral tools (all parallel)
+        if (neutralCalls.length > 0) {
+          const neutralResults = await Promise.all(neutralCalls.map(tc => executeSingleTool(tc)));
+          toolResults.push(...neutralResults);
+        }
 
         allToolResults.push(...toolResults);
 

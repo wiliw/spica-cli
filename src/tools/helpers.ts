@@ -56,6 +56,7 @@ export interface ToolDefinition {
     properties: Record<string, any>;
     required?: string[];
   };
+  batchHint?: 'read' | 'write' | 'neutral';
 }
 
 export interface ToolResult {
