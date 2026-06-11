@@ -13,20 +13,20 @@ spica-cli is an AI coding agent CLI with interactive and single-task modes. It s
 - `src/cli/ui/screenManager.ts` - TUI rendering, input handling, thinking animation (~790 lines)
 
 **Key directories:**
-- `src/llm/providers/` - LLM provider implementations (BaseProvider, OpenAICompatible)
+- `src/llm/` - LLM client, providers (BaseProvider, OpenAICompatible), rate limiter, token counter
 - `src/tools/` - Tool definitions (`registry.ts`), execution (`execute.ts`), helpers (`helpers.ts`), subagents (`subAgent.ts`), and type-specific impls (`impl/`)
 - `src/skills/` - Skill loading and invocation (`index.ts`, ~371 lines)
-- `src/cli/` - TUI (`ui/`), events, input handling, diff rendering
+- `src/cli/` - TUI (`ui/`), events, input handling, diff rendering, skill gate
 - `src/core/RuntimeState.ts` - Single source of truth for runtime state (~231 lines)
 - `src/core/EventBus.ts` - Event system
 - `src/core/ProcessMonitor.ts` - Background process monitoring
 - `src/storage/` - Checkpoint manager, project state persistence, task persistence
 - `src/mcp/` - MCP client (`client.ts`)
 - `src/hooks/` - Pre/post hook execution (`index.ts`)
-- `src/utils/` - Settings, project config, session, history, platform, message cleaner
+- `src/utils/` - Settings, project config, session, history, platform, message cleaner, logger, bell
 - `src/builtin-skills/superpowers/` - Built-in skills (14 skills)
 
-**Stats:** 60 source files, 61 test files (126 `.ts` files total)
+**Stats:** 74 source files, 61 test files (135 `.ts` files total)
 
 ## Build
 
@@ -40,8 +40,8 @@ npx tsc --noEmit      # Type check without building (0 errors)
 **Build pipeline:** `npm run build` → `npm run build:cli` → `node scripts/build-bin.js`
 
 **Build outputs:**
-- `bin/spica` - Unix/macOS bash wrapper that resolves tsconfig path and runs via `npx tsx`
-- `bin/spica.cmd` - Windows cmd wrapper
+- `bin/spica` - Unix/macOS/Windows Node.js wrapper that resolves tsconfig path and runs via `npx tsx`
+- `bin/spica.cmd` - Windows cmd wrapper (alternative entry point)
 
 **Runtime:** The project uses `tsx` (TypeScript runner) — there is no compiled `dist/` output from `npm run build`. TypeScript declarations output to `dist/` but are not part of the build pipeline.
 
@@ -63,20 +63,28 @@ npm run test:run -- --coverage      # Run with coverage (requires @vitest/covera
 
 **Coverage:** Uses v8 provider. Coverage excludes `src/builtin-skills/`.
 
-**Known issues:** 2 tests fail in `src/tools/__tests__/toolsCore.test.ts` (syntax check timeouts at 5000ms). `boundaryCases.test.ts` passes (13/13). CI sets `SKIP_API_TESTS: true` and `CI: true`.
+**Known issues:** 3 tests fail (as of last run):
+- `src/tools/__tests__/toolsCore.test.ts` — syntax check timeout at 5000ms
+- `src/__tests__/boundaryCases.test.ts` — parallel tool conflict detection hook timeout at 10000ms
+- `src/__tests__/state/initCleanup.test.ts` — init error cleanup race condition
+
+CI sets `SKIP_API_TESTS: true` and `CI: true`.
 
 ## Lint
 
 ```bash
-npm run lint         # Run ESLint on src/**/*.ts (0 errors, 82 warnings)
-npm run lint:fix     # Auto-fix lint issues (3 warnings fixable)
+npm run lint         # Run ESLint on src/**/*.ts (0 errors, ~79 warnings)
+npm run lint:fix     # Auto-fix lint issues (~3 warnings fixable)
 npm run lint:strict  # Fail on warnings (--max-warnings 0, not used in CI)
 ```
 
 **Config:** `eslint.config.js` — `@eslint/js` recommended + `typescript-eslint` recommended. Rules:
 - `@typescript-eslint/no-explicit-any`: warn
 - `@typescript-eslint/no-unused-vars`: warn (argsIgnorePattern/VarsIgnorePattern: `^_`)
-- `no-console`: off, `no-var`: error, `prefer-const`: warn
+- `@typescript-eslint/explicit-module-boundary-types`: off
+- `no-console`: off, `no-var`: error, `prefer-const`: warn, `no-empty`: error (allowEmptyCatch: true)
+- `no-case-declarations`: warn, `no-control-regex`: warn, `no-useless-escape`: warn
+- `preserve-caught-error`: warn, `no-useless-assignment`: off
 
 **Ignores:** `dist`, `node_modules`, `**/*.test.ts`, `**/*.spec.ts`, `bin`
 
@@ -95,7 +103,7 @@ npx prettier --check <file>   # Check formatting only
 - `trailingComma: "es5"`, `arrowParens: "avoid"`
 - `endOfLine: "lf"`, `bracketSpacing: true`
 
-**Also see `.editorconfig`:** utf-8, lf, 2-space indent, insert_final_newline
+**Also see `.editorconfig`:** utf-8, lf, 2-space indent, insert_final_newline, trim_trailing_whitespace (except markdown)
 
 **Note:** `src/index.ts` currently has prettier formatting warnings — run `npx prettier --write src/index.ts` if needed.
 
@@ -135,7 +143,7 @@ See `.github/workflows/ci.yml` for full details.
 - **Definitions:** `src/tools/registry.ts` — all tool schemas (`TOOLS_DEFINITIONS` array)
 - **Execution:** `src/tools/execute.ts` — giant switch statement dispatching to impl modules
 - **Barrel:** `src/tools/index.ts` — re-exports (12 lines only)
-- **Impl modules:** `src/tools/impl/` — `file_read.ts`, `file_manage.ts`, `glob.ts`, `grep.ts`, `directory.ts`, `workspace.ts`, `todo.ts`, `question.ts`, `skill.ts`
+- **Impl modules:** `src/tools/impl/` — `file_read.ts`, `file_manage.ts`, `glob.ts`, `grep.ts`, `directory.ts`, `workspace.ts`, `todo.ts`, `question.ts`, `skill.ts`, `web.ts`, `lint_test.ts`
 - **Specialized tools:** `codeHealth.ts`, `testQuality.ts`, `subAgent.ts`
 
 ### Key Mechanisms

@@ -479,7 +479,7 @@ program
                 const prefix = isCurrent ? '●' : ' ';
                 const date = new Date(s.lastActivity).toLocaleDateString();
                 const name = s.name || s.id.slice(0, 20);
-                const summary = s.summary ? s.summary.slice(0, 80) : '';
+                const summary = s.summary || '';
 
                 screen.appendScroll(
                   COLORS.primary(`${prefix} ${(i + 1).toString().padStart(2)}. `) +
