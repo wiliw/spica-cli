@@ -169,7 +169,20 @@ export class OpenAICompatibleProvider extends BaseProvider {
 async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): Promise<LLMResponse> {
     // 关键修复：在添加新用户消息前，清理不完整的消息序列
     // 防止出现 assistant toolCalls 没有对应 tool messages 的情况
-    this.messages = cleanMessages(this.messages);
+    // 但保护缓存前缀（system prompt + early stable messages）不被 cleanMessages 破坏
+    if (this.cachePrefixEnd >= 0 && this.cachePrefixEnd < this.messages.length - 1) {
+      const prefixMessages = this.messages.slice(0, this.cachePrefixEnd + 1);
+      const suffixMessages = this.messages.slice(this.cachePrefixEnd + 1);
+      const cleanedSuffix = cleanMessages(suffixMessages);
+      this.messages = [...prefixMessages, ...cleanedSuffix];
+    } else {
+      this.messages = cleanMessages(this.messages);
+    }
+
+    // Mark prefix boundary on first call (system prompt + initial messages are stable)
+    if (this.cachePrefixEnd === -1) {
+      this.cachePrefixEnd = this.messages.length - 1;
+    }
 
     this.messages.push({ role: 'user', content: prompt });
 
@@ -509,8 +522,15 @@ async generate(prompt: string, tools?: ToolDefinition[], signal?: AbortSignal): 
 
   // 从当前历史发起生成请求（不添加新的user消息）
   async generateFromHistory(tools?: ToolDefinition[], signal?: AbortSignal): Promise<LLMResponse> {
-    // 关键修复：清理不完整的消息序列，防止 API 报错
-    this.messages = cleanMessages(this.messages);
+    // 关键修复：清理后缀消息，保护缓存前缀不被破坏
+    if (this.cachePrefixEnd >= 0 && this.cachePrefixEnd < this.messages.length - 1) {
+      const prefixMessages = this.messages.slice(0, this.cachePrefixEnd + 1);
+      const suffixMessages = this.messages.slice(this.cachePrefixEnd + 1);
+      const cleanedSuffix = cleanMessages(suffixMessages);
+      this.messages = [...prefixMessages, ...cleanedSuffix];
+    } else {
+      this.messages = cleanMessages(this.messages);
+    }
 
     try {
       const stream = await this.client.chat.completions.create({

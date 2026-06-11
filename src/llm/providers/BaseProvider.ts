@@ -40,6 +40,8 @@ export interface LLMProviderConfig {
 export abstract class BaseProvider extends EventEmitter {
   protected config: LLMProviderConfig;
   protected messages: ChatMessage[] = [];
+  // Track where the cacheable prefix ends (index of last stable message)
+  protected cachePrefixEnd: number = -1;
 
   constructor(config: LLMProviderConfig) {
     super();
@@ -71,5 +73,10 @@ export abstract class BaseProvider extends EventEmitter {
 
   setMessages(messages: ChatMessage[]): void {
     this.messages = messages;
+  }
+
+  // Mark current messages end as cache prefix boundary
+  markCachePrefixEnd(): void {
+    this.cachePrefixEnd = this.messages.length - 1;
   }
 }
