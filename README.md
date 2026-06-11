@@ -27,10 +27,10 @@ npm install && npm run build && npm link
 ## Use
 
 ```bash
-spica set deepseek https://api.deepseek.com/v1 sk-xxx deepseek-chat
-spica use deepseek
-spica                              # interactive
-spica run "fix the bug"            # single task
+spica set <name> <base-url> <api-key> <model>   # add a provider
+spica use <name>                                 # switch to it
+spica                                            # interactive
+spica run "fix the bug"                          # single task
 ```
 
 ## Features

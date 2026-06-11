@@ -27,10 +27,10 @@ npm install && npm run build && npm link
 ## 使用
 
 ```bash
-spica set deepseek https://api.deepseek.com/v1 sk-xxx deepseek-chat
-spica use deepseek
-spica                              # 交互模式
-spica run "fix the bug"            # 单次任务
+spica set <name> <base-url> <api-key> <model>   # 添加 provider
+spica use <name>                                 # 切换到该 provider
+spica                                            # 交互模式
+spica run "fix the bug"                          # 单次任务
 ```
 
 ## 特性
