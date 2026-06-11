@@ -721,15 +721,6 @@ function displayToolResult(record: ToolCallRecord, data: ToolResultData): void {
       }
     }
   } else {
-    // Compact模式：只读/查询工具静默（错误除外）
-    const READ_ONLY_TOOLS = new Set([
-      'file_read', 'grep', 'glob', 'file_exists',
-      'directory_list', 'bash', 'todo_read', 'workspace',
-    ]);
-    if (READ_ONLY_TOOLS.has(record.name) && data.success) {
-      return; // 静默成功
-    }
-
     // Compact模式：完整显示（工具名+参数+结果），带缩进
     screen.appendScroll(COLORS.muted('  '));  // 缩进
     screen.appendScroll(COLORS.tool(`${record.name}`));
@@ -1031,9 +1022,9 @@ export function setupAgentEvents(
     // 注册工具调用
     registerToolCall(data);
 
-    // 只显示关键工具（file_write, file_edit 等）
-    // bash 在 compact 模式下静默（通过 busy 状态栏和 ESC ESC 提供反馈）
-    const importantTools = ['file_write', 'file_edit', 'web_fetch', 'web_search'];
+    // 🔴 关键：显示工具开始提示（让用户知道 bash 正在执行，可以 ESC ESC）
+    // 只显示关键工具（bash, file_write 等）
+    const importantTools = ['bash', 'file_write', 'file_edit', 'web_fetch', 'web_search'];
     if (importantTools.includes(data.name)) {
       const args = data.arguments || {};
       const argsDisplay = data.name === 'bash'
