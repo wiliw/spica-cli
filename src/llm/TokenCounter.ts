@@ -1,8 +1,26 @@
+import { encoding_for_model, type Tiktoken } from 'tiktoken';
+
 export class TokenCounter {
   private static readonly AVERAGE_CHARS_PER_TOKEN = 4;
   private static readonly CJK_CHARS_PER_TOKEN = 1.5;
   private static readonly CODE_CHARS_PER_TOKEN = 3;
   private contextWindow: number = 128000;  // 默认值，可动态设置
+  private encoder: Tiktoken | null = null;
+
+  constructor(model?: string) {
+    this.contextWindow = 128000;
+    if (model) {
+      this.setModel(model);
+    }
+  }
+
+  setModel(model: string): void {
+    try {
+      this.encoder = encoding_for_model(model as any);
+    } catch {
+      this.encoder = null;
+    }
+  }
 
   setContextWindow(size: number): void {
     this.contextWindow = size;
@@ -40,6 +58,10 @@ export class TokenCounter {
   }
 
   estimateTokens(text: string): number {
+    if (this.encoder) {
+      return this.encoder.encode(text).length;
+    }
+    // Fallback to char-based estimation
     const type = this.detectContentType(text);
     const charsPerToken =
       type === 'cjk' ? TokenCounter.CJK_CHARS_PER_TOKEN :

@@ -56,7 +56,8 @@
     "openai": "^4.52.0",
     "ora": "^8.0.1",
     "prompts": "^2.4.2",
-    "simple-git": "^3.25.0"
+    "simple-git": "^3.25.0",
+    "tiktoken": "^1.0.22"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

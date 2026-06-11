@@ -57,7 +57,7 @@ export class LLMClient extends EventEmitter {
       this.emit('reasoning', content);
     });
 
-    this.tokenCounter = new TokenCounter();
+    this.tokenCounter = new TokenCounter(config.model);
     this.rateLimiter = new RateLimiter(config.rateLimit || {});
     this.functionCaller = new FunctionCaller();
   }
