@@ -60,7 +60,7 @@ export class ScreenManager {
       isStreaming: false,
       onVerboseToggle: undefined,
       pendingInputRefresh: false,
-      scrollbackBuffer: getScrollbackBuffer(500),
+      scrollbackBuffer: getScrollbackBuffer(3000),
     };
 
     // 监听终端 resize
@@ -73,33 +73,27 @@ export class ScreenManager {
     const newHeight = process.stdout.rows || 24;
     const newWidth = process.stdout.columns || 80;
 
-    // 更新状态
     this.state.terminalHeight = newHeight;
     this.state.terminalWidth = newWidth;
-
-    // 重新计算布局
     this.state.inputLines = this.calcInputLines();
     this.state.statusRow = this.state.terminalHeight - this.state.inputLines - 1;
     this.state.scrollBottom = this.state.statusRow - 1;
 
-    // 清屏
+    // Clear and set new scroll region
     writeStdout(`${ESC}[2J${ESC}[H`);
-
-    // 设置滚动区域
     writeStdout(`${ESC}[1;${this.state.scrollBottom}r`);
 
-    // 重绘历史内容（适配新的终端高度）
+    // Redraw: show all available history, capped to avoid flicker on huge buffers
+    const allLines = this.state.scrollbackBuffer.getLines();
     const visibleLines = this.state.scrollBottom;
-    const historyLines = this.state.scrollbackBuffer.getLastNLines(visibleLines);
+    // Never show fewer than visible area; prefer up to 3× visible to give context
+    const showCount = Math.min(allLines.length, Math.max(visibleLines, visibleLines * 3));
+    const historyLines = allLines.slice(-showCount);
 
     for (const line of historyLines) {
       writeStdout(line + '\n');
     }
 
-    // 显示 resize 提示
-    writeStdout(COLORS.muted('[resize] history preserved\n'));
-
-    // 刷新输入框和状态栏
     this.drawStatus();
     this.refreshInput();
     this.restoreCursor();

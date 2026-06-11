@@ -453,43 +453,52 @@ program
               return;
             }
 
-            // 历史阅读界面（只读，不可继续对话）
+            // History browser — archived sessions (read-only)
             if (cmd === "sessions" || cmd === "history" || cmd === "h") {
-              const { listSessions, loadSessionById } = await import("./utils/session");
+              const { listSessions } = await import("./utils/session");
               const sessions = listSessions(agent.getWorkspacePath());
 
-              screen.appendScroll(COLORS.primary.bold("\n📚 History Browser (Read Only)\n"));
-              screen.appendScroll(COLORS.muted("  Archived chats for review only (cannot continue)\n\n"));
+              screen.appendScroll(COLORS.primary.bold("\n📚 Sessions\n"));
+              screen.appendScroll(COLORS.muted("─".repeat(60) + "\n"));
+
+              // Current session
+              const currentMsgs = agent.getMessages();
+              const currentId = loadSession(agent.getWorkspacePath())?.id;
+              screen.appendScroll(COLORS.primary(`● Current: ${currentMsgs.length} messages`) +
+                (currentId ? COLORS.muted(`  (id: ${currentId.slice(-12)})`) : '') + '\n');
+              screen.appendScroll(COLORS.muted("─".repeat(60) + "\n"));
 
               if (sessions.length === 0) {
-                screen.appendScroll(COLORS.muted("  No archived sessions yet.\n"));
-                screen.appendScroll(COLORS.muted("  Use /archive to save current chat and start new.\n\n"));
+                screen.appendScroll(COLORS.muted("  No archived sessions.\n"));
+                screen.appendScroll(COLORS.muted("  /archive to save current and start new.\n\n"));
                 return;
               }
 
-              // 显示历史列表
-              screen.appendScroll(COLORS.primary.bold("  Recent chats:\n"));
-              sessions.slice(0, 15).forEach((s, i) => {
-                const lastDate = new Date(s.lastActivity).toLocaleDateString();
+              sessions.slice(0, 20).forEach((s, i) => {
+                const isCurrent = s.id === currentId;
+                const prefix = isCurrent ? '●' : ' ';
+                const date = new Date(s.lastActivity).toLocaleDateString();
+                const name = s.name || s.id.slice(0, 20);
+                const summary = s.summary ? s.summary.slice(0, 80) : '';
+
                 screen.appendScroll(
-                  COLORS.primary(`    ${i + 1}. ${s.id.slice(0, 15)}... (${s.messageCount} msgs, ${lastDate})\n`),
+                  COLORS.primary(`${prefix} ${(i + 1).toString().padStart(2)}. `) +
+                  COLORS.primary.bold(name.slice(0, 40)) + '\n'
                 );
-                if (s.summary) {
-                  screen.appendScroll(
-                    COLORS.muted(`       ${s.summary}\n`),
-                  );
+                screen.appendScroll(
+                  COLORS.muted(`     ${s.messageCount} msgs  ${date}  ${s.id.slice(-12)}`) + '\n'
+                );
+                if (summary) {
+                  screen.appendScroll(COLORS.muted(`     ${summary}\n`));
                 }
               });
 
-              if (sessions.length > 15) {
-                screen.appendScroll(COLORS.muted(`    ... and ${sessions.length - 15} more\n`));
+              if (sessions.length > 20) {
+                screen.appendScroll(COLORS.muted(`  ... ${sessions.length - 20} more\n`));
               }
 
-              screen.appendScroll(COLORS.muted("\n  Commands:\n"));
-              screen.appendScroll(COLORS.muted("    /view <id>     Read session content\n"));
-              screen.appendScroll(COLORS.muted("    /rename <id> <name>  Rename session\n"));
-              screen.appendScroll(COLORS.muted("    /delete <id>   Delete session\n"));
-              screen.appendScroll(COLORS.muted("\n  Note: History is read-only. To continue work, stay in current session.\n\n"));
+              screen.appendScroll(COLORS.muted("\n─".repeat(60) + "\n"));
+              screen.appendScroll(COLORS.muted("/view <id>  /rename <id> <name>  /delete <id>\n\n"));
 
               return;
             }
