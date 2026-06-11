@@ -458,13 +458,13 @@ program
               const { listSessions } = await import("./utils/session");
               const sessions = listSessions(agent.getWorkspacePath());
 
-              screen.appendScroll(COLORS.primary.bold("\n📚 Sessions\n"));
+              screen.appendScroll(COLORS.primary.bold("\nSessions\n"));
               screen.appendScroll(COLORS.muted("─".repeat(60) + "\n"));
 
               // Current session
               const currentMsgs = agent.getMessages();
               const currentId = loadSession(agent.getWorkspacePath())?.id;
-              screen.appendScroll(COLORS.primary(`● Current: ${currentMsgs.length} messages`) +
+              screen.appendScroll(COLORS.primary(`* Current: ${currentMsgs.length} messages`) +
                 (currentId ? COLORS.muted(`  (id: ${currentId.slice(-12)})`) : '') + '\n');
               screen.appendScroll(COLORS.muted("─".repeat(60) + "\n"));
 
@@ -476,17 +476,17 @@ program
 
               sessions.slice(0, 20).forEach((s, i) => {
                 const isCurrent = s.id === currentId;
-                const prefix = isCurrent ? '●' : ' ';
+                const prefix = isCurrent ? '*' : ' ';
                 const date = new Date(s.lastActivity).toLocaleDateString();
-                const name = s.name || s.id.slice(0, 20);
+                const name = s.name || s.id;
                 const summary = s.summary || '';
 
                 screen.appendScroll(
                   COLORS.primary(`${prefix} ${(i + 1).toString().padStart(2)}. `) +
-                  COLORS.primary.bold(name.slice(0, 40)) + '\n'
+                  COLORS.primary.bold(name.slice(0, 50)) + '\n'
                 );
                 screen.appendScroll(
-                  COLORS.muted(`     ${s.messageCount} msgs  ${date}  ${s.id.slice(-12)}`) + '\n'
+                  COLORS.muted(`     ${s.messageCount} msgs  ${date}  ${s.id}`) + '\n'
                 );
                 if (summary) {
                   screen.appendScroll(COLORS.muted(`     ${summary}\n`));
@@ -514,7 +514,7 @@ program
                 return;
               }
 
-              screen.appendScroll(COLORS.primary.bold(`\n📖 Reading: ${session.name || sessionId}\n`));
+              screen.appendScroll(COLORS.primary.bold(`\nReading: ${session.name || sessionId}\n`));
               screen.appendScroll(COLORS.muted(`  Created: ${new Date(session.createdAt).toLocaleString()}\n`));
               screen.appendScroll(COLORS.muted(`  Last: ${new Date(session.lastActivity).toLocaleString()}\n`));
               screen.appendScroll(COLORS.muted(`  Messages: ${session.messages?.length || 0}\n`));
@@ -526,7 +526,7 @@ program
               const MAX_TO_SHOW = 50;  // protect against huge sessions
 
               messages.slice(0, MAX_TO_SHOW).forEach((m, i) => {
-                const role = m.role === 'user' ? '👤' : m.role === 'assistant' ? '🤖' : m.role === 'tool' ? '🔧' : '📋';
+                const role = m.role === 'user' ? '[user]' : m.role === 'assistant' ? '[ai]' : m.role === 'tool' ? '[tool]' : '[sys]';
                 const content = (m.content || '').slice(0, 500);
                 const preview = content.split('\n').slice(0, 3).join(' ');
 
@@ -534,14 +534,14 @@ program
                 screen.appendScroll(COLORS.muted(`${preview}\n`));
 
                 if (m.toolCalls && m.toolCalls.length > 0) {
-                  screen.appendScroll(COLORS.muted(`  → ${m.toolCalls.map(tc => tc.name).join(', ')}\n`));
+                  screen.appendScroll(COLORS.muted(`  tools: ${m.toolCalls.map(tc => tc.name).join(', ')}\n`));
                 }
               });
 
               if (messages.length > MAX_TO_SHOW) {
                 screen.appendScroll(COLORS.muted(`\n  ... and ${messages.length - MAX_TO_SHOW} more messages\n`));
               }
-              screen.appendScroll(COLORS.muted(`\n  ── End of session (${messages.length} messages) ──\n\n`));
+              screen.appendScroll(COLORS.muted(`\n  -- End of session (${messages.length} messages) --\n\n`));
 
               return;
             }
@@ -653,7 +653,7 @@ program
                   if (summary) {
                     if (fallbackReason) {
                       screen.appendScroll(COLORS.muted(`  Summary: ${summary}\n`));
-                      screen.appendScroll(COLORS.warning(`  ⚠ LLM summarization failed: ${fallbackReason}\n`));
+                      screen.appendScroll(COLORS.warning(`  [!] LLM summarization failed: ${fallbackReason}\n`));
                       screen.appendScroll(COLORS.muted(`  Using local fallback instead.\n`));
                     } else {
                       screen.appendScroll(COLORS.muted(`  Summary: ${summary}\n`));
@@ -788,7 +788,7 @@ program
                   screen.appendScroll(COLORS.muted("  (none)\n"));
                 } else {
                   packages.forEach((p) => {
-                    screen.appendScroll(`  ${COLORS.success("●")} ${p.name} (${p.skills.length} skills)\n`);
+                    screen.appendScroll(`  ${COLORS.success("*")} ${p.name} (${p.skills.length} skills)\n`);
                   });
                 }
 
@@ -1346,7 +1346,7 @@ program
     const providers = await listProviders();
     const defaultProvider = (await loadGlobalSettings()).defaultProvider;
     providers.forEach((p) => {
-      const mark = p === defaultProvider ? "●" : "○";
+      const mark = p === defaultProvider ? "*" : " ";
       console.log(`${mark} ${p}`);
     });
   });

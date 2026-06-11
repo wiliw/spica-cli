@@ -145,7 +145,7 @@ describe('formatTestQualityResult', () => {
     const output = formatTestQualityResult(result);
     
     expect(output).toContain('6.5/10');
-    expect(output).toContain('✗ FAIL');
+    expect(output).toContain('[FAIL]');
     expect(output).toContain('Total tests: 5');
     expect(output).toContain('TST-004');
   });

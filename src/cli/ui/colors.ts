@@ -137,13 +137,13 @@ export const format = {
   success: (text: string) => COLORS.success(text),
   error: (text: string) => COLORS.error(text),
   warning: (text: string) => COLORS.warning(text),
-  toolCall: (name: string) => COLORS.tool(`→ ${name}`),
+  toolCall: (name: string) => COLORS.tool(`- ${name}`),
   toolResult: (name: string, success: boolean, output: string) => {
-    const icon = success ? COLORS.success('✓') : COLORS.error('✗');
+    const icon = success ? COLORS.success('OK') : COLORS.error('FAIL');
     return `${icon} ${name}: ${output}`;
   },
   reasoning: (content: string) => COLORS.reasoning(content),
-  diffFile: (path: string) => COLORS.file(`📄 ${path}`),
+  diffFile: (path: string) => COLORS.file(`file: ${path}`),
   diffAdd: (line: string) => COLORS.diffAdd(`+ ${line}`),
   diffRemove: (line: string) => COLORS.diffRemove(`- ${line}`),
   permissionBox: (reason: string) => {
@@ -153,7 +153,7 @@ export const format = {
     const dimBorder = COLORS.muted('─'.repeat(50));
     return `
 ${border('═'.repeat(50))}
-${title('  ⚠  PERMISSION REQUIRED')}
+${title('  [!] PERMISSION REQUIRED')}
 ${border('═'.repeat(50))}
 ${text(`  Action: ${reason}`)}
 ${dimBorder}

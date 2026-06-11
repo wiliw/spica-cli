@@ -45,7 +45,7 @@ describe('CLI Commands', () => {
 
   it.skipIf(shouldSkipApiTests)('should list providers', async () => {
     const result = await runCli(['list']);
-    expect(result.stdout).toMatch(/●|○/);  // provider marker
+    expect(result.stdout).toMatch(/\* /);  // default provider marker
   }, 10000);
 
   it.skipIf(shouldSkipApiTests)('should show provider details', async () => {

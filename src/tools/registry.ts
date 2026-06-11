@@ -403,7 +403,7 @@ name: 'bash',
   {
     name: 'task',
     batchHint: 'neutral' as const,
-    description: 'Run parallel subagents (max 3). Each subagent works independently. IMPORTANT: If a subagent fails (returns ✗), you should: 1) Analyze the error message, 2) Retry with a modified prompt or different approach, 3) Or handle the failed task yourself in main agent. Do NOT ignore failed subagents - investigate and resolve them.',
+    description: 'Run parallel subagents (max 3). Each subagent works independently. IMPORTANT: If a subagent fails (returns [FAIL]), you should: 1) Analyze the error message, 2) Retry with a modified prompt or different approach, 3) Or handle the failed task yourself in main agent. Do NOT ignore failed subagents - investigate and resolve them.',
     parameters: {
       type: 'object' as const,
       properties: {

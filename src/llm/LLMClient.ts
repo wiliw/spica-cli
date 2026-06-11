@@ -86,7 +86,7 @@ export class LLMClient extends EventEmitter {
     const controller = new AbortController();
     this.abortController = controller;
 
-    // 🔴 关键：链接外部 signal（来自 agent 的 currentAbortController）
+    // Link external signal (from agent's currentAbortController)
     if (externalSignal) {
       if (externalSignal.aborted) {
         controller.abort();
@@ -249,7 +249,7 @@ export class LLMClient extends EventEmitter {
     const controller = new AbortController();
     this.abortController = controller;
 
-    // 🔴 链接外部 signal
+    // Link external signal
     if (externalSignal) {
       if (externalSignal.aborted) {
         controller.abort();
@@ -336,7 +336,7 @@ export class LLMClient extends EventEmitter {
     const controller = new AbortController();
     this.abortController = controller;
 
-    // 🔴 链接外部 signal
+    // Link external signal
     if (externalSignal) {
       if (externalSignal.aborted) {
         controller.abort();

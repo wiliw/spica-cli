@@ -427,7 +427,7 @@ export class SpicaAgent extends EventEmitter {
       }
 
       try {
-        // 🔴 关键：传递 signal 给 operation
+        // Pass signal to operation
         return await operation(signal);
       } catch (error: unknown) {
         // InterruptError: don't retry, propagate immediately
@@ -744,7 +744,7 @@ async init() {
  * @throws InterruptError if interrupted by user
  */
 async runLoop(prompt: string, maxIterations = 50): Promise<string> {
-    // 🔴 Cancel-on-entry: 如果 pendingCancel，拒绝进入
+    // Cancel-on-entry: if pendingCancel, refuse to enter
     if (this.checkCanceledOnEntry()) {
       this.pendingCancel = false;
       this.emit('agent_interrupted', { reason: 'Canceled on entry (pendingCancel)' });
@@ -774,7 +774,7 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
         throw new Error('LLM client not initialized');
       }
 
-    // 🔒 自动checkpoint：在AI工作前创建备份点（文件快照，不污染git）
+    // Auto-checkpoint before AI work (file snapshot, no git pollution)
     await this.createAutoCheckpoint(prompt);
     
     // Apply any deferred summary from previous compression
@@ -837,7 +837,7 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
         (sig) => this.llm!.generate(prompt, toolDefinitions, sig),
         'llm_generate',
         10,
-        signal  // 🔴 关键：传递 abort signal
+        signal  // Pass abort signal
       );
     } catch (llmError: unknown) {
       const errorMsg = llmError instanceof Error ? llmError.message : String(llmError);
@@ -901,7 +901,7 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
               (sig) => this.llm!.generateFromHistory(toolDefinitions, sig),
               'llm_generate_reasoning_continue',
               10,
-              signal  // 🔴 关键：传递 abort signal
+              signal  // Pass abort signal
             );
           } catch (retryError: unknown) {
             const errorMsg = retryError instanceof Error ? retryError.message : String(retryError);
@@ -946,7 +946,7 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
             (sig) => this.llm!.generateFromHistory(toolDefinitions, sig),
             'llm_generate_empty_retry',
             10,
-            signal  // 🔴 关键：传递 abort signal
+            signal  // Pass abort signal
           );
         } catch (retryError: unknown) {
           const errorMsg = retryError instanceof Error ? retryError.message : String(retryError);
@@ -1144,11 +1144,11 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
                 toolResults.map(t => ({ name: t.name, result: t.result, id: t.id })),
                 toolDefinitions,
                 postToolMessages,  // 在 tool 消息之后添加
-                sig  // 🔴 传递 signal
+                sig  // Pass signal
               ),
               'llm_continue',
               10,
-              signal  // 🔴 关键：传递 abort signal
+              signal  // Pass abort signal
             );
           } catch (llmError: unknown) {
             const errorMsg = llmError instanceof Error ? llmError.message : String(llmError);

@@ -557,9 +557,9 @@ Write-Output $proc.Id;
             }
           }, stuckWarningMs);
 
-          // 🔴 关键修复：主动检查 abort 状态（每 200ms）
-          // execa 的 cancelSignal 对于无输出的命令不会立即生效
-          // 我们需要主动检查并 kill 进程组
+          // Critical: actively check abort status (every 200ms)
+          // execa's cancelSignal doesn't take effect immediately for no-output commands
+          // We need to actively check and kill the process group
           const abortCheckInterval = setInterval(() => {
             if (abortController.signal.aborted && bashProcess.pid) {
               clearInterval(abortCheckInterval);
@@ -1117,10 +1117,10 @@ Write-Output $proc.Id;
           for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             // Check parent interrupt and sibling early-exit before each attempt
             if (externalSignal?.aborted) {
-              return `✗ ${taskLabel}: Parent agent interrupted`;
+              return `[FAIL] ${taskLabel}: Parent agent interrupted`;
             }
             if (siblingAbortController.signal.aborted) {
-              return `✗ ${taskLabel}: Early exit — sibling subagent already solved the task`;
+              return `[FAIL] ${taskLabel}: Early exit — sibling subagent already solved the task`;
             }
 
             const taskAgent = new SpicaAgent(undefined, WORKSPACE);
@@ -1154,7 +1154,7 @@ Write-Output $proc.Id;
                 taskAgent.interrupt();
                 taskAgent.dispose();
                 clearTimeout(timeoutId);
-                return `✗ ${taskLabel}: Parent agent interrupted`;
+                return `[FAIL] ${taskLabel}: Parent agent interrupted`;
               }
               abortHandler = () => {
                 externalSignal.removeEventListener('abort', abortHandler!);
@@ -1176,7 +1176,7 @@ Write-Output $proc.Id;
               taskAgent.interrupt();
               taskAgent.dispose();
               clearTimeout(timeoutId);
-              return `✗ ${taskLabel}: Early exit — sibling subagent already solved the task`;
+              return `[FAIL] ${taskLabel}: Early exit — sibling subagent already solved the task`;
             }
 
             try {
@@ -1238,7 +1238,7 @@ Write-Output $proc.Id;
                 eventCallback('sub_agent_done', { id: subTaskId, summary });
               }
 
-              return `✓ ${taskLabel}: ${summary}`;
+              return `[PASS] ${taskLabel}: ${summary}`;
             } catch (err: any) {
               // Cleanup
               clearTimeout(timeoutId);
@@ -1266,17 +1266,17 @@ Write-Output $proc.Id;
               if (eventCallback) {
                 eventCallback('sub_agent_error', { id: subTaskId, error: lastError });
               }
-              return `✗ ${taskLabel}: ${lastError}`;
+              return `[FAIL] ${taskLabel}: ${lastError}`;
             }
           }
 
           // Should not reach here, but just in case
-          return `✗ ${taskLabel}: ${lastError}`;
+          return `[FAIL] ${taskLabel}: ${lastError}`;
         }));
 
         // 分析结果，检测失败
-        const failedTasks = results.filter(r => r.startsWith('✗'));
-        const succeededTasks = results.filter(r => r.startsWith('✓'));
+        const failedTasks = results.filter(r => r.startsWith('[FAIL]'));
+        const succeededTasks = results.filter(r => r.startsWith('[PASS]'));
 
         // Cap total output size to prevent context pollution
         const MAX_TOTAL_OUTPUT = 2000;
