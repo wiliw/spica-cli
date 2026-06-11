@@ -4,7 +4,7 @@ import { executeTool, getAllToolDefinitions, setWorkspace, getToolBatchHint } fr
 import { initMCP } from './mcp/client';
 import { initSkills, listSkills } from './skills/index';
 import { getProviderConfig } from './utils/settings';
-import { getSystemPrompt, getCompactPrompt } from './prompts/system';
+import { getSystemPrompt, getSystemPromptStable, getSystemPromptVariable, getCompactPrompt } from './prompts/system';
 import { loadProjectConfig as loadAgentsConfig, autoDetectProject, createAgentsMd, type ProjectConfig } from './utils/projectConfig';
 import { SkillDefinition } from './utils/settings';
 import { cleanMessages } from './utils/messageCleaner';
@@ -140,6 +140,9 @@ export class SpicaAgent extends EventEmitter {
   private _providerName?: string;
   private _cachedSkills: SkillDefinition[] = [];
   private _compacting = false;
+  // Non-blocking compression: LLM summary runs in background
+  private _pendingCompression: Promise<void> | null = null;
+  private _deferredSummary: ChatMessage | null = null;
 
   // === Interrupt 机制（参考 Crush 设计）===
   // 当前活跃的 AbortController（每个请求独立）
@@ -639,7 +642,9 @@ async init() {
     const skills = listSkills(this.workspacePath);
     const skillsMetadata = skills.map(s => `- ${s.name}: ${s.description}`).join('\n');
     
-    this.llm.setSystemPrompt(getSystemPrompt(this.projectConfig, skillsMetadata, this.workspacePath));
+    const stablePrompt = getSystemPromptStable(this.projectConfig);
+    const variablePrompt = getSystemPromptVariable(skillsMetadata, this.workspacePath);
+    this.llm.setSystemPromptSplit(stablePrompt, variablePrompt);
     
     this.llm.on('chunk', (chunk: string) => {
       this.emit('stream', { chunk });
@@ -768,6 +773,9 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
     // 🔒 自动checkpoint：在AI工作前创建备份点（文件快照，不污染git）
     await this.createAutoCheckpoint(prompt);
     
+    // Apply any deferred summary from previous compression
+    this.applyPendingSummary();
+
     // Pre-request: 基于token数判断是否需要压缩
     const existingMessages = this.llm.getMessages();
     const tokenCounter = new TokenCounter();
@@ -799,9 +807,11 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
 
     const triggerThreshold = Math.floor(contextWindow * 0.6);  // 触发阈值：60%（现代设计，更早触发避免过满）
 
-    // 当使用超过触发阈值时自动压缩（compact 内部会 emit context_compressed 事件）
+    // 当使用超过触发阈值时自动压缩
+    // 非阻塞：规则截断立即生效，LLM 摘要在后台异步生成，下次请求前注入
     if (usedTokens > triggerThreshold) {
-      await this.compact(signal);
+      const targetTokens = Math.floor(contextWindow * 0.4);
+      await this.startNonBlockingCompression(targetTokens, signal);
     }
 
     this.emit('token_usage', {
@@ -1327,201 +1337,265 @@ async runLoop(prompt: string, maxIterations = 50): Promise<string> {
  * @returns Promise that resolves when compression complete
  * @emits context_compressed with { before, after, removed }
  */
-public async compact(signal?: AbortSignal): Promise<void> {
-    if (!this.llm || this._compacting) return;
+  /**
+   * Non-blocking compression: rule-truncate immediately, LLM summary in background.
+   *
+   * Phase 1 (instant): Keep last N messages, truncate long content — tokens drop NOW.
+   * Phase 2 (background): Fire LLM summary for old messages, store for next request.
+   *
+   * On the next request, applyPendingSummary() injects the summary after system messages.
+   */
+  private async startNonBlockingCompression(targetTokens: number, signal?: AbortSignal): Promise<void> {
+    if (!this.llm) return;
     this._compacting = true;
+
     try {
+      const allMessages = this.llm.getMessages();
+      const systemMessages = allMessages.filter(m => m.role === 'system');
+      const nonSystem = allMessages.filter(m => m.role !== 'system');
+
+      if (nonSystem.length === 0) {
+        this.emit('context_compressed', { before: allMessages.length, after: allMessages.length, tokensBefore: 0, tokensAfter: 0 });
+        return;
+      }
+
+      const tokenCounter = new TokenCounter();
       const provider = this.llm.getProvider();
-      const targetTokens = Math.floor(provider.getContextWindow() * 0.4);
-      await this.compactToTarget(targetTokens, signal);
+      tokenCounter.setContextWindow(provider.getContextWindow());
+      const contextWindow = provider.getContextWindow();
+      const usedTokens = tokenCounter.estimateMessages(nonSystem);
+
+      if (usedTokens < targetTokens) {
+        this.emit('context_compressed', { before: allMessages.length, after: allMessages.length, tokensBefore: usedTokens, tokensAfter: usedTokens });
+        return;
+      }
+
+      // --- Phase 1: Rule-based truncation (instant) ---
+      const ratio = usedTokens / targetTokens;
+      let keepCount = ratio > 2 ? 5 : ratio > 1.5 ? 8 : 12;
+      const minKeep = Math.max(3, Math.min(8, Math.ceil(contextWindow / 50000)));
+      keepCount = Math.max(minKeep, Math.min(keepCount, Math.max(minKeep + 2, 15), Math.floor(nonSystem.length * 0.25)));
+
+      // Score messages by importance — keep high-value context (file writes, user intent)
+      // even if they're not in the recent tail
+      const scored = nonSystem.map((m, i) => ({ msg: m, score: this.scoreMessage(m, i, nonSystem.length) }));
+      const lastCount = Math.max(2, Math.ceil(keepCount / 3)); // always keep recent tail
+      const tail = scored.slice(-lastCount);
+      const head = scored.slice(0, -lastCount);
+      head.sort((a, b) => b.score - a.score);
+      const topHead = head.slice(0, Math.max(0, keepCount - lastCount));
+      const selected = [...topHead, ...tail].sort((a, b) => {
+        // restore chronological order from original indices
+        const ai = nonSystem.indexOf(a.msg);
+        const bi = nonSystem.indexOf(b.msg);
+        return ai - bi;
+      }).map(s => s.msg);
+
+      const oldMessages = nonSystem.filter(m => !selected.includes(m));
+
+      const maxContentLength = Math.max(500, Math.floor(contextWindow * 0.01));
+
+      const truncatedRecent = selected.map(m => {
+        const truncatedContent = (m.content || '').length > maxContentLength
+          ? (m.content || '').slice(0, maxContentLength) + '...[truncated]'
+          : m.content;
+
+        const maxToolCalls = Math.max(3, Math.min(10, Math.floor(contextWindow / 25000)));
+        let truncatedToolCalls = m.toolCalls;
+        if (m.toolCalls && m.toolCalls.length > maxToolCalls) {
+          truncatedToolCalls = m.toolCalls.slice(0, maxToolCalls);
+          truncatedToolCalls.push({ id: 'truncated', name: '...[truncated]', arguments: {} });
+        }
+
+        return { ...m, content: truncatedContent, toolCalls: truncatedToolCalls };
+      });
+
+      // Clean tool messages
+      const cleaned = this.cleanToolMessages(truncatedRecent);
+
+      // Apply immediately — context shrinks NOW
+      this.llm.setMessages([...systemMessages, ...cleaned]);
+      const newTokens = tokenCounter.estimateMessages(cleaned);
+
+      this.emit('context_compressed', {
+        before: allMessages.length,
+        after: systemMessages.length + cleaned.length,
+        tokensBefore: usedTokens,
+        tokensAfter: newTokens,
+      });
+
+      // --- Phase 2: Background LLM summary (non-blocking) ---
+      if (oldMessages.length === 0) return;
+
+      // Rich prompt with tool names preserved (same format as generateSummary)
+      const summaryPrompt = this.buildSummaryPrompt(oldMessages);
+
+      this._pendingCompression = (async () => {
+        try {
+          const summaryMsg = await this.generateSummary(oldMessages, signal);
+          if (summaryMsg.content && summaryMsg.content.trim()) {
+            this._deferredSummary = summaryMsg;
+          }
+        } catch {
+          // generateSummary has its own fallback and shouldn't throw, but guard anyway
+          this._deferredSummary = null;
+        }
+        this._pendingCompression = null;
+      })();
     } finally {
       this._compacting = false;
     }
   }
 
-  // 压缩到指定目标tokens以下
-  private async compactToTarget(targetTokens: number, signal?: AbortSignal): Promise<void> {
-    if (!this.llm) return;
-    const allMessages = this.llm.getMessages();
+  /**
+   * Inject any deferred compression summary into the message list.
+   * Called at the start of each run() — applies the LLM summary from
+   * the previous request's background compression.
+   */
+  private applyPendingSummary(): void {
+    if (!this._deferredSummary || !this.llm) return;
 
-    // 分离系统提示词（始终保留）
-    const systemPrompt = allMessages.find(m => m.role === 'system');
-    const messagesWithoutSystem = allMessages.filter(m => m.role !== 'system');
-
-    // 如果没有非系统消息，不需要压缩
-    if (messagesWithoutSystem.length === 0) {
-      this.emit('context_compressed', { before: allMessages.length, after: allMessages.length, tokensBefore: 0, tokensAfter: 0 });
+    // Wait for in-flight compression if still running
+    if (this._pendingCompression) {
+      // Still in progress — we'll catch it next time.
+      // Don't block the current request.
       return;
     }
 
-    const tokenCounter = new TokenCounter();
-    const provider = this.llm.getProvider();
-    tokenCounter.setContextWindow(provider.getContextWindow());
-    const contextWindow = provider.getContextWindow();
+    const messages = this.llm.getMessages();
+    const summary = this._deferredSummary;
+    this._deferredSummary = null;
 
-    const usedTokens = tokenCounter.estimateMessages(messagesWithoutSystem);
-
-    // 如果 tokens 已经低于目标，不需要压缩
-    if (usedTokens < targetTokens) {
-      this.emit('context_compressed', { before: allMessages.length, after: allMessages.length, tokensBefore: usedTokens, tokensAfter: usedTokens });
-      return;
-    }
-
-    // 根据超量程度决定保留消息数量
-    const ratio = usedTokens / targetTokens;
-    let keepCount = ratio > 2 ? 5 : ratio > 1.5 ? 8 : 12;
-    // 确保最小保留 5 条，最大保留不超过 15 条，且不超过总数的 25%
-    // 测试证明 min=3 max=8 过于激进，会丢失太多上下文
-    // Adaptive floor: small windows keep fewer, large windows keep more
-    const minKeep = Math.max(3, Math.min(8, Math.ceil(contextWindow / 50000)));
-    keepCount = Math.max(minKeep, Math.min(keepCount, Math.max(minKeep + 2, 15), Math.floor(messagesWithoutSystem.length * 0.25)));
-
-    const recentMessages = messagesWithoutSystem.slice(-keepCount);
-    const _oldMessages = messagesWithoutSystem.slice(0, -keepCount);
-
-    // Adaptive truncation: 1% of context window, floor 500 chars
-    const maxContentLength = Math.max(500, Math.floor(contextWindow * 0.01));
-
-    // 对 recentMessages 中的超长内容进行截断
-    const truncatedRecent = recentMessages.map(m => {
-      // 截断 content（adaptive to context window）
-      const truncatedContent = (m.content || '').length > maxContentLength
-        ? (m.content || '').slice(0, maxContentLength) + '...[truncated]'
-        : m.content;
-
-      // 截断 toolCalls（adaptive to context window）
-      const maxToolCalls = Math.max(3, Math.min(10, Math.floor(contextWindow / 25000)));
-      let truncatedToolCalls = m.toolCalls;
-      if (m.toolCalls && m.toolCalls.length > maxToolCalls) {
-        truncatedToolCalls = m.toolCalls.slice(0, maxToolCalls);
-        // 标记被截断
-        truncatedToolCalls.push({
-          id: 'truncated',
-          name: '...[truncated]',
-          arguments: {}
-        });
-      }
-
-      return {
-        ...m,
-        content: truncatedContent,
-        toolCalls: truncatedToolCalls,
-      };
-    });
-
-    // 用 LLM 生成摘要（如果还有旧消息）
-    // Safety: if kept messages alone exceed 70% of target, reduce until they fit
-    const MAX_COMPACT_ITERATIONS = 5;
-    const safetyTruncated = [...truncatedRecent];
-    let safetyTokens = tokenCounter.estimateMessages(safetyTruncated);
-    let compactIterations = 0;
-
-    // 从后面移除消息（保留前面的assistant-tool配对）
-    while (safetyTokens > targetTokens * 0.7 && safetyTruncated.length > 3) {
-      compactIterations++;
-      if (compactIterations > MAX_COMPACT_ITERATIONS) {
-        this.emit('context_warning', {
-          level: 'warning',
-          usage: 100,
-          message: `Compact loop exceeded ${MAX_COMPACT_ITERATIONS} iterations. Keeping remaining messages.`,
-        });
-        break;
-      }
-      safetyTruncated.pop();  // 从后面移除
-      safetyTokens = tokenCounter.estimateMessages(safetyTruncated);
-    }
-    // Recompute oldMessages to match possibly reduced recent set
-    const finalOldMessages = messagesWithoutSystem.slice(0, messagesWithoutSystem.length - safetyTruncated.length);
-
-    if (finalOldMessages.length > 0) {
-      const summary = await this.generateSummary(finalOldMessages, signal);
-      // 保留 assistant + 对应的 tool messages，过滤掉孤立的 tool messages
-      const safetyTruncatedClean: ChatMessage[] = [];
-      const existingToolMessageIds = new Set<string>();
-      const assistantToolCallIds = new Set<string>();
-
-      // 第一遍：收集所有存在的 tool message 的 toolCallId，以及所有 assistant 的 toolCall id
-      for (const m of safetyTruncated) {
-        if (m.role === 'tool' && m.toolCallId) {
-          existingToolMessageIds.add(m.toolCallId);
-        }
-        if (m.role === 'assistant' && m.toolCalls) {
-          for (const tc of m.toolCalls) {
-            assistantToolCallIds.add(tc.id);
-          }
-        }
-      }
-
-      // 第二遍：保留 user/assistant，以及匹配的 tool messages（不含 system，因为已分离）
-      for (const m of safetyTruncated) {
-        if (m.role === 'user' || m.role === 'assistant') {
-          // 如果是 assistant with toolCalls，检查每个toolCall是否有对应的tool message
-          if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
-            const hasAllToolMessages = m.toolCalls.every(tc => existingToolMessageIds.has(tc.id));
-            if (!hasAllToolMessages) {
-              // 缺少部分 tool messages，去掉所有 toolCalls
-              safetyTruncatedClean.push({ ...m, toolCalls: undefined });
-            } else {
-              safetyTruncatedClean.push(m);
-            }
-          } else {
-            safetyTruncatedClean.push(m);
-          }
-        } else if (m.role === 'tool' && m.toolCallId) {
-          // 只保留有对应 assistant message 的 tool message
-          if (assistantToolCallIds.has(m.toolCallId)) {
-            safetyTruncatedClean.push(m);
-          }
-        }
-      }
-
-      // 组装压缩后的消息：系统提示词 + 摘要 + 保留的消息
-      const compressed = systemPrompt
-        ? [systemPrompt, summary, ...safetyTruncatedClean]
-        : [summary, ...safetyTruncatedClean];
-      this.llm.setMessages(compressed);
-
-      // 检查压缩后的 tokens，如果仍然超限，继续压缩
-      const newTokens = tokenCounter.estimateMessages(compressed);
-      if (newTokens > targetTokens && compressed.length > 3) {
-        // 再次压缩，只保留最近 2 条 + 摘要（保留系统提示词）
-        const toCompressAgain = compressed.filter(m => m.role !== 'system');
-        const finalMessages = toCompressAgain.slice(-2);
-        const secondSummary = await this.generateSummary(toCompressAgain.slice(0, -2), signal);
-        const finalCompressed = systemPrompt
-          ? [systemPrompt, secondSummary, ...finalMessages]
-          : [secondSummary, ...finalMessages];
-        this.llm.setMessages(finalCompressed);
-      }
-    } else {
-      // 没有旧消息，只截断（也要过滤，并保留系统提示词）
-      const safetyTruncatedClean = safetyTruncated.filter(m =>
-        m.role === 'user' || m.role === 'assistant'
-      );
-      const finalMessages = systemPrompt
-        ? [systemPrompt, ...safetyTruncatedClean]
-        : safetyTruncatedClean;
-      this.llm.setMessages(finalMessages);
-    }
+    // Insert after system messages, before conversation
+    const sysCount = messages.filter(m => m.role === 'system').length;
+    messages.splice(sysCount, 0, summary);
+    this.llm.setMessages(messages);
 
     this.emit('context_compressed', {
-      before: allMessages.length,
-      after: this.llm.getMessages().length,
-      tokensBefore: usedTokens,
-      tokensAfter: tokenCounter.estimateMessages(this.llm.getMessages()),
+      before: messages.length - 1,
+      after: messages.length,
+      tokensBefore: 0,
+      tokensAfter: 0,
     });
   }
 
-  // Generate history summary using LLM.
-  // Tool result content is discarded — only tool names + key args are kept.
-  // This gives the LLM enough context to summarize what happened without
-  // overwhelming it with raw file contents, grep output, or bash stdout.
-  private async generateSummary(messages: ChatMessage[], signal?: AbortSignal): Promise<ChatMessage> {
+  /**
+   * Clean tool messages — keep only those with matching assistant toolCalls.
+   * Extracted from compactToTarget for reuse.
+   */
+  private cleanToolMessages(messages: ChatMessage[]): ChatMessage[] {
+    const existingToolMessageIds = new Set<string>();
+    const assistantToolCallIds = new Set<string>();
+
+    for (const m of messages) {
+      if (m.role === 'tool' && m.toolCallId) {
+        existingToolMessageIds.add(m.toolCallId);
+      }
+      if (m.role === 'assistant' && m.toolCalls) {
+        for (const tc of m.toolCalls) {
+          assistantToolCallIds.add(tc.id);
+        }
+      }
+    }
+
+    const result: ChatMessage[] = [];
+    for (const m of messages) {
+      if (m.role === 'user' || m.role === 'assistant') {
+        if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+          const hasAllToolMessages = m.toolCalls.every(tc => existingToolMessageIds.has(tc.id));
+          if (!hasAllToolMessages) {
+            result.push({ ...m, toolCalls: undefined });
+          } else {
+            result.push(m);
+          }
+        } else {
+          result.push(m);
+        }
+      } else if (m.role === 'tool' && m.toolCallId) {
+        if (assistantToolCallIds.has(m.toolCallId)) {
+          result.push(m);
+        }
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Score a message for retention priority during compression.
+   * Higher score = more likely to be kept.
+   *
+   * Scoring rules:
+   * - user messages: 8 base (user intent is critical)
+   * - assistant with file_write/git/bash: 7 (actual code changes)
+   * - assistant with file_edit: 6 (edits)
+   * - assistant with other toolCalls: 3 (generic action)
+   * - assistant no toolCalls: 2 (commentary)
+   * - tool for file_write/git: 4 (result of write)
+   * - tool for file_read/grep/glob: 1 (transient read)
+   * - tool for other: 2
+   * - recency bonus: +0.5 for messages in the last 25%
+   */
+  private scoreMessage(msg: ChatMessage, index: number, total: number): number {
+    const recencyWeight = index > total * 0.75 ? 0.5 : 0;
+
+    if (msg.role === 'user') return 8 + recencyWeight;
+
+    if (msg.role === 'tool') {
+      // Check if this tool result is for a write operation
+      const content = msg.content || '';
+      if (content && (
+        content.includes('file_write') ||
+        content.includes('file_edit') ||
+        content.includes('file_delete') ||
+        content.includes('file_move') ||
+        content.includes('git add') ||
+        content.includes('git commit') ||
+        content.includes('bash')
+      )) return 4 + recencyWeight;
+      // Read-only tool results are low value
+      return 1 + recencyWeight;
+    }
+
+    if (msg.role === 'assistant') {
+      if (msg.toolCalls && msg.toolCalls.length > 0) {
+        const toolNames = msg.toolCalls.map(tc => tc.name);
+        if (toolNames.some(n => /(file_write|bash|git)/.test(n))) return 7 + recencyWeight;
+        if (toolNames.some(n => /file_edit/.test(n))) return 6 + recencyWeight;
+        return 3 + recencyWeight;
+      }
+      return 2 + recencyWeight;
+    }
+
+    return 1 + recencyWeight;
+  }
+
+  // Legacy: synchronous compact for backward compatibility
+  public async compact(signal?: AbortSignal): Promise<void> {
+    if (!this.llm || this._compacting) return;
+    this._compacting = true;
+    try {
+      const provider = this.llm.getProvider();
+      const targetTokens = Math.floor(provider.getContextWindow() * 0.4);
+      await this.startNonBlockingCompression(targetTokens, signal);
+      // Wait for background summary to complete before returning
+      if (this._pendingCompression) {
+        await this._pendingCompression;
+        this.applyPendingSummary();
+      }
+    } finally {
+      this._compacting = false;
+    }
+  }
+
+  /**
+   * Build a summary prompt from messages (without calling LLM).
+   * Produces the same prompt text as generateSummary uses internally.
+   * Used by non-blocking compression to create the prompt for background summarization.
+   */
+  private buildSummaryPrompt(messages: ChatMessage[]): string {
     const KEY_ARGS = new Set(['path', 'command', 'action', 'pattern', 'query', 'url', 'question', 'prompt']);
 
     const messagesText = messages.map(m => {
-      const role = m.role;
-
       if (m.role === 'system') {
         return `system: ${m.content || ''}`;
       }
@@ -1531,14 +1605,12 @@ public async compact(signal?: AbortSignal): Promise<void> {
       }
 
       if (m.role === 'tool') {
-        // Discard tool result content — keep only the tool name for context
         const toolName = (m as any).name || 'unknown';
         return `tool_result: ${toolName}`;
       }
 
       // assistant
       if (m.toolCalls && m.toolCalls.length > 0) {
-        // Preserve tool names + key args only
         const toolInfo = m.toolCalls.map(tc => {
           const args = tc.arguments || {};
           const keyArgsStr = Object.entries(args)
@@ -1551,11 +1623,18 @@ public async compact(signal?: AbortSignal): Promise<void> {
         return `assistant: [Tools: ${toolInfo}] ${textContent}`;
       }
 
-      // Pure text assistant message — truncate to 300 chars
       return `assistant: ${(m.content || '').slice(0, 300)}`;
     }).join('\n');
 
-    const prompt = getCompactPrompt(messagesText);
+    return getCompactPrompt(messagesText);
+  }
+
+  // Generate history summary using LLM.
+  // Tool result content is discarded — only tool names + key args are kept.
+  // This gives the LLM enough context to summarize what happened without
+  // overwhelming it with raw file contents, grep output, or bash stdout.
+  private async generateSummary(messages: ChatMessage[], signal?: AbortSignal): Promise<ChatMessage> {
+    const prompt = this.buildSummaryPrompt(messages);
 
     try {
       const response = await this.llm!.generateDirect(prompt, signal);
@@ -1567,6 +1646,7 @@ ${response.content || 'Early conversation compressed'}`,
       };
     } catch {
       // Fallback: preserve user messages in full, tool calls with names + key args
+      const KEY_ARGS = new Set(['path', 'command', 'action', 'pattern', 'query', 'url', 'question', 'prompt']);
       const items: string[] = [];
       for (const m of messages) {
         if (m.role === 'user') {

@@ -112,67 +112,25 @@ function loadLearnings(workspacePath: string): string {
   }
 }
 
-export function getSystemPrompt(projectConfig?: ProjectConfig, skillsMetadata?: string, workspacePath?: string): string {
+/**
+ * Build the stable prefix of the system prompt.
+ * This content NEVER changes across sessions — it's the highest-value cache target.
+ * Keeping it as a separate message from variable content (skills, learnings)
+ * means OpenAI's prefix cache hits this message even when skills change.
+ */
+export function getSystemPromptStable(projectConfig?: ProjectConfig): string {
   let prompt = '';
 
-  // 1. Project Guidelines - 最高优先级（用户指令）
-  if (projectConfig) {
-    if (projectConfig.rawContent) {
-      prompt += '## Project Guidelines (from AGENTS.md) - Highest Priority\n' + projectConfig.rawContent + '\n\n';
-    } else {
-      // Fallback: compact format if no raw content
-      const parts = [projectConfig.type];
-      if (projectConfig.language) parts.push(projectConfig.language);
-      if (projectConfig.framework) parts.push(projectConfig.framework);
-      prompt += `## Project Guidelines\nProject: ${parts.join(' | ')}`;
-
-      if (projectConfig.commands?.build || projectConfig.commands?.test) {
-        prompt += `\nCommands: build=${projectConfig.commands.build || 'N/A'}, test=${projectConfig.commands.test || 'N/A'}`;
-      }
-
-      if (projectConfig.constraints && projectConfig.constraints.length > 0) {
-        prompt += `\nConstraints: ${projectConfig.constraints.slice(0, 3).join(', ')}`;
-      }
-      prompt += '\n\n';
-    }
-    
-    // Inject rule layers if present
-    if (projectConfig.ruleLayers) {
-      const { critical, important, preferences } = projectConfig.ruleLayers;
-      if (critical.length > 0 || important.length > 0 || preferences.length > 0) {
-        prompt += '## Rule Layers (from AGENTS.md)\n\n';
-        
-        if (critical.length > 0) {
-          prompt += '### CRITICAL Rules (Must Follow)\n';
-          critical.forEach(rule => prompt += `- ${rule}\n`);
-          prompt += '\n';
-        }
-        
-        if (important.length > 0) {
-          prompt += '### IMPORTANT Rules (Should Follow)\n';
-          important.forEach(rule => prompt += `- ${rule}\n`);
-          prompt += '\n';
-        }
-        
-        if (preferences.length > 0) {
-          prompt += '### Preferences (Nice to Have)\n';
-          preferences.forEach(rule => prompt += `- ${rule}\n`);
-          prompt += '\n';
-        }
-      }
-    }
-  }
-
-  // 2. Bootstrap skill: using-superpowers - 次高优先级
-  const bootstrapContent = loadBootstrapSkill();
-  if (bootstrapContent) {
-    prompt += '## How to Use Skills\n' + bootstrapContent + '\n\n';
-  }
-
-  // 3. 基础身份 - 最低优先级
+  // Core identity — most stable
   prompt += SYSTEM_PROMPT;
 
-  // 4. File-Scoped Commands 指导 - 最低优先级
+  // Bootstrap skill — very stable
+  const bootstrapContent = loadBootstrapSkill();
+  if (bootstrapContent) {
+    prompt += '\n\n## How to Use Skills\n' + bootstrapContent;
+  }
+
+  // File-Scoped Commands — stable
   prompt += `
 ## File-Scoped Commands (Preferred - Fast)
 
@@ -189,20 +147,79 @@ Always prefer file-scoped commands over project-wide. Token savings: 97%.
 - Full test suite - ASK BEFORE RUNNING
 `;
 
-  // 5. Project learnings from .spica/learnings/
-  if (workspacePath) {
-    prompt += loadLearnings(workspacePath);
-  }
+  // Project Guidelines — stable per project
+  if (projectConfig) {
+    if (projectConfig.rawContent) {
+      prompt += '\n\n## Project Guidelines (from AGENTS.md) - Highest Priority\n' + projectConfig.rawContent;
+    } else {
+      const parts = [projectConfig.type];
+      if (projectConfig.language) parts.push(projectConfig.language);
+      if (projectConfig.framework) parts.push(projectConfig.framework);
+      prompt += `\n\n## Project Guidelines\nProject: ${parts.join(' | ')}`;
 
-  // 6. Skills metadata - 仅列出技能名称
-  if (skillsMetadata) {
-    prompt += buildSkillsSection(skillsMetadata);
+      if (projectConfig.commands?.build || projectConfig.commands?.test) {
+        prompt += `\nCommands: build=${projectConfig.commands.build || 'N/A'}, test=${projectConfig.commands.test || 'N/A'}`;
+      }
+
+      if (projectConfig.constraints && projectConfig.constraints.length > 0) {
+        prompt += `\nConstraints: ${projectConfig.constraints.slice(0, 3).join(', ')}`;
+      }
+    }
+    
+    if (projectConfig.ruleLayers) {
+      const { critical, important, preferences } = projectConfig.ruleLayers;
+      if (critical.length > 0 || important.length > 0 || preferences.length > 0) {
+        prompt += '\n\n## Rule Layers (from AGENTS.md)\n';
+        
+        if (critical.length > 0) {
+          prompt += '\n### CRITICAL Rules (Must Follow)\n';
+          critical.forEach(rule => prompt += `- ${rule}\n`);
+        }
+        
+        if (important.length > 0) {
+          prompt += '\n### IMPORTANT Rules (Should Follow)\n';
+          important.forEach(rule => prompt += `- ${rule}\n`);
+        }
+        
+        if (preferences.length > 0) {
+          prompt += '\n### Preferences (Nice to Have)\n';
+          preferences.forEach(rule => prompt += `- ${rule}\n`);
+        }
+      }
+    }
   }
 
   return prompt;
 }
 
-// Compact prompt for context compression (English)
+/**
+ * Build the variable suffix of the system prompt.
+ * Skills metadata and learnings change across sessions — by isolating them
+ * in a separate message, the stable prefix (above) stays cache-hot.
+ */
+export function getSystemPromptVariable(skillsMetadata?: string, workspacePath?: string): string {
+  let prompt = '';
+
+  // Skills metadata — changes when skills are installed/removed
+  if (skillsMetadata) {
+    prompt += buildSkillsSection(skillsMetadata);
+  }
+
+  // Learnings — changes when new learnings are added
+  if (workspacePath) {
+    prompt += loadLearnings(workspacePath);
+  }
+
+  return prompt;
+}
+
+/**
+ * Legacy: single-string system prompt for backward compatibility.
+ * Prefer getSystemPromptStable + getSystemPromptVariable for cache-optimized split.
+ */
+export function getSystemPrompt(projectConfig?: ProjectConfig, skillsMetadata?: string, workspacePath?: string): string {
+  return getSystemPromptStable(projectConfig) + getSystemPromptVariable(skillsMetadata, workspacePath);
+}
 export function getCompactPrompt(messagesText: string): string {
   return `You are summarizing conversation history for YOUR OWN future reference. You will read this summary later to continue working. Be precise — vague summaries waste your future context window.
 

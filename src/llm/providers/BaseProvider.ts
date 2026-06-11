@@ -59,6 +59,20 @@ export abstract class BaseProvider extends EventEmitter {
     this.messages.unshift({ role: 'system', content: prompt });
   }
 
+  /**
+   * Set system prompt as two messages: stable (cached) + variable (may change).
+   * Splitting the prompt means OpenAI's prefix cache hits the stable message
+   * even when skills/learnings change between sessions.
+   */
+  setSystemPromptSplit(stable: string, variable?: string) {
+    this.messages = this.messages.filter(m => m.role !== 'system');
+    this.messages.unshift({ role: 'system', content: stable });
+    if (variable && variable.length > 0) {
+      // Insert after the stable system message
+      this.messages.splice(1, 0, { role: 'system', content: variable });
+    }
+  }
+
   addMessage(message: ChatMessage) {
     this.messages.push(message);
   }
@@ -73,6 +87,9 @@ export abstract class BaseProvider extends EventEmitter {
 
   setMessages(messages: ChatMessage[]): void {
     this.messages = messages;
+    // Invalidate cache prefix — compact/new session has different message layout
+    // Next generate() call will re-mark at the new stable boundary
+    this.cachePrefixEnd = -1;
   }
 
   // Mark current messages end as cache prefix boundary

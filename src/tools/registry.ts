@@ -520,7 +520,9 @@ export function getAllToolDefinitions(): ToolDefinition[] {
       parameters: t.inputSchema,
     };
   });
-  return [...TOOLS_DEFINITIONS, ...mcpConverted];
+  // Sort by name for deterministic order — stabilizes the cache key for API requests.
+  // Without this, MCP tool ordering variations cause cache misses on the tools parameter.
+  return [...TOOLS_DEFINITIONS, ...mcpConverted].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 
