@@ -159,63 +159,62 @@ export function saveSession(workspacePath: string, messages: ChatMessage[], sess
   }
 }
 
-// Generate simple summary from messages (user messages + tool calls)
+// Generate simple summary from messages — natural language, no template prefixes
 export function generateSessionSummary(messages: ChatMessage[]): string {
   if (messages.length === 0) return '';
 
-  const parts: string[] = [];
-
-  // Extract actual user requests — skip skill prompts and system-like messages
+  // Extract actual user requests — skip skill prompts and system injections
   const userMessages = messages
     .filter(m => m.role === 'user')
     .map(m => (m.content || '').replace(/\n/g, ' ').trim())
     .filter(m => {
-      // Skip skill prompts (long markdown starting with # or containing "## ")
-      if (m.startsWith('#') || m.includes('## Overview') || m.includes('## Core')) return false;
-      // Skip system-like injected messages
+      if (m.length === 0) return false;
+      // Skip skill prompts (long markdown templates)
+      if (m.startsWith('#') || m.includes('## Overview')) return false;
+      // Skip system injections
       if (m.startsWith('[QUEUED') || m.startsWith('[SYSTEM]')) return false;
-      return m.length > 0;
+      // Skip pure symbols like ？？？
+      if (/^[？?！!。.…]+$/.test(m)) return false;
+      return true;
     })
-    .slice(0, 3)
-    .map(m => m.slice(0, 100));
+    .slice(0, 3);
+
+  // Build a natural-language summary
+  const parts: string[] = [];
 
   if (userMessages.length > 0) {
-    parts.push(userMessages.join(' | '));
+    const cleaned = userMessages.map(m => m.slice(0, 120));
+    parts.push(cleaned.join('; '));
   }
 
-  // Extract key assistant summaries (non-tool-call, first sentence)
-  const assistantTexts = messages
-    .filter(m => m.role === 'assistant' && !m.toolCalls && m.content)
-    .map(m => {
-      const text = (m.content || '').replace(/\n/g, ' ');
-      // Skip compression summaries
-      if (text.startsWith('[COMPACTED') || text.startsWith('[History Summary]')) return '';
-      return text.slice(0, 150);
-    })
-    .filter(t => t.length > 10)
-    .slice(0, 2);
-
-  if (assistantTexts.length > 0) {
-    parts.push(assistantTexts.join(' | '));
-  }
-
-  // Extract file paths modified
+  // Add files modified
   const filePaths = new Set<string>();
   for (const m of messages) {
     if (m.toolCalls) {
       for (const tc of m.toolCalls) {
         const args = tc.arguments || {};
-        if (['file_write', 'file_edit', 'file_multi_edit', 'file_patch', 'file_replace', 'file_insert'].includes(tc.name)) {
+        if (['file_write', 'file_edit', 'file_multi_edit'].includes(tc.name)) {
           if (args.path) filePaths.add(args.path as string);
         }
       }
     }
   }
-  if (filePaths.size > 0) {
-    parts.push('Files: ' + Array.from(filePaths).slice(0, 8).join(', '));
+
+  if (parts.length === 0 && filePaths.size === 0) {
+    // Nothing meaningful to summarize
+    return `${messages.length} messages`;
   }
 
-  return parts.join('. ').slice(0, 400);
+  if (filePaths.size > 0) {
+    const files = Array.from(filePaths).slice(0, 5).map(f => f.replace(/.*\//, ''));
+    if (parts.length > 0) {
+      parts[0] += ` — modified ${files.join(', ')}`;
+    } else {
+      parts.push(`Modified ${files.join(', ')}`);
+    }
+  }
+
+  return parts.join('. ').slice(0, 300);
 }
 
 // Archive session to sessions directory
@@ -323,8 +322,9 @@ export function listSessions(workspacePath: string): SessionMeta[] {
       .map(f => {
         const session = fs.readJsonSync(join(sessionsDir, f));
         let summary = session.summary;
-        // Generate fallback summary for sessions saved without one
-        if (!summary && session.messages?.length > 0) {
+        // Regenerate if missing or old template format ("Tasks:", "Key outputs:")
+        const isOldFormat = summary && /^(Tasks|Key outputs|Files|Tools):/.test(summary);
+        if ((!summary || isOldFormat) && session.messages?.length > 0) {
           summary = generateSessionSummary(session.messages);
           // Persist the generated summary so we don't regenerate every time
           if (summary) {
